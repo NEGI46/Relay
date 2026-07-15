@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Relay PC Gateway</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">R</div>
+        <div>
+          <h1>Relay PC Gateway</h1>
+          <p class="subtitle" id="subtitle">中継拠点コンソール</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <label class="admin-field">
+          <span>管理者キー</span>
+          <input id="adminKey" type="password" autocomplete="off" placeholder="ダッシュボード操作用" />
+        </label>
+        <button type="button" class="btn secondary" id="btnSaveKey">保存</button>
+        <button type="button" class="btn" id="btnRefresh">更新</button>
+        <label class="toggle">
+          <input type="checkbox" id="autoRefresh" checked />
+          <span>自動更新</span>
+        </label>
+      </div>
+    </header>
+
+    <section class="banner note">
+      <strong>zero-operation 運用</strong>
+      一般端末の登録は不要です。Android は UDP ビーコンで本機を発見し、公開同期で REPORT を送ります。
+      公開保存は <em>UNVERIFIED（中継拠点・未認証）</em> です。公式情報としては扱いません。
+    </section>
+
+    <section class="cards" id="statCards" aria-live="polite"></section>
+
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab active" data-tab="overview">概要</button>
+      <button type="button" class="tab" data-tab="messages">メッセージ</button>
+      <button type="button" class="tab" data-tab="bridges">Bridge</button>
+      <button type="button" class="tab" data-tab="ops">運用操作</button>
+    </nav>
+
+    <main>
+      <section id="panel-overview" class="panel active">
+        <div class="grid-2">
+          <div class="card">
+            <h2>サービス状態</h2>
+            <dl class="kv" id="serviceStatus"></dl>
+          </div>
+          <div class="card">
+            <h2>種別内訳</h2>
+            <div id="typeBreakdown" class="bars"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2>直近の受信</h2>
+            <span class="muted" id="recentHint"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>優先度</th><th>種別</th><th>Trust</th><th>状態</th><th>Origin</th><th>受信</th>
+                </tr>
+              </thead>
+              <tbody id="recentBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-messages" class="panel">
+        <div class="toolbar">
+          <input id="msgQuery" type="search" placeholder="messageId / origin / bridge" />
+          <select id="msgType">
+            <option value="">種別すべて</option>
+            <option value="SAFETY">安否 SAFETY</option>
+            <option value="SUPPLY">物資 SUPPLY</option>
+          </select>
+          <select id="msgStatus">
+            <option value="">状態すべて</option>
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="RESOLVED">RESOLVED</option>
+            <option value="RETRACTED">RETRACTED</option>
+          </select>
+          <select id="msgTrust">
+            <option value="">Trustすべて</option>
+            <option value="UNVERIFIED">UNVERIFIED</option>
+            <option value="VERIFIED">VERIFIED</option>
+          </select>
+          <button type="button" class="btn secondary" id="btnFilter">絞り込み</button>
+          <button type="button" class="btn secondary" id="btnExport">CSV出力</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th><th>種別</th><th>優先度</th><th>状態</th><th>Trust</th>
+                <th>Rx</th><th>Bridge</th><th>Origin</th><th>受信</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="messagesBody"></tbody>
+          </table>
+        </div>
+        <p class="muted" id="messagesMeta"></p>
+      </section>
+
+      <section id="panel-bridges" class="panel">
+        <div class="card">
+          <h2>登録 Bridge（任意の verified 経路）</h2>
+          <p class="muted">一般利用者はここを使いません。運用者が token 経路を使う場合のみ。</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th><th>名前</th><th>Paired</th><th>Connected</th><th>最終同期</th><th>受信数</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="bridgesBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-ops" class="panel">
+        <div class="grid-2">
+          <div class="card">
+            <h2>ペアリングコード発行</h2>
+            <p class="muted">5分間有効。管理者キーが必要です。</p>
+            <button type="button" class="btn" id="btnPairCode">コード生成</button>
+            <pre class="result" id="pairCodeResult"></pre>
+          </div>
+          <div class="card">
+            <h2>Bridge 承認 / 拒否</h2>
+            <form id="formApprove" class="stack">
+              <label>Bridge ID <input name="bridgeId" required /></label>
+              <label>ペアリングコード <input name="code" required /></label>
+              <button type="submit" class="btn">承認して token 発行</button>
+            </form>
+            <form id="formReject" class="stack" style="margin-top:1rem">
+              <label>Bridge ID <input name="bridgeId" required /></label>
+              <label>コード（任意） <input name="code" /></label>
+              <button type="submit" class="btn danger">拒否 / token 失効</button>
+            </form>
+            <pre class="result" id="opsResult"></pre>
+          </div>
+        </div>
+        <div class="card">
+          <h2>運用メモ</h2>
+          <ul class="bullets">
+            <li>HTTP は TLS なし。Private ネットワーク + Firewall 限定で運用してください。</li>
+            <li>公開同期: <code>POST /api/public/sync/messages</code> / 発見: UDP <span id="opsDiscoveryPort">42888</span></li>
+            <li>管理者キーは <code>%USERPROFILE%\.relay\admin.key</code> または環境変数に保存されます（画面には表示しません）。</li>
+            <li>Health: <a href="/api/health" target="_blank" rel="noopener">/api/health</a></li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span id="footerStatus">接続確認中…</span>
+      <span id="footerClock"></span>
+    </footer>
+  </div>
+
+  <dialog id="detailDialog">
+    <form method="dialog" class="dialog-head">
+      <h2>メッセージ詳細</h2>
+      <button type="submit" class="btn secondary">閉じる</button>
+    </form>
+    <div id="detailBody" class="detail-body"></div>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>
