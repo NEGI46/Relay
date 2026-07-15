@@ -61,6 +61,40 @@ class RelayDesignCorrectionTest {
     }
 
     @Test
+    fun `unverified gateway ranks above peer and below verified gateway`() {
+        val peer = DeliveryReceipt("peer", "message-1", ReceiptType.PEER_RECEIVED, "device-B", NOW)
+        val unverified = DeliveryReceipt(
+            "unverified",
+            "message-1",
+            ReceiptType.GATEWAY_RECEIVED_UNVERIFIED,
+            "pc-hub",
+            NOW,
+        )
+        val verified = DeliveryReceipt("verified", "message-1", ReceiptType.GATEWAY_RECEIVED, "pc-hub", NOW)
+        assertEquals(
+            DeliveryPresentation.GATEWAY_RECEIVED_UNVERIFIED,
+            deriveDeliveryPresentation(listOf(peer, unverified)),
+        )
+        assertEquals(
+            DeliveryPresentation.GATEWAY_RECEIVED,
+            deriveDeliveryPresentation(listOf(peer, unverified, verified)),
+        )
+    }
+
+    @Test
+    fun `prepareForGatewayUpload allows hop exhausted active reports`() {
+        val clock = MutableClock(NOW)
+        val policy = MessagePolicy(clock)
+        val exhausted = message(hopCount = 8, maxHopCount = 8).copy(
+            lifetimeMs = 60_000,
+            receivedElapsedRealtimeMs = NOW,
+            persistedAtWallClockMs = NOW,
+        )
+        assertTrue(policy.prepareForTransfer(exhausted) == null)
+        assertTrue(policy.prepareForGatewayUpload(exhausted) != null)
+    }
+
+    @Test
     fun `resource policy rejects new records without removing existing records`() = runBlocking {
         val repository = InMemoryMessageRepository(ResourcePolicy(maxStoredMessages = 1, maxStoredMessagesPerOrigin = 1))
         assertEquals(InsertResult.Inserted, repository.insert(message(id = "one")))

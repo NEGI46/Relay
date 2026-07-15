@@ -156,6 +156,7 @@ private fun HomeScreen(
                         Text(if (state.transportRunning) "自動で接続・中継しています" else "開始すると自動で通信します")
                         Text("保存中の情報: ${count}件")
                         Text("接続中の端末: ${state.connectedPeers}台")
+                        Text(gatewayStatusLabel(state.gatewayLastResult, state.transportRunning))
                         Button(
                             onClick = if (state.transportRunning) stop else start,
                             modifier = Modifier.fillMaxWidth().height(56.dp),
@@ -237,6 +238,17 @@ private fun RegionalScreen(messages: List<RelayMessage>, deviceId: String, deliv
             items(messages, key = { it.messageId }) { MessageCard(it, deviceId, deliveries[it.messageId]) }
         }
     }
+}
+
+private fun gatewayStatusLabel(lastResult: String?, transportRunning: Boolean): String = when {
+    !transportRunning -> "中継拠点: 通信停止中"
+    lastResult == null -> "中継拠点: 探索・同期の準備中"
+    lastResult == "idle" -> "中継拠点: 送信待ちの情報なし"
+    lastResult == "gateway_not_found" -> "中継拠点: 未検出（同じWi‑FiにPC Gatewayがありますか）"
+    lastResult.startsWith("sent=") -> "中継拠点: 同期済み（$lastResult）"
+    lastResult.startsWith("http_") -> "中継拠点: 通信エラー（$lastResult）"
+    lastResult == "network_error" -> "中継拠点: ネットワークエラー"
+    else -> "中継拠点: $lastResult"
 }
 
 @Composable

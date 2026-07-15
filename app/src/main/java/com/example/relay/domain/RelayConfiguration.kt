@@ -56,12 +56,21 @@ data class RelayRuntimeSettings(
     val role: DeviceRole = DeviceRole.MEMBER,
 )
 
-/** Future Nearby authentication boundary. No implementation may auto-approve a connection. */
+/**
+ * Optional future boundary for **trusted-hub** Nearby policies.
+ *
+ * Zero-operation default: transport auto-accepts when Nearby digits exist; application
+ * data remains unverified (validation, dedupe, TTL, hop limits, explicit UI labels).
+ * Implementations of this interface must not present auto-accept as identity proof.
+ */
 interface ConnectionAuthenticator {
     fun verificationRequired(peerId: String, authenticationDigits: String): ConnectionVerification
 }
 
 sealed interface ConnectionVerification {
+    /** Digits available for diagnostics only under zero-op; not a user approval gate. */
     data class PendingManualVerification(val peerId: String, val authenticationDigits: String) : ConnectionVerification
     data class Rejected(val reason: String) : ConnectionVerification
+    /** Explicit opt-in for trusted deployments that accept without UI (still not identity). */
+    data class AutoAcceptedUntrusted(val peerId: String) : ConnectionVerification
 }

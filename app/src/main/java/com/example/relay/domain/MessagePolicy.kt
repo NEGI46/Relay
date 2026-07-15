@@ -65,6 +65,20 @@ class MessagePolicy(
         )
     }
 
+    /**
+     * Prepare a message for PC Gateway upload. Unlike peer forwarding, hop-exhausted
+     * messages may still dump to the fixed hub as a final sink while TTL remains valid.
+     */
+    fun prepareForGatewayUpload(message: RelayMessage): RelayMessage? {
+        if (!isActive(message)) return null
+        return message.copy(
+            accumulatedAgeMs = effectiveAgeMs(message),
+            receivedElapsedRealtimeMs = clock.elapsedRealtimeMillis(),
+            persistedAtWallClockMs = clock.nowMillis(),
+            elapsedRealtimeSessionId = clock.sessionId(),
+        )
+    }
+
     fun receive(message: RelayMessage): RelayMessage? {
         if (validate(message) !is MessageValidation.Valid || message.accumulatedAgeMs >= message.lifetimeMs || message.hopCount >= message.maxHopCount) return null
         return message.copy(

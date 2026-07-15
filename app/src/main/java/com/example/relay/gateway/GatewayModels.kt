@@ -6,7 +6,8 @@ data class GatewaySettings(
     val gatewayName: String = "",
     val bridgeId: String = "",
     val enabled: Boolean = false,
-    val automaticSync: Boolean = false,
+    /** Zero-op default: bridge tries public LAN discovery without UI configuration. */
+    val automaticSync: Boolean = true,
     val lastConnectedAt: Long? = null,
     val lastSyncResult: String? = null,
 )

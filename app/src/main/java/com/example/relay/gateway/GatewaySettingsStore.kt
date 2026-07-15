@@ -16,7 +16,7 @@ class GatewaySettingsStore(context: Context) : GatewaySettingsStoreContract {
         gatewayName = preferences.getString("name", "") ?: "",
         bridgeId = preferences.getString("bridgeId", "") ?: "",
         enabled = preferences.getBoolean("enabled", false),
-        automaticSync = preferences.getBoolean("automatic", false),
+        automaticSync = preferences.getBoolean("automatic", true),
         lastConnectedAt = preferences.getLong("lastConnected", 0).takeIf { it > 0 },
         lastSyncResult = preferences.getString("lastResult", null),
     )

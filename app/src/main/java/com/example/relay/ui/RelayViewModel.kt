@@ -28,6 +28,8 @@ import com.example.relay.gateway.GatewaySettings
 import com.example.relay.gateway.GatewaySettingsStore
 import com.example.relay.gateway.GatewaySyncEngine
 import com.example.relay.gateway.GatewaySyncResult
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 enum class RelayScreen { HOME, SAFETY_FORM, SUPPLY_FORM, REGIONAL, SETTINGS, PEERS, DEBUG, GATEWAY }
@@ -46,6 +48,8 @@ data class RelayUiState(
     val transportName: String = "未設定",
     val peers: Map<String, RuntimePeer> = emptyMap(),
     val debugEvents: List<String> = emptyList(),
+    /** Last PC Gateway sync outcome (from settings store; public or authenticated path). */
+    val gatewayLastResult: String? = null,
 )
 
 class RelayViewModel(
@@ -81,6 +85,8 @@ class RelayViewModel(
         viewModelScope.launch {
             communicationRuntime.state.collect { runtime ->
                 val current = _uiState.value
+                val gateway = gatewaySettingsStore.load()
+                _gatewaySettings.value = gateway
                 _uiState.value = current.copy(
                     transportRunning = runtime.running,
                     discoveredPeers = runtime.peers.values.count { it.status != com.example.relay.runtime.RuntimePeerStatus.CONNECTED },
@@ -94,7 +100,19 @@ class RelayViewModel(
                     transportName = runtime.transportName,
                     peers = runtime.peers,
                     debugEvents = runtime.debugEvents,
+                    gatewayLastResult = gateway.lastSyncResult,
                 )
+            }
+        }
+        // Gateway sync runs in the communication service; refresh status for the home card.
+        viewModelScope.launch {
+            while (isActive) {
+                delay(3_000)
+                val gateway = gatewaySettingsStore.load()
+                _gatewaySettings.value = gateway
+                if (_uiState.value.gatewayLastResult != gateway.lastSyncResult) {
+                    _uiState.value = _uiState.value.copy(gatewayLastResult = gateway.lastSyncResult)
+                }
             }
         }
     }
