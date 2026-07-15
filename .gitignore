@@ -15,3 +15,14 @@ data/
 artifacts/pc-gateway-app-image/
 artifacts/pc-gateway-exe/
 artifacts/~relay-pc-gateway.DDF
+# Local WiX 3.14 binaries (download wix314-binaries.zip into tools/wix314)
+tools/wix314/
+artifacts/*.txt
+artifacts/gw-*.txt
+artifacts/export-test.csv
+artifacts/smoke-payload.json
+artifacts/public-*.txt
+artifacts/relay-before-device-test.patch
+artifacts/relay-untracked-list.txt
+artifacts/relay_status.pre-run.json
+artifacts/relay-pc-gateway-appimage.exe*

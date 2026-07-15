@@ -56,24 +56,28 @@
     "pc_gateway_distribution": {
       "wix_installer_exe": {
         "path": "artifacts/relay-pc-gateway.exe",
-        "rebuild_this_session": "BLOCKED",
-        "reason": "WiX Toolset (candle/light) not installed; jpackage --type exe unavailable",
-        "includes_latest_console_ui": false
+        "rebuild_this_session": "PASS",
+        "wix_source": "tools/wix314 (wix314-binaries.zip from GitHub wix3141rtm)",
+        "type": "jpackage Windows installer (WiX)",
+        "app_version": "0.1.0",
+        "size_bytes": 78145024,
+        "sha256": "8CAAAD0AE6067DD9B1396DF2B5A0D81319AA97E71ED1C5596357CF52233E298E",
+        "built_at_jst": "2026-07-16T08:44:13+09:00",
+        "includes_latest_console_ui": true,
+        "code_signature": "UNSIGNED",
+        "usage": "Run installer → installs to Program Files\\RelayPcGateway\\RelayPcGateway.exe"
       },
       "jpackage_app_image": {
         "path": "artifacts/pc-gateway-app-image/RelayPcGateway/RelayPcGateway.exe",
-        "version": "0.1.1",
-        "rebuild_this_session": "PASS",
         "includes_latest_console_ui": true,
-        "launcher_sha256": "535FE4C97E1C5E577548D189E84301FD92DC01C1BF02569968B7710B62354632",
-        "note": "Run with WorkingDirectory set to RelayPcGateway folder; bare copy of launcher exe alone is insufficient"
+        "note": "Optional portable app-image; formal deliverable is the WiX installer EXE"
       },
       "install_dist": {
         "path": "pc-gateway/build/install/pc-gateway/bin/pc-gateway.bat",
         "status": "PASS",
-        "includes_latest_console_ui": true
-      },
-      "code_signature": "UNSIGNED"
+        "includes_latest_console_ui": true,
+        "smoke_after_exe_build": "PASS (health + new dashboard UI)"
+      }
     }
   },
 

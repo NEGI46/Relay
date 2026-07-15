@@ -82,10 +82,28 @@ $env:RELAY_GATEWAY_ID = 'pc-gateway-local'
 
 ## Windows EXE パッケージ
 
-前提: JDK 17+（`jpackage`）、WiX 3.x。
+前提:
+
+- フル JDK 17+（`jpackage`、例: `C:\Program Files\Java\jdk-17\bin`）
+- WiX Toolset 3.x の `candle.exe` / `light.exe`
+
+WiX はシステムインストール不要です。次を展開するとスクリプトが自動検出します:
+
+```powershell
+# 例: リポジトリ内 tools/wix314 へ展開
+# https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
+```
 
 ```powershell
 .\scripts\build-pc-gateway-exe.ps1
 ```
 
-未署名のため SmartScreen 確認が出ることがあります。EXE 実行中は上書きできないので、先にプロセスを停止してください。
+成果物:
+
+| ファイル | 内容 |
+|----------|------|
+| `artifacts/relay-pc-gateway.exe` | **Windows インストーラ**（jpackage + WiX） |
+| `artifacts/relay-pc-gateway.exe.sha256` | SHA-256 |
+
+生成例（2026-07-16）: サイズ約 78 MB、最新管理 UI 同梱。未署名のため SmartScreen 確認が出ることがあります。  
+インストーラ実行後の本体は通常 `C:\Program Files\RelayPcGateway\RelayPcGateway.exe` です。上書きビルド前に実行中の Gateway / インストーラを停止してください。
