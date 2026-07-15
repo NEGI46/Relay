@@ -1,0 +1,17 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+.kotlin/
+data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+artifacts/pc-gateway-app-image/
+artifacts/pc-gateway-exe/
+artifacts/~relay-pc-gateway.DDF
