@@ -1,18 +1,42 @@
 # PC Gateway セキュリティ
 
-実装済み:
+## 信頼モデル（zero-operation）
 
-- 未知Bridgeは期限付きペアリングコードとPC管理者承認が必要。自動登録しない。
-- 承認後はランダムBearer tokenを発行し、SQLiteにはSHA-256 hashだけを保存する。
-- Android tokenはAndroid Keystore AES/GCMで暗号化保存する。
-- 同期要求ごとにBridge IDとBearer tokenを検証する。
-- `messageId`と`(messageId, receiptType, actorId)`を一意制約で重複排除する。
-- Payload、message type、status、priority、TTL、累積age、hop数、識別子長をPC側でも検証する。
-- DB保存成功後だけGateway Receiptを生成する。
+| 経路 | 認証 | 保存 trust | Receipt |
+|------|------|------------|---------|
+| 公開 Ingress | なし（同一 LAN + レート制限） | `UNVERIFIED` | `GATEWAY_RECEIVED_UNVERIFIED` |
+| ペアリング同期 | Bearer token（管理者承認後） | `VERIFIED` | `GATEWAY_RECEIVED` |
 
-残存リスク:
+- ビーコンと公開同期は **発見・中継拠点保存**であり、身元保証や公式情報ではない
+- Android UI は未認証ラベルを表示する
+- 未導入スマホは中継に参加しない
 
-- MVPのLAN HTTPはTLSなしで、信頼できない無線LANではBearer tokenを盗聴され得る。
-- 管理者キーは環境変数で渡し、リポジトリやログへ保存しない。
-- PKI、署名、tokenローテーション、監査ログ、複数Gateway信頼モデルは未実装である。
-- `0.0.0.0`公開とWindows Firewall設定は運用者の責任であり、自動変更しない。
+## 実装済み制御
+
+- 公開経路: リクエスト/メッセージ/バイトの分単位レート制限（ソケット peer 単位）
+- 公開経路: `STATUS_CHANGE` 拒否、形式・TTL・hop・payload サイズ検証
+- `messageId` 重複排除・collision 検出
+- DB 件数上限
+- ペアリング: 期限付きコード、管理者キー、token は SHA-256 ハッシュ保存
+- Android token（任意経路）: Keystore AES/GCM
+- 管理者キー: env または永続ファイル（起動ごとに乱数で捨てない）
+- `GET /api/sync/receipts` は **当該 Bridge が提出した message の Receipt のみ**
+- コンソールに admin key の平文を出さない
+
+## 残存リスク
+
+- LAN HTTP は **TLS なし**。信頼できない無線 LAN では盗聴・なりすまし可能
+- 公開経路では origin / payload を誰でも送りうる（未検証表示が前提）
+- ビーコンは誰でも偽装できる（discovery ≠ auth）
+- メッセージ署名（protocol v2 ECDSA）はライブラリ実装済みだが **既定パスでは未配線**
+- 複数 Gateway の信頼ランキングは未実装
+- EXE は未コード署名（SmartScreen）
+- NAT 配下では複数端末が同一 peer IP としてレート制限を共有しうる
+
+## 運用上の必須
+
+1. Windows ネットワークを **Private**
+2. Firewall で TCP API ポートと UDP 42888 のみ、Private に限定  
+   `scripts/configure-pc-gateway-firewall.ps1`
+3. Public / ゲスト Wi‑Fi に Gateway を出さない
+4. 管理画面と admin key を一般利用者に渡さない

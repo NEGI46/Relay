@@ -1,0 +1,397 @@
+{
+  "schema_version": "2.0",
+  "generated_at_jst": "2026-07-16T08:00:00+09:00",
+  "source": "session status snapshot after zero-op P0 fixes + PC console UI",
+  "language": "ja",
+
+  "project": {
+    "name": "Relay",
+    "platform": "Android + Windows PC Gateway",
+    "android_language": "Kotlin",
+    "android_ui_framework": "Jetpack Compose",
+    "pc_gateway_stack": ["Kotlin/JVM", "Ktor", "Netty", "SQLite", "Local Web UI (static SPA)"],
+    "purpose": "災害時にインターネットが利用できない状況でも、近隣Android端末同士で安否情報や物資不足情報を交換し、Store-Carry-Forward方式で別端末やGatewayへ多段中継する",
+    "ai_features_at_runtime": false,
+    "network_model": "Store-Carry-Forward",
+    "operation_model": "zero-operation",
+    "operation_model_doc": "docs/OPERATION_MODEL.md",
+    "primary_success_condition": "REPORTが固定中継地点のPC Gatewayに検証・SQLite保存され、GATEWAY_RECEIVED_UNVERIFIEDがAndroidへ返り「中継拠点へ保存済み（未認証）」と表示されること（公式到達とは区別）",
+    "current_stage": "ZERO_OP_CODE_COMPLETE_DEVICE_NOT_VERIFIED",
+    "next_target_stage": "PC_GATEWAY_PUBLIC_DEVICE_VERIFIED"
+  },
+
+  "git": {
+    "branch": "agent/zero-operation-relay",
+    "last_commit": "c832ff22137771c932135ff3f51ff9928557ad11",
+    "last_commit_subject": "Implement zero-operation Relay gateway model",
+    "working_tree": "dirty",
+    "uncommitted_change_count": 37,
+    "note": "c832ff2以降のP0修正・ドキュメント・PC管理UIは未コミット"
+  },
+
+  "core_design": {
+    "device_roles": {
+      "MEMBER": "一般利用者端末",
+      "COURIER": "地域を移動しながら情報を運ぶ端末",
+      "RELAY": "常時給電を想定した固定中継端末",
+      "GATEWAY": "メッセージ集約・外部同期の起点（PCが主。Android roleは残存）",
+      "ADMIN": "管理者端末"
+    },
+    "important_constraints": [
+      "Relayアプリ未導入端末は自動中継端末として機能しない",
+      "一般利用者はGateway登録・接続承認・token入力をしない",
+      "Nearby接続は自動成立。受信データは未検証扱い",
+      "公開同期の保存はUNVERIFIED。公式情報として扱わない",
+      "Peer ACKをGateway到達として扱わない",
+      "HTTP 2xxだけではGateway到達済みにしない",
+      "永続的なハードウェアIDを使わない",
+      "メッセージ本文や個人情報を本番ログへ出さない",
+      "LAN HTTPはTLS未導入（Privateネットワーク限定運用）"
+    ],
+    "deployment_strategy": [
+      "Android端末をMember/Courier/Relayとして利用",
+      "固定地点に常時給電Android Bridge + PC Gateway",
+      "PCがUDPビーコンで自己広告、Androidが自動発見",
+      "token不要の公開IngressでREPORT集約",
+      "保存成功時のみGATEWAY_RECEIVED_UNVERIFIED",
+      "任意でペアリング+Bearerによるverified経路"
+    ]
+  },
+
+  "message_model": {
+    "main_types": ["REPORT", "STATUS_CHANGE"],
+    "report_examples": ["安否情報", "物資不足情報"],
+    "status_values": ["ACTIVE", "RESOLVED", "RETRACTED"],
+    "delivery_receipts": [
+      "PEER_RECEIVED",
+      "GATEWAY_RECEIVED_UNVERIFIED",
+      "GATEWAY_RECEIVED"
+    ],
+    "delivery_semantics": {
+      "nearby_send_accepted": "Nearby APIが送信要求を受け付けた状態",
+      "nearby_payload_completed": "Nearby上でPayload転送が完了した状態",
+      "peer_received": "相手のRelayアプリが検証し、DB保存を完了した状態",
+      "gateway_received_unverified": "PC公開経路で検証・SQLite保存完了（中継拠点・未認証）",
+      "gateway_received": "認証Bridge経由で検証・SQLite保存完了（verified）"
+    },
+    "critical_rule": "Payload転送完了やPeer ACKやHTTP成功を最終配信完了や公式Gateway到達として扱わない"
+  },
+
+  "android_status": {
+    "nearby_transport": {
+      "status": "IMPLEMENTED",
+      "strategy": "P2P_CLUSTER",
+      "connection_policy": "AUTO_ACCEPT_WHEN_AUTH_DIGITS_AVAILABLE",
+      "features": [
+        "Advertising",
+        "Discovery",
+        "Peer発見・消失",
+        "接続自動受理（利用者承認UIなし）",
+        "BYTES Payload送受信",
+        "Payload転送結果",
+        "停止時cleanup"
+      ]
+    },
+    "permissions": {
+      "status": "IMPLEMENTED",
+      "features": [
+        "Androidバージョン別ランタイム権限",
+        "通常拒否案内",
+        "永久拒否時の設定画面案内",
+        "Bluetooth状態確認",
+        "位置情報サービス確認",
+        "Google Play services確認",
+        "通知権限",
+        "Foreground Service関連権限"
+      ]
+    },
+    "foreground_service": {
+      "status": "IMPLEMENTED",
+      "features": [
+        "connectedDevice種別",
+        "通知Channel",
+        "接続Peer数表示",
+        "停止Action",
+        "二重起動防止",
+        "停止時Transport終了"
+      ]
+    },
+    "ui": {
+      "status": "IMPLEMENTED",
+      "screens": ["HOME", "SAFETY_FORM", "SUPPLY_FORM", "REGIONAL", "SETTINGS"],
+      "features": [
+        "権限許可後の通信自動開始",
+        "中継拠点同期ステータス表示",
+        "GATEWAY_RECEIVED_UNVERIFIED表示（中継拠点へ保存済み・未認証）",
+        "Peer到達とGateway到達の区別"
+      ],
+      "residual_enums_not_in_nav": ["PEERS", "DEBUG", "GATEWAY"]
+    },
+    "pc_gateway_bridge": {
+      "status": "IMPLEMENTED_P0_FIXED",
+      "primary_path": "public_discovery",
+      "features": [
+        "UDP LAN自動発見（ポート42888へbind）",
+        "発見タイムアウト既定6s（ビーコン間隔5s以上）",
+        "token不要の公開同期 pushPublic",
+        "通信開始時の自動同期ループ（discoveryあり or automaticSync）",
+        "automaticSync既定true",
+        "cleartext HTTP許可（network security config）",
+        "REPORTのみ公開アップロード",
+        "hop枯渇でもGatewayへ最終吐き出し可能",
+        "Receipt保存後にpending削除",
+        "pending stale ID掃除 retainOnly",
+        "任意: 設定+Bearerの認証同期経路（UIなし）"
+      ],
+      "p0_fixes_applied": [
+        "UdpGatewayDiscoveryがephemeralポートではなく42888にbind",
+        "automaticSync/discoveryで同期ループ起動",
+        "usesCleartextTraffic + network_security_config"
+      ],
+      "known_limitations": [
+        "pendingキューはSharedPreferences（Room単一トランザクションではない）",
+        "実機での公開同期は未検証",
+        "認証ペアリングUIは一般利用者向けに非表示"
+      ]
+    },
+    "single_device_validation": {
+      "status": "NOT_RUN",
+      "note": "adb未整備・実機未接続。コードと単体テストのみPASS"
+    }
+  },
+
+  "pc_gateway_status": {
+    "status": "IMPLEMENTED",
+    "server": {
+      "framework": "Ktor/Netty",
+      "default_bind": "0.0.0.0:8080",
+      "sqlite_persistence": "PASS",
+      "lan_beacon": {
+        "enabled_default": true,
+        "udp_port": 42888,
+        "interval_ms": 5000
+      },
+      "anonymous_ingress": {
+        "path": "/api/public/sync/messages",
+        "enabled_default": true,
+        "token_required": false,
+        "report_only": true,
+        "rate_limited": true,
+        "receipt_on_store": "GATEWAY_RECEIVED_UNVERIFIED"
+      },
+      "authenticated_ingress": {
+        "path": "/api/sync/messages",
+        "token_required": true,
+        "receipt_on_store": "GATEWAY_RECEIVED",
+        "receipts_scoped_to_bridge": true
+      },
+      "pairing": {
+        "code_ttl_minutes": 5,
+        "approve": "IMPLEMENTED",
+        "reject_revoke": "IMPLEMENTED"
+      },
+      "admin_key": {
+        "resolution_order": [
+          "env:RELAY_GATEWAY_ADMIN_KEY",
+          "file:%USERPROFILE%\\.relay\\admin.key",
+          "generate_and_persist"
+        ],
+        "printed_to_console": false
+      }
+    },
+    "operator_console_ui": {
+      "status": "IMPLEMENTED",
+      "url": "http://127.0.0.1:8080/",
+      "assets": [
+        "pc-gateway/src/main/resources/web/index.html",
+        "pc-gateway/src/main/resources/web/app.css",
+        "pc-gateway/src/main/resources/web/app.js"
+      ],
+      "features": [
+        "概要カード（件数・UNVERIFIED/VERIFIED）",
+        "種別内訳バー",
+        "直近受信一覧",
+        "メッセージ検索・フィルタ・詳細ダイアログ",
+        "CSVエクスポート",
+        "Bridge一覧・token失効",
+        "ペアリングコード発行・承認・拒否",
+        "5秒自動更新",
+        "管理者キーのブラウザlocalStorage保存"
+      ],
+      "apis": [
+        "GET /api/dashboard",
+        "GET /api/messages",
+        "GET /api/messages/{id}",
+        "GET /api/messages/export.csv",
+        "GET /api/health",
+        "POST /api/public/sync/messages",
+        "POST /api/pair/*"
+      ],
+      "packaging_note": "installDist/ソース起動で新UI利用可。jpackage EXEは未再ビルドのため旧バイナリの可能性あり"
+    },
+    "features": [
+      "REPORT受信（公開・認証）",
+      "STATUS_CHANGE受信（認証経路）",
+      "形式検証",
+      "messageId重複排除",
+      "TTL判定",
+      "hop制限",
+      "Payloadサイズ制限",
+      "DB件数上限",
+      "SQLite永続保存",
+      "ingress_trust / source_bridge_id",
+      "レート制限付き匿名Ingress",
+      "LANビーコン",
+      "ローカル管理コンソールUI",
+      "Gateway Receipt生成"
+    ],
+    "receipt_rule": {
+      "unverified": "公開経路でSQLite保存成功または同一messageId既保存確認時にGATEWAY_RECEIVED_UNVERIFIED",
+      "verified": "認証経路で同様にGATEWAY_RECEIVED。後からverified再送でtrust昇格可"
+    },
+    "known_limitations": [
+      "LAN HTTPはTLS未導入",
+      "protocol v2 ECDSAはライブラリ実装済みだがサーバ未配線",
+      "EXEコード署名なし",
+      "jpackage EXEに最新UIが未同梱の可能性",
+      "3台以上Bridge同時・長時間・大量データは未検証",
+      "実機LAN E2E未実施"
+    ],
+    "scripts": [
+      "scripts/build-pc-gateway-exe.ps1",
+      "scripts/register-pc-gateway-autostart.ps1",
+      "scripts/configure-pc-gateway-firewall.ps1"
+    ]
+  },
+
+  "build_and_test_status": {
+    "android_unit_tests": { "count": 54, "failures": 0, "status": "PASS" },
+    "relay_protocol_tests": { "count": 6, "failures": 0, "status": "PASS" },
+    "pc_gateway_tests": { "count": 18, "failures": 0, "status": "PASS" },
+    "total_unit_tests": { "count": 78, "failures": 0, "status": "PASS" },
+    "android_debug_build": "PASS",
+    "pc_gateway_install_dist": "PASS",
+    "pc_gateway_jpackage_exe_rebuild": "NOT_RUN_AFTER_UI",
+    "lint": {
+      "status": "LAST_ATTEMPT_DAEMON_CRASH_OR_PRIOR_PASS",
+      "note": "以前PASS報告あり。直近セッションではdaemon消失あり。要再実行"
+    },
+    "android_apk": {
+      "path": "artifacts/relay-debug.apk",
+      "size_bytes": 13068560,
+      "sha256": "0790D65440A8E8C05E740C8C752F14B62EDF325F2839B597A2DC6E9DD36DC6CE",
+      "signature": "Android Debug",
+      "includes_p0_fixes": true
+    },
+    "pc_gateway_distribution": {
+      "formal_exe_path": "artifacts/relay-pc-gateway.exe",
+      "size_bytes": 85690368,
+      "sha256": "E818BA943B267D730FC8BB6D5E76F7ED37CAE536247A13FA7EBF777F128ED705",
+      "updated_exe_path": "artifacts/relay-pc-gateway-updated.exe",
+      "same_as_updated": true,
+      "code_signature": "UNSIGNED",
+      "includes_latest_console_ui": false,
+      "note": "EXEはzero-op時点の更新版へ置換済み。その後の管理UIはinstallDistソース経路のみ確実"
+    }
+  },
+
+  "current_validation_state": {
+    "connected_android_devices": 0,
+    "adb_available": false,
+    "android_single_device": "NOT_RUN",
+    "android_to_pc_gateway_public_sync": "NOT_RUN",
+    "pc_gateway_public_device_verified": false,
+    "two_device_nearby_sync": "NOT_RUN",
+    "three_device_multihop": "NOT_RUN",
+    "gateway_receipt_unit_tests": "PASS",
+    "udp_discovery_unit_test": "PASS",
+    "pc_console_ui_unit_tests": "PASS"
+  },
+
+  "session_changes_since_c832ff2": {
+    "summary": [
+      "P0: UDP発見bind修正",
+      "P0: 自動同期ループ有効化",
+      "P0: cleartext HTTP許可",
+      "Gateway upload hop枯渇対応・pending改善・HOME同期表示",
+      "admin key永続化・pair reject・receiptスコープ",
+      "Firewall/autostartスクリプト改善",
+      "ドキュメントzero-op整合",
+      "PC管理コンソールUI新設"
+    ],
+    "uncommitted": true
+  },
+
+  "next_test_objective": {
+    "name": "PC Gateway × Android 公開同期 実機検証",
+    "success_stage": "PC_GATEWAY_PUBLIC_DEVICE_VERIFIED",
+    "runbook": "docs/runbooks/PHONE_TO_PC_PUBLIC_SYNC_E2E.md",
+    "minimum_success_flow": [
+      "PC Gateway起動（0.0.0.0:8080 + UDP 42888）",
+      "Privateネットワーク + Firewall許可",
+      "Android同一LAN・権限許可・通信自動開始",
+      "REPORT作成",
+      "公開同期でPC SQLite保存",
+      "GATEWAY_RECEIVED_UNVERIFIED",
+      "Android UIで中継拠点へ保存済み（未認証）"
+    ],
+    "required_checks": [
+      "Android設定にlocalhostを使わない（自動発見）",
+      "WindowsネットワークをPrivate",
+      "TCP 8080とUDP 42888をFirewallで許可",
+      "HTTP成功だけでは公式到達表示にしない",
+      "同一messageIdはPCに1件",
+      "token/本文がログに出ない"
+    ]
+  },
+
+  "known_major_issues": [
+    {"issue": "Android実機からPC公開同期未検証", "priority": "HIGHEST"},
+    {"issue": "Nearby 2台実機未検証", "priority": "HIGHEST"},
+    {"issue": "最新PC管理UIがjpackage EXE未同梱の可能性", "priority": "HIGH"},
+    {"issue": "LAN HTTPでTLS未導入", "priority": "HIGH_AFTER_DEVICE_VERIFICATION"},
+    {"issue": "protocol v2署名がサーバ未配線", "priority": "HIGH_AFTER_DEVICE_VERIFICATION"},
+    {"issue": "pendingがSharedPreferences", "priority": "MEDIUM"},
+    {"issue": "未コミット変更多数", "priority": "MEDIUM"}
+  ],
+
+  "do_not_do_yet": [
+    "PCへのNearby Connections互換実装",
+    "未知Peerの公式扱い",
+    "コミュニティPKI本番導入",
+    "SMS",
+    "iOS対応",
+    "Bloom Filter",
+    "CAP対応",
+    "大規模アーキテクチャ変更",
+    "実機未実施をPASSと報告すること"
+  ],
+
+  "important_files": [
+    "docs/OPERATION_MODEL.md",
+    "docs/PC_GATEWAY_SETUP.md",
+    "docs/runbooks/PHONE_TO_PC_PUBLIC_SYNC_E2E.md",
+    "app/src/main/java/com/example/relay/gateway/GatewayLanDiscovery.kt",
+    "app/src/main/java/com/example/relay/gateway/GatewaySyncEngine.kt",
+    "app/src/main/res/xml/network_security_config.xml",
+    "pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayServer.kt",
+    "pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayStore.kt",
+    "pc-gateway/src/main/resources/web/",
+    "scripts/configure-pc-gateway-firewall.ps1",
+    "scripts/register-pc-gateway-autostart.ps1",
+    "artifacts/relay-debug.apk",
+    "artifacts/relay-pc-gateway.exe",
+    "artifacts/relay_status.json"
+  ],
+
+  "instructions_for_next_ai": [
+    "最初にgit status、ブランチ、未コミット変更を確認する",
+    "既存変更をreset/checkout/stash/削除しない",
+    "OPERATION_MODEL.mdを運用の正本とする",
+    "未実施の実機テストをPASSと報告しない",
+    "HTTP成功とGATEWAY_RECEIVED_UNVERIFIEDを区別する",
+    "PC EXEに最新UIが必要ならbuild-pc-gateway-exe.ps1を再実行",
+    "不具合時はLAN→listen→Firewall(TCP/UDP)→discovery bind→cleartext→DB→Receiptの順で切り分ける",
+    "最終報告では変更ファイル、テスト結果、残存Critical/Major、到達段階を明記する"
+  ]
+}

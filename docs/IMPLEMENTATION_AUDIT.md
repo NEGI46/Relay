@@ -1,5 +1,10 @@
 # Relay 実装監査
 
+> **HISTORICAL (2026-07-14)**  
+> この文書は Nearby / FGS / PC Gateway 実装前の監査記録です。  
+> **現行の運用・実装の正本は [OPERATION_MODEL.md](OPERATION_MODEL.md) とリポジトリ現状です。**  
+> ここに書かれた「Nearby 未実装」等は現行では誤りです。実機検証状況は [DEVICE_VALIDATION_REPORT.md](DEVICE_VALIDATION_REPORT.md) を参照。
+
 監査日: 2026-07-14
 
 ## 結論

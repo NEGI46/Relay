@@ -1,36 +1,31 @@
-# PC Gateway テストチェックリスト
+# PC Gateway 試験チェックリスト
 
-自動テスト:
+**正本:** [OPERATION_MODEL.md](OPERATION_MODEL.md)
 
-- [x] Gateway DTOのREPORT/Receipt往復
-- [x] 初回SQLite保存
-- [x] 同一messageIdの重複保存排除
-- [x] DB保存成功後のみGateway Receipt生成
-- [x] TTL/累積age拒否
-- [x] 期限切れペアリングコード拒否
-- [x] 未認証同期拒否
-- [x] Android相当Engineのtokenなし停止
-- [x] Android相当EngineのPC保存成功Receipt取込
-- [x] STATUS_CHANGEによる対象REPORTの状態更新
+## 自動テスト（コード）
 
-同一PC実行確認:
+- [x] `:pc-gateway:test`（公開 Ingress、レート制限、store、reject、receipt スコープ等）
+- [x] 公開経路 STATUS_CHANGE 拒否
+- [x] UNVERIFIED receipt 生成
 
-- [x] `:pc-gateway:installDist`
-- [x] 配布`.bat`起動
-- [x] `/api/health`
-- [x] 管理画面
-- [x] SQLiteファイル生成
-- [x] ペアリング要求・管理者承認
-- [x] 認証済みREPORT送信
-- [x] `GATEWAY_RECEIVED`生成・再取得
+## プロセス単体（PC のみ）
 
-未実施:
+- [ ] Health 200
+- [ ] 管理画面表示、VERIFIED/UNVERIFIED 件数
+- [ ] UDP 42888 ビーコン（LAN bind 時）
+- [ ] admin key 再起動後も同一（`%USERPROFILE%\.relay\admin.key`）
+- [ ] `POST /api/public/sync/messages` で REPORT 保存 + UNVERIFIED
+- [ ] 重複 messageId が 1 件
+- [ ] （任意）pair → approve → 認証 sync → verified receipt
+- [ ] （任意）pair/reject 後に認証 sync 拒否
 
-- [ ] Android実機からPC GatewayへのLAN同期
-- [ ] Windows Firewallを設定した別端末接続
-- [ ] 大量Bridge、長時間切断、TLS、メーカー固有Android制約
-# EXE packaging
+## デバイス E2E
 
-- [ ] Run `scripts\build-pc-gateway-exe.ps1` on Windows with JDK `jpackage` and WiX 3.x.
-- [ ] Verify `artifacts\relay-pc-gateway.exe` is non-empty and record its SHA-256.
-- [ ] Install/run the unsigned EXE on a test PC and verify `/api/health`.
+- [ ] [PHONE_TO_PC_PUBLIC_SYNC_E2E.md](runbooks/PHONE_TO_PC_PUBLIC_SYNC_E2E.md)
+
+## 配布
+
+- [ ] `artifacts/relay-pc-gateway.exe` 起動
+- [ ] 自動起動タスク登録
+- [ ] Firewall Private のみ
+- [ ] コード署名（正式配布時）

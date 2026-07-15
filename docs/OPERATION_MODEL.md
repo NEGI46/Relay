@@ -14,7 +14,7 @@ Relayは、一般利用者が中継地点を登録したり、端末同士の接
 
 PCでの保存が成功した場合だけ`GATEWAY_RECEIVED_UNVERIFIED`を生成します。これは「中継拠点に保存済み（未認証）」を意味し、公式Gatewayや最終宛先への到達を意味しません。
 
-PC Gatewayは電源投入後に自動起動するWindowsタスクとして登録できます。個々のスマートフォンをPCへ登録する作業はありません。
+PC Gatewayは電源投入後に自動起動するWindowsタスクとして登録できます（`scripts/register-pc-gateway-autostart.ps1`）。管理者キーは `%USERPROFILE%\.relay\admin.key` に永続化され、コンソールへ平文出力しません。Firewall は Private プロファイルで TCP API と UDP 発見ポートのみ許可します（`scripts/configure-pc-gateway-firewall.ps1`）。個々のスマートフォンをPCへ登録する作業はありません。
 
 ## 到達性の前提
 

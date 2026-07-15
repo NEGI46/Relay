@@ -46,9 +46,13 @@ Android `app`、共有DTO `relay-protocol`、PC Gateway `pc-gateway`の3モジ�
 
 ## PC Gateway
 
-Android BridgeからローカルLAN経由でPC GatewayへREPORTを同期できます。PC Gatewayは`.\gradlew.bat :pc-gateway:installDist`後に生成される`pc-gateway/build/install/pc-gateway/bin/pc-gateway.bat`から起動し、管理画面は`http://127.0.0.1:8080/`、Healthは`/api/health`です。ペアリング、SQLite保存、重複排除、Gateway Receiptを実装しています。詳細は[PC_GATEWAY_SETUP.md](docs/PC_GATEWAY_SETUP.md)、[PC_GATEWAY_ARCHITECTURE.md](docs/PC_GATEWAY_ARCHITECTURE.md)、[PC_GATEWAY_SECURITY.md](docs/PC_GATEWAY_SECURITY.md)を参照してください。
+固定中継の主経路は **zero-operation** です。PC は UDP ビーコン（42888）で自らを広告し、Android は token なしで `POST /api/public/sync/messages` に REPORT を送れます。保存成功時は `GATEWAY_RECEIVED_UNVERIFIED`（中継拠点・未認証）です。ペアリング + Bearer は任意の verified 経路です。
 
-Android実機からPCへの同期は未検証です。PCへの送信完了だけではGateway到達済みと表示せず、PC保存成功応答から返った`GATEWAY_RECEIVED`だけを既存Receipt処理へ取り込みます。
+起動例: `.\gradlew.bat :pc-gateway:installDist` 後の `pc-gateway/build/install/pc-gateway/bin/pc-gateway.bat`、または `artifacts/relay-pc-gateway.exe`。管理画面 `http://127.0.0.1:8080/`、Health `/api/health`。既定 bind は `0.0.0.0:8080`（Firewall で Private のみ許可）。
+
+詳細: [OPERATION_MODEL.md](docs/OPERATION_MODEL.md)、[PC_GATEWAY_SETUP.md](docs/PC_GATEWAY_SETUP.md)、[PC_GATEWAY_ARCHITECTURE.md](docs/PC_GATEWAY_ARCHITECTURE.md)、[PC_GATEWAY_SECURITY.md](docs/PC_GATEWAY_SECURITY.md)。
+
+Android 実機から PC への同期は **未検証** です。HTTP 送信成功だけでは公式到達と表示しません。
 
 ## 前提とMVP既定値
 
@@ -85,7 +89,7 @@ Windows PowerShell:
 .\gradlew.bat assembleDebug
 ```
 
-検証済み結果（2026-07-15）: ルート`test`、`lint`、`assembleDebug`、`:pc-gateway:test`、`:pc-gateway:build`が成功。Android 47件、共有DTO 2件、PC Gateway 6件の計55件がPASS。APKは`app/build/outputs/apk/debug/app-debug.apk`に生成されます。
+検証済み結果（コードベース）: `testDebugUnitTest`、`:relay-protocol:test`、`:pc-gateway:test`、`assembleDebug` が成功。件数はおおよそ Android 50+ / protocol 6 / pc-gateway 15 前後（追加に応じて変動）。APK は `app/build/outputs/apk/debug/app-debug.apk` および `artifacts/relay-debug.apk`。
 
 macOS / Linux:
 
@@ -118,23 +122,19 @@ Nearby Connections自体の接続特性に加えて、アプリ層の入力検�
 
 - REPORTの有効期間は端末ごとの受信時刻でリセットしない。`lifetimeMs`と`accumulatedAgeMs`を転送し、送信前にその端末での保持時間を累積する。
 - 再起動後は単調時計を直接比較しない。保存時の壁時計差分を非負の場合に限り利用し、復元不能または時計が戻った場合は安全側で期限切れにする。
-- Payload転送完了、Peerアプリ保存（`PEER_RECEIVED`）、Gateway保存（`GATEWAY_RECEIVED`）は別の状態である。画面上の「Gateway到達済み」はGateway Receiptからのみ導出する。
-- 業務メッセージは`REPORT`と`STATUS_CHANGE`だけを扱う。STATUS_CHANGEは常にREPORTより先に中継する。
-- 通信は`DRILL`または`RELAY`モードで明示開始した場合だけ起動する。端末ロール（MEMBER/GATEWAY/ADMIN）はモードとは別に保持する。
-- 一般利用者へ接続承認を要求しない。Nearby接続は自動成立し、受信データは未検証として扱う。信頼済み拠点向けの認証境界は将来追加する。
+- Payload転送完了、Peer保存（`PEER_RECEIVED`）、中継拠点未認証（`GATEWAY_RECEIVED_UNVERIFIED`）、認証 Gateway（`GATEWAY_RECEIVED`）は別状態。
+- 業務メッセージは`REPORT`と`STATUS_CHANGE`。STATUS_CHANGEはREPORTより先に中継する。
+- 権限許可済みならアプリ起動時に通信（RELAY）を自動開始する。一般利用者は接続承認・Gateway 登録をしない。
 
-## フェーズ3: 実機通信TODO
+## フェーズ3: 実機検証TODO（実装は zero-op 済み）
 
-- 現行のGoogle Play services公式資料に基づいてNearby依存版を固定する
-- 複数Peer用途のStrategyを選定し、2〜3台の実機で広告・発見・接続を確認する
-- 接続開始時の認証コードを両端末へ表示し、利用者の承認後に接続を受理する
-- Android OS版ごとのBluetooth、Nearby Wi-Fi、位置情報、通知権限を整理する
-- 権限拒否時に理由と設定導線を表示する
-- Foreground Serviceと常時通知を実装し、接続数と停止操作を表示する
-- 画面消灯、省電力、アプリ復帰、切断、再接続を実機で検証する
-- 64 KiB境界、Manifest分割、連続送信、ACK直前切断を検証する
-- `P2P_CLUSTER`等のStrategy選択と端末メーカー差を記録する
-- 実機2台の確認手順と既知制限を本READMEへ追記する
+コード上は Nearby 自動接続、権限、FGS、公開 PC 同期がある。**実機での PASS は未実施。**
+
+- 1 台: 起動、権限、REPORT 保存復元、通信自動開始
+- 2 台: 承認 UI なしで接続、REPORT 同期、Peer ACK の表示意味
+- Phone↔PC: ビーコン発見 → public sync → UNVERIFIED 表示（[runbook](docs/runbooks/PHONE_TO_PC_PUBLIC_SYNC_E2E.md)）
+- 画面消灯、省電力、切断・再接続、メーカー差
+- 64 KiB 境界、連続送信、ACK 直前切断
 
 ## 既知の技術リスク
 
