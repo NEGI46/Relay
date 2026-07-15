@@ -16,8 +16,80 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 data class StoreOutcome(val disposition: String, val receipt: GatewayReceipt? = null, val reason: String? = null)
-data class BridgeSummary(val bridgeId: String, val name: String, val paired: Boolean, val connected: Boolean, val lastSyncAt: Long?, val receivedCount: Long)
-data class MessageSummary(val messageId: String, val messageType: String, val recordType: String, val priority: String, val status: String, val origin: String, val createdAt: Long, val receivedAt: Long, val hopCount: Int, val gatewayReceived: Boolean, val ingressTrust: String)
+@kotlinx.serialization.Serializable
+data class BridgeSummary(
+    val bridgeId: String,
+    val name: String,
+    val paired: Boolean,
+    val connected: Boolean,
+    val lastSyncAt: Long? = null,
+    val receivedCount: Long,
+)
+
+@kotlinx.serialization.Serializable
+data class MessageSummary(
+    val messageId: String,
+    val messageType: String,
+    val recordType: String,
+    val priority: String,
+    val status: String,
+    val origin: String,
+    val createdAt: Long,
+    val receivedAt: Long,
+    val hopCount: Int,
+    val gatewayReceived: Boolean,
+    val gatewayReceivedUnverified: Boolean,
+    val ingressTrust: String,
+    val sourceBridgeId: String? = null,
+)
+
+@kotlinx.serialization.Serializable
+data class MessageDetail(
+    val messageId: String,
+    val messageType: String,
+    val recordType: String,
+    val priority: String,
+    val status: String,
+    val originDeviceId: String,
+    val createdAt: Long,
+    val expiresAt: Long,
+    val lifetimeMs: Long,
+    val accumulatedAgeMs: Long,
+    val hopCount: Int,
+    val hopLimit: Int,
+    val receivedAt: Long,
+    val ingressTrust: String,
+    val sourceBridgeId: String?,
+    val gatewayReceived: Boolean,
+    val gatewayReceivedUnverified: Boolean,
+    val payloadJson: String,
+    val receipts: List<GatewayReceipt>,
+)
+
+@kotlinx.serialization.Serializable
+data class TypeCount(val messageType: String, val count: Int)
+
+@kotlinx.serialization.Serializable
+data class DashboardSnapshot(
+    val gatewayId: String,
+    val totalMessages: Int,
+    val activeMessages: Int,
+    val verifiedMessages: Int,
+    val unverifiedMessages: Int,
+    val bridgeCount: Int,
+    val pairedBridgeCount: Int,
+    val receiptCount: Int,
+    val byType: List<TypeCount>,
+    val recentMessages: List<MessageSummary>,
+    val bridges: List<BridgeSummary>,
+    val anonymousIngressEnabled: Boolean,
+    val lanDiscoveryEnabled: Boolean,
+    val lanDiscoveryPort: Int,
+    val httpPort: Int,
+    val bindHost: String,
+    val maxStoredMessages: Int,
+    val generatedAt: Long,
+)
 
 class GatewayStore(private val config: GatewayConfig, private val json: Json = GatewayJson) : AutoCloseable {
     private val lock = Any()
@@ -30,174 +102,622 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
             statement.execute("PRAGMA busy_timeout=5000")
             statement.execute("PRAGMA journal_mode=WAL")
             statement.execute("PRAGMA foreign_keys=ON")
-            statement.execute("""
+            statement.execute(
+                """
                 CREATE TABLE IF NOT EXISTS messages(
                   message_id TEXT PRIMARY KEY, canonical_json TEXT NOT NULL, message_type TEXT NOT NULL,
                   record_type TEXT NOT NULL, priority TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL,
                   expires_at INTEGER NOT NULL, lifetime_ms INTEGER NOT NULL, accumulated_age_ms INTEGER NOT NULL,
                   hop_count INTEGER NOT NULL, hop_limit INTEGER NOT NULL, origin_id TEXT NOT NULL, received_at INTEGER NOT NULL,
-                  ingress_trust TEXT NOT NULL DEFAULT 'VERIFIED'
+                  ingress_trust TEXT NOT NULL DEFAULT 'VERIFIED',
+                  source_bridge_id TEXT
                 )
-            """.trimIndent())
-            val hasIngressTrust = statement.executeQuery("PRAGMA table_info(messages)").use { columns ->
-                var found = false
-                while (columns.next()) if (columns.getString("name") == "ingress_trust") found = true
-                found
-            }
-            if (!hasIngressTrust) statement.execute("ALTER TABLE messages ADD COLUMN ingress_trust TEXT NOT NULL DEFAULT 'VERIFIED'")
+                """.trimIndent(),
+            )
+            ensureColumn(statement, "messages", "ingress_trust", "TEXT NOT NULL DEFAULT 'VERIFIED'")
+            ensureColumn(statement, "messages", "source_bridge_id", "TEXT")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(priority, created_at, expires_at)")
-            statement.execute("""
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_messages_source_bridge ON messages(source_bridge_id)")
+            statement.execute(
+                """
                 CREATE TABLE IF NOT EXISTS receipts(
                   receipt_id TEXT PRIMARY KEY, message_id TEXT NOT NULL, receipt_type TEXT NOT NULL,
                   actor_id TEXT NOT NULL, recorded_at INTEGER NOT NULL,
                   UNIQUE(message_id, receipt_type, actor_id)
                 )
-            """.trimIndent())
-            statement.execute("""
+                """.trimIndent(),
+            )
+            statement.execute(
+                """
                 CREATE TABLE IF NOT EXISTS bridges(
                   bridge_id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT, paired INTEGER NOT NULL DEFAULT 0,
                   connected INTEGER NOT NULL DEFAULT 0, last_sync_at INTEGER, received_count INTEGER NOT NULL DEFAULT 0
                 )
-            """.trimIndent())
-            statement.execute("""
+                """.trimIndent(),
+            )
+            statement.execute(
+                """
                 CREATE TABLE IF NOT EXISTS pairing_codes(code TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0)
-            """.trimIndent())
+                """.trimIndent(),
+            )
         }
+    }
+
+    private fun ensureColumn(statement: java.sql.Statement, table: String, column: String, ddl: String) {
+        val has = statement.executeQuery("PRAGMA table_info($table)").use { columns ->
+            var found = false
+            while (columns.next()) if (columns.getString("name") == column) found = true
+            found
+        }
+        if (!has) statement.execute("ALTER TABLE $table ADD COLUMN $column $ddl")
     }
 
     fun createPairingCode(now: Long = System.currentTimeMillis()): String = synchronized(lock) {
         val code = (100000..999999).random().toString()
         connection.prepareStatement("INSERT INTO pairing_codes(code, expires_at) VALUES (?, ?)").use {
-            it.setString(1, code); it.setLong(2, now + 5 * 60_000); it.executeUpdate()
+            it.setString(1, code)
+            it.setLong(2, now + 5 * 60_000)
+            it.executeUpdate()
         }
         code
     }
 
     fun requestPair(code: String, bridgeId: String, name: String, now: Long = System.currentTimeMillis()): Boolean = synchronized(lock) {
         connection.prepareStatement("SELECT used, expires_at FROM pairing_codes WHERE code=?").use { ps ->
-            ps.setString(1, code); ps.executeQuery().use { rs ->
+            ps.setString(1, code)
+            ps.executeQuery().use { rs ->
                 if (!rs.next() || rs.getInt("used") != 0 || rs.getLong("expires_at") < now) return false
             }
         }
-        connection.prepareStatement("INSERT INTO bridges(bridge_id,name) VALUES(?,?) ON CONFLICT(bridge_id) DO UPDATE SET name=excluded.name").use {
-            it.setString(1, bridgeId); it.setString(2, name.take(80)); it.executeUpdate()
+        connection.prepareStatement(
+            "INSERT INTO bridges(bridge_id,name) VALUES(?,?) ON CONFLICT(bridge_id) DO UPDATE SET name=excluded.name",
+        ).use {
+            it.setString(1, bridgeId)
+            it.setString(2, name.take(80))
+            it.executeUpdate()
         }
         true
     }
 
     fun approvePair(bridgeId: String, code: String, now: Long = System.currentTimeMillis()): String? = synchronized(lock) {
         if (!requestPair(code, bridgeId, bridgeId, now)) return null
-        val token = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also { java.security.SecureRandom().nextBytes(it) })
+        val token = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(ByteArray(32).also { java.security.SecureRandom().nextBytes(it) })
         connection.prepareStatement("UPDATE bridges SET paired=1, token_hash=? WHERE bridge_id=?").use {
-            it.setString(1, hash(token)); it.setString(2, bridgeId); it.executeUpdate()
+            it.setString(1, hash(token))
+            it.setString(2, bridgeId)
+            it.executeUpdate()
         }
-        connection.prepareStatement("UPDATE pairing_codes SET used=1 WHERE code=?").use { it.setString(1, code); it.executeUpdate() }
+        connection.prepareStatement("UPDATE pairing_codes SET used=1 WHERE code=?").use {
+            it.setString(1, code)
+            it.executeUpdate()
+        }
         token
     }
 
+    /**
+     * Rejects an in-flight pairing request and/or revokes an existing bridge token.
+     * Marks the pairing code used (if provided) so it cannot be approved later.
+     */
+    fun rejectPair(bridgeId: String, code: String? = null, now: Long = System.currentTimeMillis()): Boolean = synchronized(lock) {
+        var changed = false
+        if (!code.isNullOrBlank()) {
+            val updated = connection.prepareStatement(
+                "UPDATE pairing_codes SET used=1 WHERE code=? AND used=0 AND expires_at>=?",
+            ).use {
+                it.setString(1, code)
+                it.setLong(2, now)
+                it.executeUpdate()
+            }
+            changed = changed || updated > 0
+        }
+        val revoked = connection.prepareStatement(
+            "UPDATE bridges SET paired=0, token_hash=NULL, connected=0 WHERE bridge_id=?",
+        ).use {
+            it.setString(1, bridgeId)
+            it.executeUpdate()
+        }
+        changed = changed || revoked > 0
+        // Ensure a row exists so the dashboard can show the rejected bridge.
+        if (revoked == 0) {
+            connection.prepareStatement(
+                "INSERT INTO bridges(bridge_id,name,paired) VALUES(?,?,0) ON CONFLICT(bridge_id) DO NOTHING",
+            ).use {
+                it.setString(1, bridgeId)
+                it.setString(2, bridgeId.take(80))
+                it.executeUpdate()
+            }
+        }
+        changed || bridgeId.isNotBlank()
+    }
+
+    fun revokeBridge(bridgeId: String): Boolean = rejectPair(bridgeId, code = null)
+
     fun authenticate(bridgeId: String, token: String): Boolean = synchronized(lock) {
         connection.prepareStatement("SELECT paired, token_hash FROM bridges WHERE bridge_id=?").use { ps ->
-            ps.setString(1, bridgeId); ps.executeQuery().use { rs ->
+            ps.setString(1, bridgeId)
+            ps.executeQuery().use { rs ->
                 rs.next() && rs.getInt("paired") == 1 && constantTimeEquals(rs.getString("token_hash"), hash(token))
             }
         }
     }
 
-    fun ingest(bridgeId: String, messages: List<GatewayMessage>, now: Long = System.currentTimeMillis()): List<StoreOutcome> = synchronized(lock) {
-        connection.autoCommit = false
-        try {
-            val results = messages.map { message -> ingestOne(message, now, VERIFIED_GATEWAY_RECEIPT_TYPE) }
-            connection.prepareStatement("UPDATE bridges SET connected=1,last_sync_at=?,received_count=received_count+? WHERE bridge_id=?").use {
-                it.setLong(1, now); it.setInt(2, messages.size); it.setString(3, bridgeId); it.executeUpdate()
+    fun ingest(bridgeId: String, messages: List<GatewayMessage>, now: Long = System.currentTimeMillis()): List<StoreOutcome> =
+        synchronized(lock) {
+            connection.autoCommit = false
+            try {
+                val ordered = messages.sortedWith(
+                    compareBy<GatewayMessage> { if (it.recordType == "STATUS_CHANGE") 0 else 1 }
+                        .thenByDescending { priorityRank(it.priority) }
+                        .thenByDescending { it.createdAt },
+                )
+                val results = ordered.map { message ->
+                    ingestOne(message, now, VERIFIED_GATEWAY_RECEIPT_TYPE, sourceBridgeId = bridgeId)
+                }
+                connection.prepareStatement(
+                    "UPDATE bridges SET connected=1,last_sync_at=?,received_count=received_count+? WHERE bridge_id=?",
+                ).use {
+                    it.setLong(1, now)
+                    it.setInt(2, messages.size)
+                    it.setString(3, bridgeId)
+                    it.executeUpdate()
+                }
+                connection.commit()
+                results
+            } catch (error: Exception) {
+                connection.rollback()
+                throw error
+            } finally {
+                connection.autoCommit = true
             }
-            connection.commit(); results
-        } catch (error: Exception) {
-            connection.rollback(); throw error
-        } finally { connection.autoCommit = true }
-    }
+        }
 
     /** Unregistered LAN senders can store validated data but receive only an explicitly unverified receipt. */
-    fun ingestUnregistered(messages: List<GatewayMessage>, now: Long = System.currentTimeMillis()): List<StoreOutcome> = synchronized(lock) {
-        connection.autoCommit = false
-        try {
-            val results = messages.map { message -> ingestOne(message, now, UNVERIFIED_GATEWAY_RECEIPT_TYPE) }
-            connection.commit(); results
-        } catch (error: Exception) {
-            connection.rollback(); throw error
-        } finally { connection.autoCommit = true }
+    fun ingestUnregistered(messages: List<GatewayMessage>, now: Long = System.currentTimeMillis()): List<StoreOutcome> =
+        synchronized(lock) {
+            connection.autoCommit = false
+            try {
+                val ordered = messages.sortedWith(
+                    compareByDescending<GatewayMessage> { priorityRank(it.priority) }
+                        .thenByDescending { it.createdAt },
+                )
+                val results = ordered.map { message ->
+                    ingestOne(message, now, UNVERIFIED_GATEWAY_RECEIPT_TYPE, sourceBridgeId = null)
+                }
+                connection.commit()
+                results
+            } catch (error: Exception) {
+                connection.rollback()
+                throw error
+            } finally {
+                connection.autoCommit = true
+            }
+        }
+
+    private fun priorityRank(priority: String): Int = when (priority) {
+        "CRITICAL" -> 4
+        "HIGH" -> 3
+        "NORMAL" -> 2
+        else -> 1
     }
 
-    private fun ingestOne(message: GatewayMessage, now: Long, receiptType: String): StoreOutcome {
+    private fun ingestOne(
+        message: GatewayMessage,
+        now: Long,
+        receiptType: String,
+        sourceBridgeId: String?,
+    ): StoreOutcome {
         val ingressTrust = if (receiptType == VERIFIED_GATEWAY_RECEIPT_TYPE) "VERIFIED" else "UNVERIFIED"
-        if (message.messageId.isBlank() || message.messageId.length > 64 || message.originDeviceId.length !in 1..64) return StoreOutcome("REJECTED", reason = "invalid_identifier")
-        if (message.lifetimeMs !in 1..604_800_000L || message.accumulatedAgeMs !in 0..message.lifetimeMs || message.accumulatedAgeMs >= message.lifetimeMs) return StoreOutcome("REJECTED", reason = "expired_or_invalid_ttl")
-        if (message.hopLimit !in 1..32 || message.hopCount !in 0..message.hopLimit) return StoreOutcome("REJECTED", reason = "invalid_hop")
+        if (message.messageId.isBlank() || message.messageId.length > 64 || message.originDeviceId.length !in 1..64) {
+            return StoreOutcome("REJECTED", reason = "invalid_identifier")
+        }
+        if (message.lifetimeMs !in 1..604_800_000L ||
+            message.accumulatedAgeMs !in 0..message.lifetimeMs ||
+            message.accumulatedAgeMs >= message.lifetimeMs
+        ) {
+            return StoreOutcome("REJECTED", reason = "expired_or_invalid_ttl")
+        }
+        if (message.hopLimit !in 1..32 || message.hopCount !in 0..message.hopLimit) {
+            return StoreOutcome("REJECTED", reason = "invalid_hop")
+        }
         if (message.recordType == "STATUS_CHANGE") {
-            val target = message.payload.jsonObject["targetMessageId"]?.jsonPrimitive?.content ?: return StoreOutcome("REJECTED", reason = "invalid_status_change")
-            val newStatus = message.payload.jsonObject["newStatus"]?.jsonPrimitive?.content ?: return StoreOutcome("REJECTED", reason = "invalid_status_change")
-            if (newStatus !in setOf("ACTIVE", "RESOLVED", "RETRACTED")) return StoreOutcome("REJECTED", reason = "invalid_status_change")
-            val exists = connection.prepareStatement("SELECT 1 FROM messages WHERE message_id=?").use { ps -> ps.setString(1, target); ps.executeQuery().use { it.next() } }
+            val target = message.payload.jsonObject["targetMessageId"]?.jsonPrimitive?.content
+                ?: return StoreOutcome("REJECTED", reason = "invalid_status_change")
+            val newStatus = message.payload.jsonObject["newStatus"]?.jsonPrimitive?.content
+                ?: return StoreOutcome("REJECTED", reason = "invalid_status_change")
+            if (newStatus !in setOf("ACTIVE", "RESOLVED", "RETRACTED")) {
+                return StoreOutcome("REJECTED", reason = "invalid_status_change")
+            }
+            val exists = connection.prepareStatement("SELECT 1 FROM messages WHERE message_id=?").use { ps ->
+                ps.setString(1, target)
+                ps.executeQuery().use { it.next() }
+            }
             if (!exists) return StoreOutcome("REJECTED", reason = "target_report_not_found")
         }
-        val total = connection.createStatement().use { it.executeQuery("SELECT COUNT(*) FROM messages").use { rs -> rs.next(); rs.getInt(1) } }
+        val total = connection.createStatement().use {
+            it.executeQuery("SELECT COUNT(*) FROM messages").use { rs ->
+                rs.next()
+                rs.getInt(1)
+            }
+        }
         if (total >= config.maxStoredMessages) return StoreOutcome("REJECTED", reason = "db_message_limit")
         val existing = connection.prepareStatement("SELECT canonical_json FROM messages WHERE message_id=?").use { ps ->
-            ps.setString(1, message.messageId); ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+            ps.setString(1, message.messageId)
+            ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
         }
         if (existing != null) {
             val canonical = json.encodeToString(message)
             if (existing != canonical) return StoreOutcome("COLLISION", reason = "messageId collision")
             if (ingressTrust == "VERIFIED") {
-                connection.prepareStatement("UPDATE messages SET ingress_trust='VERIFIED' WHERE message_id=?").use { ps ->
-                    ps.setString(1, message.messageId); ps.executeUpdate()
+                connection.prepareStatement(
+                    "UPDATE messages SET ingress_trust='VERIFIED', source_bridge_id=COALESCE(?, source_bridge_id) WHERE message_id=?",
+                ).use { ps ->
+                    ps.setString(1, sourceBridgeId)
+                    ps.setString(2, message.messageId)
+                    ps.executeUpdate()
                 }
             }
             return StoreOutcome("DUPLICATE", receiptFor(message.messageId, now, receiptType))
         }
-        connection.prepareStatement("""
-            INSERT INTO messages(message_id,canonical_json,message_type,record_type,priority,status,created_at,expires_at,lifetime_ms,accumulated_age_ms,hop_count,hop_limit,origin_id,received_at,ingress_trust)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """.trimIndent()).use { ps ->
-            ps.setString(1, message.messageId); ps.setString(2, json.encodeToString(message)); ps.setString(3, message.messageType)
-            ps.setString(4, message.recordType); ps.setString(5, message.priority); ps.setString(6, message.status)
-            ps.setLong(7, message.createdAt); ps.setLong(8, message.expiresAt); ps.setLong(9, message.lifetimeMs); ps.setLong(10, message.accumulatedAgeMs)
-            ps.setInt(11, message.hopCount); ps.setInt(12, message.hopLimit); ps.setString(13, message.originDeviceId); ps.setLong(14, message.receivedAt)
-            ps.setString(15, ingressTrust); ps.executeUpdate()
+        connection.prepareStatement(
+            """
+            INSERT INTO messages(message_id,canonical_json,message_type,record_type,priority,status,created_at,expires_at,lifetime_ms,accumulated_age_ms,hop_count,hop_limit,origin_id,received_at,ingress_trust,source_bridge_id)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """.trimIndent(),
+        ).use { ps ->
+            ps.setString(1, message.messageId)
+            ps.setString(2, json.encodeToString(message))
+            ps.setString(3, message.messageType)
+            ps.setString(4, message.recordType)
+            ps.setString(5, message.priority)
+            ps.setString(6, message.status)
+            ps.setLong(7, message.createdAt)
+            ps.setLong(8, message.expiresAt)
+            ps.setLong(9, message.lifetimeMs)
+            ps.setLong(10, message.accumulatedAgeMs)
+            ps.setInt(11, message.hopCount)
+            ps.setInt(12, message.hopLimit)
+            ps.setString(13, message.originDeviceId)
+            ps.setLong(14, message.receivedAt)
+            ps.setString(15, ingressTrust)
+            ps.setString(16, sourceBridgeId)
+            ps.executeUpdate()
         }
         if (message.recordType == "STATUS_CHANGE") {
             val target = message.payload.jsonObject["targetMessageId"]!!.jsonPrimitive.content
             val newStatus = message.payload.jsonObject["newStatus"]!!.jsonPrimitive.content
-            connection.prepareStatement("UPDATE messages SET status=? WHERE message_id=?").use { ps -> ps.setString(1, newStatus); ps.setString(2, target); ps.executeUpdate() }
+            connection.prepareStatement("UPDATE messages SET status=? WHERE message_id=?").use { ps ->
+                ps.setString(1, newStatus)
+                ps.setString(2, target)
+                ps.executeUpdate()
+            }
         }
         return StoreOutcome("STORED", receiptFor(message.messageId, now, receiptType))
     }
 
     private fun receiptFor(messageId: String, now: Long, receiptType: String): GatewayReceipt {
-        val existing = connection.prepareStatement("SELECT receipt_id, message_id, receipt_type, actor_id, recorded_at FROM receipts WHERE message_id=? AND receipt_type=? AND actor_id=?").use { ps ->
-            ps.setString(1, messageId); ps.setString(2, receiptType); ps.setString(3, config.gatewayId); ps.executeQuery().use { rs -> if (rs.next()) GatewayReceipt(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getLong(5)) else null }
+        val existing = connection.prepareStatement(
+            "SELECT receipt_id, message_id, receipt_type, actor_id, recorded_at FROM receipts WHERE message_id=? AND receipt_type=? AND actor_id=?",
+        ).use { ps ->
+            ps.setString(1, messageId)
+            ps.setString(2, receiptType)
+            ps.setString(3, config.gatewayId)
+            ps.executeQuery().use { rs ->
+                if (rs.next()) {
+                    GatewayReceipt(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getLong(5))
+                } else {
+                    null
+                }
+            }
         }
         if (existing != null) return existing
         val receipt = GatewayReceipt(UUID.randomUUID().toString(), messageId, receiptType, config.gatewayId, now)
-        connection.prepareStatement("INSERT INTO receipts(receipt_id,message_id,receipt_type,actor_id,recorded_at) VALUES(?,?,?,?,?)").use { ps ->
-            ps.setString(1, receipt.receiptId); ps.setString(2, receipt.messageId); ps.setString(3, receipt.receiptType); ps.setString(4, receipt.actorId); ps.setLong(5, receipt.recordedAt); ps.executeUpdate()
+        connection.prepareStatement(
+            "INSERT INTO receipts(receipt_id,message_id,receipt_type,actor_id,recorded_at) VALUES(?,?,?,?,?)",
+        ).use { ps ->
+            ps.setString(1, receipt.receiptId)
+            ps.setString(2, receipt.messageId)
+            ps.setString(3, receipt.receiptType)
+            ps.setString(4, receipt.actorId)
+            ps.setLong(5, receipt.recordedAt)
+            ps.executeUpdate()
         }
         return receipt
     }
 
-    fun receipts(): List<GatewayReceipt> = synchronized(lock) { connection.prepareStatement("SELECT receipt_id,message_id,receipt_type,actor_id,recorded_at FROM receipts ORDER BY recorded_at").use { ps -> ps.executeQuery().use { rs -> buildList { while (rs.next()) add(GatewayReceipt(rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getLong(5))) } } } }
-
-    fun summaries(): List<BridgeSummary> = synchronized(lock) { connection.prepareStatement("SELECT bridge_id,name,paired,connected,last_sync_at,received_count FROM bridges ORDER BY name").use { ps -> ps.executeQuery().use { rs -> buildList { while (rs.next()) add(BridgeSummary(rs.getString(1),rs.getString(2),rs.getInt(3)==1,rs.getInt(4)==1,rs.getLong(5).takeIf { !rs.wasNull() },rs.getLong(6))) } } } }
-
-    fun counts(): Pair<Int, Int> = synchronized(lock) { connection.createStatement().use { st -> st.executeQuery("SELECT COUNT(*), COALESCE(SUM(CASE WHEN status='ACTIVE' THEN 1 ELSE 0 END),0) FROM messages").use { rs -> rs.next(); rs.getInt(1) to rs.getInt(2) } } }
-
-    fun messages(type: String? = null, status: String? = null, query: String? = null): List<MessageSummary> = synchronized(lock) {
-        val rows = connection.prepareStatement("SELECT m.message_id,m.message_type,m.record_type,m.priority,m.status,m.origin_id,m.created_at,m.received_at,m.hop_count,EXISTS(SELECT 1 FROM receipts r WHERE r.message_id=m.message_id AND r.receipt_type='GATEWAY_RECEIVED'),m.ingress_trust FROM messages m ORDER BY CASE priority WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'NORMAL' THEN 2 ELSE 1 END DESC, created_at DESC").use { ps -> ps.executeQuery().use { rs -> buildList { while (rs.next()) add(MessageSummary(rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getLong(7),rs.getLong(8),rs.getInt(9),rs.getInt(10)==1,rs.getString(11))) } } }
-        rows.filter { (type == null || it.messageType == type) && (status == null || it.status == status) && (query.isNullOrBlank() || it.messageId.contains(query, true) || it.origin.contains(query, true)) }
+    fun receipts(): List<GatewayReceipt> = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT receipt_id,message_id,receipt_type,actor_id,recorded_at FROM receipts ORDER BY recorded_at",
+        ).use { ps ->
+            ps.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        add(GatewayReceipt(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getLong(5)))
+                    }
+                }
+            }
+        }
     }
 
-    override fun close() { synchronized(lock) { connection.close() } }
-    private fun hash(value: String): String = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(value.toByteArray()))
-    private fun constantTimeEquals(a: String?, b: String): Boolean = a != null && MessageDigest.isEqual(a.toByteArray(), b.toByteArray())
+    /** Receipts for messages this bridge submitted (or later claimed via verified re-sync). */
+    fun receiptsForBridge(bridgeId: String): List<GatewayReceipt> = synchronized(lock) {
+        connection.prepareStatement(
+            """
+            SELECT r.receipt_id,r.message_id,r.receipt_type,r.actor_id,r.recorded_at
+            FROM receipts r
+            INNER JOIN messages m ON m.message_id = r.message_id
+            WHERE m.source_bridge_id = ?
+            ORDER BY r.recorded_at
+            """.trimIndent(),
+        ).use { ps ->
+            ps.setString(1, bridgeId)
+            ps.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        add(GatewayReceipt(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getLong(5)))
+                    }
+                }
+            }
+        }
+    }
+
+    fun summaries(): List<BridgeSummary> = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT bridge_id,name,paired,connected,last_sync_at,received_count FROM bridges ORDER BY name",
+        ).use { ps ->
+            ps.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        add(
+                            BridgeSummary(
+                                rs.getString(1),
+                                rs.getString(2),
+                                rs.getInt(3) == 1,
+                                rs.getInt(4) == 1,
+                                rs.getLong(5).takeIf { !rs.wasNull() },
+                                rs.getLong(6),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun counts(): Pair<Int, Int> = synchronized(lock) {
+        connection.createStatement().use { st ->
+            st.executeQuery(
+                "SELECT COUNT(*), COALESCE(SUM(CASE WHEN status='ACTIVE' THEN 1 ELSE 0 END),0) FROM messages",
+            ).use { rs ->
+                rs.next()
+                rs.getInt(1) to rs.getInt(2)
+            }
+        }
+    }
+
+    fun trustCounts(): Pair<Int, Int> = synchronized(lock) {
+        connection.createStatement().use { st ->
+            st.executeQuery(
+                """
+                SELECT
+                  COALESCE(SUM(CASE WHEN ingress_trust='VERIFIED' THEN 1 ELSE 0 END),0),
+                  COALESCE(SUM(CASE WHEN ingress_trust='UNVERIFIED' THEN 1 ELSE 0 END),0)
+                FROM messages
+                """.trimIndent(),
+            ).use { rs ->
+                rs.next()
+                rs.getInt(1) to rs.getInt(2)
+            }
+        }
+    }
+
+    fun messages(
+        type: String? = null,
+        status: String? = null,
+        query: String? = null,
+        trust: String? = null,
+        limit: Int = 500,
+    ): List<MessageSummary> = synchronized(lock) {
+        val rows = connection.prepareStatement(
+            """
+            SELECT m.message_id,m.message_type,m.record_type,m.priority,m.status,m.origin_id,m.created_at,m.received_at,m.hop_count,
+              EXISTS(SELECT 1 FROM receipts r WHERE r.message_id=m.message_id AND r.receipt_type='GATEWAY_RECEIVED'),
+              EXISTS(SELECT 1 FROM receipts r WHERE r.message_id=m.message_id AND r.receipt_type='GATEWAY_RECEIVED_UNVERIFIED'),
+              m.ingress_trust,m.source_bridge_id
+            FROM messages m
+            ORDER BY CASE priority WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'NORMAL' THEN 2 ELSE 1 END DESC, created_at DESC
+            """.trimIndent(),
+        ).use { ps ->
+            ps.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        add(
+                            MessageSummary(
+                                rs.getString(1),
+                                rs.getString(2),
+                                rs.getString(3),
+                                rs.getString(4),
+                                rs.getString(5),
+                                rs.getString(6),
+                                rs.getLong(7),
+                                rs.getLong(8),
+                                rs.getInt(9),
+                                rs.getInt(10) == 1,
+                                rs.getInt(11) == 1,
+                                rs.getString(12),
+                                rs.getString(13),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+        rows.asSequence()
+            .filter { type == null || it.messageType == type }
+            .filter { status == null || it.status == status }
+            .filter { trust == null || it.ingressTrust.equals(trust, ignoreCase = true) }
+            .filter {
+                query.isNullOrBlank() ||
+                    it.messageId.contains(query, true) ||
+                    it.origin.contains(query, true) ||
+                    (it.sourceBridgeId?.contains(query, true) == true)
+            }
+            .take(limit.coerceIn(1, 5_000))
+            .toList()
+    }
+
+    fun messageDetail(messageId: String): MessageDetail? = synchronized(lock) {
+        connection.prepareStatement(
+            """
+            SELECT m.message_id,m.message_type,m.record_type,m.priority,m.status,m.origin_id,m.created_at,m.expires_at,
+              m.lifetime_ms,m.accumulated_age_ms,m.hop_count,m.hop_limit,m.received_at,m.ingress_trust,m.source_bridge_id,
+              m.canonical_json,
+              EXISTS(SELECT 1 FROM receipts r WHERE r.message_id=m.message_id AND r.receipt_type='GATEWAY_RECEIVED'),
+              EXISTS(SELECT 1 FROM receipts r WHERE r.message_id=m.message_id AND r.receipt_type='GATEWAY_RECEIVED_UNVERIFIED')
+            FROM messages m WHERE m.message_id=?
+            """.trimIndent(),
+        ).use { ps ->
+            ps.setString(1, messageId)
+            ps.executeQuery().use { rs ->
+                if (!rs.next()) return null
+                val receipts = connection.prepareStatement(
+                    "SELECT receipt_id,message_id,receipt_type,actor_id,recorded_at FROM receipts WHERE message_id=? ORDER BY recorded_at",
+                ).use { rps ->
+                    rps.setString(1, messageId)
+                    rps.executeQuery().use { rrs ->
+                        buildList {
+                            while (rrs.next()) {
+                                add(
+                                    GatewayReceipt(
+                                        rrs.getString(1),
+                                        rrs.getString(2),
+                                        rrs.getString(3),
+                                        rrs.getString(4),
+                                        rrs.getLong(5),
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+                val canonical = rs.getString(16)
+                val payloadJson = runCatching {
+                    val element = json.parseToJsonElement(canonical)
+                    val payload = element.jsonObject["payload"]
+                    payload?.toString() ?: canonical
+                }.getOrDefault(canonical)
+                MessageDetail(
+                    messageId = rs.getString(1),
+                    messageType = rs.getString(2),
+                    recordType = rs.getString(3),
+                    priority = rs.getString(4),
+                    status = rs.getString(5),
+                    originDeviceId = rs.getString(6),
+                    createdAt = rs.getLong(7),
+                    expiresAt = rs.getLong(8),
+                    lifetimeMs = rs.getLong(9),
+                    accumulatedAgeMs = rs.getLong(10),
+                    hopCount = rs.getInt(11),
+                    hopLimit = rs.getInt(12),
+                    receivedAt = rs.getLong(13),
+                    ingressTrust = rs.getString(14),
+                    sourceBridgeId = rs.getString(15),
+                    gatewayReceived = rs.getInt(17) == 1,
+                    gatewayReceivedUnverified = rs.getInt(18) == 1,
+                    payloadJson = payloadJson.take(8_192),
+                    receipts = receipts,
+                )
+            }
+        }
+    }
+
+    fun typeCounts(): List<TypeCount> = synchronized(lock) {
+        connection.createStatement().use { st ->
+            st.executeQuery(
+                "SELECT message_type, COUNT(*) FROM messages GROUP BY message_type ORDER BY COUNT(*) DESC",
+            ).use { rs ->
+                buildList {
+                    while (rs.next()) add(TypeCount(rs.getString(1), rs.getInt(2)))
+                }
+            }
+        }
+    }
+
+    fun receiptCount(): Int = synchronized(lock) {
+        connection.createStatement().use { st ->
+            st.executeQuery("SELECT COUNT(*) FROM receipts").use { rs ->
+                rs.next()
+                rs.getInt(1)
+            }
+        }
+    }
+
+    fun dashboard(config: GatewayConfig, recentLimit: Int = 12): DashboardSnapshot {
+        val counts = counts()
+        val trust = trustCounts()
+        val bridges = summaries()
+        return DashboardSnapshot(
+            gatewayId = config.gatewayId,
+            totalMessages = counts.first,
+            activeMessages = counts.second,
+            verifiedMessages = trust.first,
+            unverifiedMessages = trust.second,
+            bridgeCount = bridges.size,
+            pairedBridgeCount = bridges.count { it.paired },
+            receiptCount = receiptCount(),
+            byType = typeCounts(),
+            recentMessages = messages(limit = recentLimit),
+            bridges = bridges,
+            anonymousIngressEnabled = config.anonymousIngressEnabled,
+            lanDiscoveryEnabled = config.lanDiscoveryEnabled,
+            lanDiscoveryPort = config.lanDiscoveryPort,
+            httpPort = config.port,
+            bindHost = config.host,
+            maxStoredMessages = config.maxStoredMessages,
+            generatedAt = System.currentTimeMillis(),
+        )
+    }
+
+    fun exportCsv(limit: Int = 5_000): String = synchronized(lock) {
+        val header = listOf(
+            "messageId", "messageType", "recordType", "priority", "status", "ingressTrust",
+            "origin", "sourceBridgeId", "createdAt", "receivedAt", "hopCount",
+            "gatewayReceived", "gatewayReceivedUnverified",
+        ).joinToString(",")
+        val rows = messages(limit = limit).joinToString("\n") { m ->
+            listOf(
+                m.messageId,
+                m.messageType,
+                m.recordType,
+                m.priority,
+                m.status,
+                m.ingressTrust,
+                m.origin,
+                m.sourceBridgeId.orEmpty(),
+                m.createdAt.toString(),
+                m.receivedAt.toString(),
+                m.hopCount.toString(),
+                m.gatewayReceived.toString(),
+                m.gatewayReceivedUnverified.toString(),
+            ).joinToString(",") { csvEscape(it) }
+        }
+        header + "\n" + rows + "\n"
+    }
+
+    private fun csvEscape(value: String): String {
+        val needs = value.any { it == ',' || it == '"' || it == '\n' || it == '\r' }
+        return if (!needs) value else "\"${value.replace("\"", "\"\"")}\""
+    }
+
+    override fun close() {
+        synchronized(lock) { connection.close() }
+    }
+
+    private fun hash(value: String): String =
+        Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(value.toByteArray()))
+
+    private fun constantTimeEquals(a: String?, b: String): Boolean =
+        a != null && MessageDigest.isEqual(a.toByteArray(), b.toByteArray())
 }
 
 val GatewayJson = Json { ignoreUnknownKeys = false; encodeDefaults = true; classDiscriminator = "payloadType" }

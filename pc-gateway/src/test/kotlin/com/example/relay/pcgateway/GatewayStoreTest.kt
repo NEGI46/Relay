@@ -85,4 +85,42 @@ class GatewayStoreTest {
             assertEquals("RESOLVED", db.messages().first { it.messageId == "m-1" }.status)
         }
     }
+
+    @Test fun `reject pair revokes token and prevents authentication`() {
+        store().use { db ->
+            val code = db.createPairingCode(1_000)
+            db.requestPair(code, "bridge-a", "Bridge A", 1_001)
+            val token = db.approvePair("bridge-a", code, 1_002)!!
+            assertEquals(true, db.authenticate("bridge-a", token))
+            assertEquals(true, db.rejectPair("bridge-a", code = null, now = 1_003))
+            assertEquals(false, db.authenticate("bridge-a", token))
+        }
+    }
+
+    @Test fun `receipts for bridge are scoped to that bridge submissions`() {
+        store().use { db ->
+            val codeA = db.createPairingCode(1_000)
+            db.requestPair(codeA, "bridge-a", "A", 1_001)
+            db.approvePair("bridge-a", codeA, 1_002)
+            val codeB = db.createPairingCode(1_010)
+            db.requestPair(codeB, "bridge-b", "B", 1_011)
+            db.approvePair("bridge-b", codeB, 1_012)
+            db.ingest("bridge-a", listOf(message("from-a")), 2_000)
+            db.ingest("bridge-b", listOf(message("from-b")), 2_100)
+            assertEquals(listOf("from-a"), db.receiptsForBridge("bridge-a").map { it.messageId })
+            assertEquals(listOf("from-b"), db.receiptsForBridge("bridge-b").map { it.messageId })
+            assertEquals(2, db.receipts().size)
+        }
+    }
+
+    @Test fun `unverified public messages show unverified receipt flag`() {
+        store().use { db ->
+            db.ingestUnregistered(listOf(message()), 2_000)
+            val row = db.messages().single()
+            assertEquals(true, row.gatewayReceivedUnverified)
+            assertEquals(false, row.gatewayReceived)
+            assertEquals("UNVERIFIED", row.ingressTrust)
+            assertNull(row.sourceBridgeId)
+        }
+    }
 }

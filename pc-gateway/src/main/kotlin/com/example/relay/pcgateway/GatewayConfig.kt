@@ -1,7 +1,7 @@
 package com.example.relay.pcgateway
 
-import java.util.UUID
 import java.io.File
+import java.util.UUID
 
 data class GatewayConfig(
     /** Bind on LAN by default; restrict exposure with the Windows Private-network firewall profile. */
@@ -12,7 +12,11 @@ data class GatewayConfig(
     val dbPath: String = System.getenv("RELAY_GATEWAY_DB")
         ?: File(System.getProperty("user.home"), ".relay/relay-gateway.db").path,
     val gatewayId: String = System.getenv("RELAY_GATEWAY_ID") ?: "pc-gateway-local",
-    val adminKey: String = System.getenv("RELAY_GATEWAY_ADMIN_KEY") ?: UUID.randomUUID().toString(),
+    /**
+     * Operator key for pairing and dashboard APIs.
+     * Resolution order: env RELAY_GATEWAY_ADMIN_KEY → ~/.relay/admin.key → generate+persist.
+     */
+    val adminKey: String = resolveAdminKey(),
     val maxPayloadBytes: Int = 64 * 1024,
     val maxMessagesPerRequest: Int = 128,
     val maxStoredMessages: Int = 50_000,
@@ -26,3 +30,30 @@ data class GatewayConfig(
     val lanDiscoveryPort: Int = (System.getenv("RELAY_GATEWAY_DISCOVERY_PORT") ?: "42888").toIntOrNull() ?: 42888,
     val lanDiscoveryIntervalMs: Long = 5_000,
 )
+
+fun defaultAdminKeyFile(): File =
+    File(System.getenv("RELAY_GATEWAY_ADMIN_KEY_FILE") ?: File(System.getProperty("user.home"), ".relay/admin.key").path)
+
+/**
+ * Returns where the admin key came from (for console diagnostics; never prints the key).
+ */
+fun resolveAdminKeySource(): String {
+    val env = System.getenv("RELAY_GATEWAY_ADMIN_KEY")
+    if (!env.isNullOrBlank()) return "env:RELAY_GATEWAY_ADMIN_KEY"
+    val file = defaultAdminKeyFile()
+    return if (file.isFile) "file:${file.absolutePath}" else "generated-file:${file.absolutePath}"
+}
+
+fun resolveAdminKey(): String {
+    val env = System.getenv("RELAY_GATEWAY_ADMIN_KEY")
+    if (!env.isNullOrBlank()) return env.trim()
+    val file = defaultAdminKeyFile()
+    if (file.isFile) {
+        val existing = file.readText(Charsets.UTF_8).trim()
+        if (existing.isNotEmpty()) return existing
+    }
+    val generated = UUID.randomUUID().toString()
+    file.parentFile?.mkdirs()
+    file.writeText(generated, Charsets.UTF_8)
+    return generated
+}
