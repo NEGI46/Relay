@@ -75,3 +75,27 @@ def decode_message(data: bytes, now: int | None = None) -> MeshMessage:
 
 def dedupe_key(message: MeshMessage) -> str:
     return hashlib.sha256(f"{message.request_id}:{message.payload_hash}".encode()).hexdigest()
+
+
+class DedupeCache:
+    """Small in-process TTL cache for a single adapter process.
+
+    The PC Gateway remains the durable authority. This cache only prevents a
+    radio retry from forwarding the same request while the sidecar is alive.
+    """
+
+    def __init__(self) -> None:
+        self._expires: dict[str, int] = {}
+
+    def seen(self, message: MeshMessage, now: int) -> bool:
+        key = dedupe_key(message)
+        self._purge(now)
+        if key in self._expires:
+            return True
+        self._expires[key] = min(message.created_at + message.ttl_seconds, now + message.ttl_seconds)
+        return False
+
+    def _purge(self, now: int) -> None:
+        for key, expiry in list(self._expires.items()):
+            if expiry <= now:
+                del self._expires[key]
