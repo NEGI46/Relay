@@ -17,6 +17,7 @@ import com.example.relay.domain.DeliveryPresentation
 import com.example.relay.domain.ReceiptType
 import com.example.relay.domain.deriveDeliveryPresentation
 import com.example.relay.domain.MessagePolicy
+import com.example.relay.rescue.ReportSignature
 import com.example.relay.domain.receiptEvictionCandidate
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
@@ -156,12 +157,14 @@ class RoomMessageRepository(
         messageId, messageType, createdAt, expiresAt, priority, originDeviceId,
         json.encodeToString<MessagePayload>(payload), hopCount, maxHopCount, status, receivedAt,
         recordType, lifetimeMs, accumulatedAgeMs, receivedElapsedRealtimeMs, persistedAtWallClockMs, elapsedRealtimeSessionId,
+        reportSignature?.let { json.encodeToString(ReportSignature.serializer(), it) },
     )
 
     private fun MessageEntity.toDomain() = RelayMessage(
         messageId, messageType, createdAt, expiresAt, priority, originDeviceId,
         json.decodeFromString<MessagePayload>(payloadJson), hopCount, maxHopCount, status, receivedAt,
         recordType, lifetimeMs, accumulatedAgeMs, receivedElapsedRealtimeMs, persistedAtWallClockMs, elapsedRealtimeSessionId,
+        reportSignatureJson?.let { json.decodeFromString(ReportSignature.serializer(), it) },
     )
 
     private fun MessageDelivery.toEntity() = MessageDeliveryEntity(messageId, peerDeviceId, acknowledgedAt, packetId)

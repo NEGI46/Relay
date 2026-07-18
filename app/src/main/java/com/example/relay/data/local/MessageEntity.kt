@@ -28,6 +28,7 @@ data class MessageEntity(
     val receivedElapsedRealtimeMs: Long,
     val persistedAtWallClockMs: Long,
     val elapsedRealtimeSessionId: String,
+    val reportSignatureJson: String?,
 )
 
 @Entity(tableName = "message_deliveries", primaryKeys = ["messageId", "peerDeviceId"])

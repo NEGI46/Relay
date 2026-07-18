@@ -2,7 +2,7 @@ package com.example.relay.data.local
 
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import kotlin.test.assertContentEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -13,6 +13,6 @@ class SqlCipherPassphraseStoreTest {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val first = SqlCipherPassphraseStore(context).loadOrCreate()
         val second = SqlCipherPassphraseStore(context).loadOrCreate()
-        assertContentEquals(first, second)
+        assertArrayEquals(first, second)
     }
 }
