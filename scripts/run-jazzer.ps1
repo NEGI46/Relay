@@ -11,6 +11,8 @@ if ($python) {
   $env:PYTHONPATH = (Join-Path (Get-Location) 'tools/ble-sim')
   & $python -m unittest discover tools/ble-sim -p 'test_*.py' 2>&1 | Tee-Object (Join-Path $OutputPath 'ble-sim.txt')
   if ($LASTEXITCODE -ne 0) { throw 'BLE decoder regression tests failed.' }
+  & $python -m unittest discover test-lab/fuzz -p '*_test.py' 2>&1 | Tee-Object (Join-Path $OutputPath 'decoder-regression.txt')
+  if ($LASTEXITCODE -ne 0) { throw 'Decoder regression corpus failed.' }
   & $python tools/ble-sim/run_tests.py 2>&1 | Tee-Object (Join-Path $OutputPath 'ble-sim-junit.txt')
   Copy-Item tools/ble-sim/test-results/ble-sim.xml (Join-Path $OutputPath 'ble-sim.xml') -Force
 } else {
