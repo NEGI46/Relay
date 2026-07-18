@@ -1,10 +1,13 @@
 package com.example.relay.rescue
 
+import com.example.relay.domain.RelayMessage
+
 class RescueCryptoException(val code: String, cause: Throwable? = null) : Exception(code, cause)
 
 expect object RescueCryptography {
     fun generateRecipientKeyPair(): RescueKeyPair
     fun generateShelterSigningKeyPair(): RescueKeyPair
+    fun generateReportSigningKeyPair(): RescueKeyPair
 
     fun importPublicKey(keyId: String, algorithm: RescueKeyAlgorithm, encodedBase64: String): RescuePublicKey
     fun importPrivateKey(keyId: String, algorithm: RescueKeyAlgorithm, encodedBase64: String): RescuePrivateKey
@@ -21,6 +24,8 @@ expect object RescueCryptography {
     /** Detached ECDSA P-256 signature for a canonical, purpose-specific trust document. */
     fun signTrustDocument(canonicalBytes: ByteArray, regionalSigningPrivateKey: RescuePrivateKey): TrustDocumentSignature
     fun verifyTrustDocument(canonicalBytes: ByteArray, signature: TrustDocumentSignature, regionalSigningPublicKey: RescuePublicKey): Boolean
+    fun signReport(message: RelayMessage, signingKeyPair: RescueKeyPair): RelayMessage
+    fun verifyReport(message: RelayMessage): Boolean
 }
 
 /** Courier-safe operation: it can only advance routing metadata and never receives private keys. */

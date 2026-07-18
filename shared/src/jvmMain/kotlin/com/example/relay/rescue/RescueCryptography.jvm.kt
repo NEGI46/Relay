@@ -25,6 +25,7 @@ import javax.crypto.spec.SecretKeySpec
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import com.example.relay.domain.RelayMessage
 
 actual object RescueCryptography {
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = false }
@@ -37,6 +38,8 @@ actual object RescueCryptography {
     actual fun generateShelterSigningKeyPair(): RescueKeyPair = generate("EC", RescueKeyAlgorithm.ECDSA_P256_SHA256) {
         initialize(ECGenParameterSpec("secp256r1"), random)
     }
+
+    actual fun generateReportSigningKeyPair(): RescueKeyPair = generateShelterSigningKeyPair()
 
     actual fun importPublicKey(keyId: String, algorithm: RescueKeyAlgorithm, encodedBase64: String): RescuePublicKey = guarded("invalid_public_key") {
         requireValidKeyId(keyId)
@@ -190,6 +193,26 @@ actual object RescueCryptography {
             false
         }
     }
+
+    actual fun signReport(message: RelayMessage, signingKeyPair: RescueKeyPair): RelayMessage = guarded("report_signing_failed") {
+        require(message.recordType == com.example.relay.domain.RelayRecordType.REPORT)
+        val signature = Signature.getInstance("SHA256withECDSA").apply {
+            initSign(parsePrivate(signingKeyPair.privateKey), random)
+            update(reportBytes(message))
+        }.sign()
+        message.copy(reportSignature = ReportSignature(signingKeyPair.publicKey.keyId, publicKey = signingKeyPair.publicKey, signatureBase64 = encode(signature)))
+    }
+
+    actual fun verifyReport(message: RelayMessage): Boolean = try {
+        val signed = message.reportSignature ?: return false
+        if (message.recordType != com.example.relay.domain.RelayRecordType.REPORT || signed.validate() != RescueValidationResult.Valid) return false
+        Signature.getInstance("SHA256withECDSA").apply {
+            initVerify(parsePublic(signed.publicKey))
+            update(reportBytes(message))
+        }.verify(decode(signed.signatureBase64))
+    } catch (_: Exception) { false }
+
+    private fun reportBytes(message: RelayMessage): ByteArray = json.encodeToString(RelayMessage.serializer(), message.copy(reportSignature = null)).encodeToByteArray()
 
     private fun generate(jcaAlgorithm: String, algorithm: RescueKeyAlgorithm, initialize: KeyPairGenerator.() -> Unit): RescueKeyPair = guarded("key_generation_failed") {
         val pair = KeyPairGenerator.getInstance(jcaAlgorithm).apply(initialize).generateKeyPair()

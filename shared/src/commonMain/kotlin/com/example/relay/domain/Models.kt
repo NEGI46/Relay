@@ -2,6 +2,7 @@ package com.example.relay.domain
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import com.example.relay.rescue.ReportSignature
 
 @Serializable
 enum class MessageType { SAFETY, SUPPLY }
@@ -79,6 +80,7 @@ data class RelayMessage(
     val receivedElapsedRealtimeMs: Long = 0,
     val persistedAtWallClockMs: Long = receivedAt,
     val elapsedRealtimeSessionId: String = "",
+    val reportSignature: ReportSignature? = null,
 )
 
 @Serializable

@@ -104,6 +104,15 @@ data class TrustDocumentSignature(
     val signatureBase64: String,
 )
 
+/** Detached signature carried by an ordinary REPORT for tamper detection. */
+@Serializable
+data class ReportSignature(
+    val signerKeyId: String,
+    val signatureAlgorithm: String = RescueAlgorithms.ECDSA_P256_SHA256,
+    val publicKey: RescuePublicKey,
+    val signatureBase64: String,
+)
+
 object RescueAlgorithms {
     const val AES_256_GCM = "AES-256-GCM"
     const val RSA_OAEP_SHA256 = "RSA-OAEP-256"
@@ -198,6 +207,14 @@ fun SignedShelterReceipt.validate(): RescueValidationResult = validationResult {
 fun TrustDocumentSignature.validate(): RescueValidationResult = validationResult {
     requireIdentifier(signerKeyId, "invalid_signer_key_id")
     require(signatureAlgorithm == RescueAlgorithms.ECDSA_P256_SHA256, "unsupported_signature")
+    require(signatureBase64.length in 64..256, "invalid_signature")
+}
+
+fun ReportSignature.validate(): RescueValidationResult = validationResult {
+    requireIdentifier(signerKeyId, "invalid_signer_key_id")
+    require(signatureAlgorithm == RescueAlgorithms.ECDSA_P256_SHA256, "unsupported_signature")
+    require(publicKey.keyId == signerKeyId, "signer_key_mismatch")
+    require(publicKey.algorithm == RescueKeyAlgorithm.ECDSA_P256_SHA256, "unsupported_key")
     require(signatureBase64.length in 64..256, "invalid_signature")
 }
 
