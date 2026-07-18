@@ -26,6 +26,15 @@ jobs:
           cache: gradle
       - name: Build debug APK and JVM artifacts
         run: ./gradlew :app:assembleDebug :pc-gateway:build --no-daemon
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relay-build-artifacts
+          path: |
+            app/build/outputs/apk/**/*.apk
+            pc-gateway/build/libs/**
+          if-no-files-found: warn
 
   unit:
     name: Shared unit tests
@@ -90,6 +99,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: relay-build-artifacts
+          path: distribution
       - shell: pwsh
         run: ./scripts/run-mobsf.ps1 -ArtifactPath distribution -OutputPath artifacts/mobsf.json -Mode $env:SECURITY_MODE
       - uses: actions/upload-artifact@v4
@@ -106,7 +119,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - shell: pwsh
-        run: ./scripts/run-syft.ps1 -SourcePath . -OutputPath artifacts/syft-sbom.json
+        run: ./scripts/run-syft.ps1 -SourcePath . -OutputPath artifacts/syft-sbom.json -SpdxOutputPath artifacts/syft-sbom.spdx.json
       - shell: pwsh
         run: ./scripts/run-osv.ps1 -SourcePath . -OutputPath artifacts/osv.json -Mode $env:SECURITY_MODE
       - shell: pwsh
@@ -125,7 +138,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - shell: pwsh
-        run: ./scripts/run-syft.ps1 -SourcePath . -OutputPath artifacts/syft-sbom.json
+        run: ./scripts/run-syft.ps1 -SourcePath . -OutputPath artifacts/syft-sbom.json -SpdxOutputPath artifacts/syft-sbom.spdx.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -140,8 +153,31 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: relay-build-artifacts
+          path: distribution
       - shell: pwsh
         run: ./scripts/verify-distribution-signatures.ps1 -PackageRoot distribution -Mode $env:SECURITY_MODE
+
+  gateway-recovery:
+    name: Gateway recovery and transport fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover tests/gateway-recovery -p '*_smoke.py' -v
+      - run: python -m unittest discover gateway-bp7-export -p 'test_*.py' -v
+      - run: python -m unittest discover gateway-meshtastic-adapter/tests -p 'test_*.py' -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relay-gateway-recovery
+          path: tests/gateway-recovery/
+          if-no-files-found: warn
 
   quality-gates:
     name: Quality and security gates
