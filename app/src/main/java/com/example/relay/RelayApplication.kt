@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.relay.data.local.RelayDatabase
 import com.example.relay.data.repository.RoomMessageRepository
 import com.example.relay.data.repository.RoomRescueEnvelopeRepository
+import com.example.relay.data.local.SqlCipherPassphraseStore
 import com.example.relay.domain.DeviceRoleStore
 import com.example.relay.domain.StringDeviceRoleStore
 import com.example.relay.domain.MessagePolicy
