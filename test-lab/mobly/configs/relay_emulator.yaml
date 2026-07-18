@@ -1,0 +1,19 @@
+{
+  "test_bed": "relay_emulators",
+  "use_real_devices": true,
+  "debug_package": "com.example.relay",
+  "debug_service": "com.example.relay.test.RelayTestSnippetService",
+  "devices": [
+    {"serial": "emulator-5554", "role": "origin"},
+    {"serial": "emulator-5556", "role": "relay"},
+    {"serial": "emulator-5558", "role": "destination"}
+  ],
+  "prerequisites": {
+    "api_level": 31,
+    "debug_apk_installed": true,
+    "bluetooth_enabled": true,
+    "location_enabled": true,
+    "nearby_permissions_granted": true,
+    "snippet_bridge": "relay_test"
+  }
+}

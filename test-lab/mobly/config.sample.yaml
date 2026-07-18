@@ -1,0 +1,12 @@
+testbed_name: relay-emulator-triple
+devices:
+  - id: android-a
+    type: LocalAndroidVirtualDevice
+  - id: android-b
+    type: LocalAndroidVirtualDevice
+  - id: android-c
+    type: LocalAndroidVirtualDevice
+tests:
+  - relay_multihop_test.RelayMultihopTest
+  - gateway_sync_test.GatewaySyncTest
+  - ble_submit_prestage_test.BleSubmitPrestageTest
