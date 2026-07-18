@@ -105,7 +105,7 @@ Peer ACKはGatewayまたは最終宛先への到達として表示されない�
 
 ### Major
 
-1. MessageSigner/VerifierはNoOpかつ未使用。origin、Gateway Receipt、寿命フィールドを悪意あるPeerが偽装できる。
+1. 通常のRelayMessage配送とGateway Receiptの署名・認可は未完了で、悪意あるPeerによるorigin/寿命偽装リスクが残る。一方、REPORTは`shared`のcanonical ECDSA P-256署名・検証、期限判定、Room永続化まで実装済みである。
 2. ACK前の切断またはプロセス終了時、packet相関と送信済み状態はvolatileで復元されない。
 3. `SendResult.Failed`でもデバッグイベントが完了として出る経路がある。
 4. Reject理由はメモリ内イベントのみ。永続・端末ログに残らない。
