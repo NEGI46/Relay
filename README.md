@@ -9,7 +9,7 @@
 [![Android](https://img.shields.io/badge/Android-6.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#クイックスタート)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.x-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](#technology--技術構成)
 [![Local first](https://img.shields.io/badge/design-local--first-2563EB?style=flat-square)](#how-it-works--仕組み)
-[![No AI](https://img.shields.io/badge/AI-not%20required-64748B?style=flat-square)](#privacy-and-trust--プライバシーと信頼)
+[![No AI](https://img.shields.io/badge/AI-not%20required-64748B?style=flat-square)](#プライバシーと信頼)
 
 [日本語](#日本語) · [English](#english) · [Architecture](docs/architecture.md) · [Operation model](docs/OPERATION_MODEL.md) · [PC Gateway setup](docs/PC_GATEWAY_SETUP.md)
 
