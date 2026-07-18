@@ -1,0 +1,9 @@
+appId: com.example.relay
+name: Create rescue request
+---
+- launchApp
+- tapOn:
+    text: "救助要請"
+- assertNotVisible:
+    text: "119へ通報済み"
+- takeScreenshot: rescue-request

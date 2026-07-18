@@ -1,0 +1,9 @@
+appId: com.example.relay
+name: Regional feed
+---
+- launchApp
+- tapOn:
+    text: "地域フィード"
+- assertNotVisible:
+    text: "119へ通報済み"
+- takeScreenshot: regional-feed

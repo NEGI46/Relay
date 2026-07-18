@@ -1,0 +1,10 @@
+appId: com.example.relay
+name: Relay first launch
+onFlowStart:
+  - launchApp:
+      clearState: true
+      stopApp: true
+---
+- assertNotVisible:
+    text: "119へ通報済み"
+- takeScreenshot: first-launch

@@ -21,7 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.builtins.StringSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -100,7 +100,7 @@ class RelayTestSnippetService : Service() {
             putString("messagesJson", json.encodeToString(messages))
             putString("deliveriesJson", json.encodeToString(app.messageRepository.deliveries()))
             putString("receiptsJson", json.encodeToString(app.messageRepository.allReceipts()))
-            putString("pendingGatewayIdsJson", json.encodeToString(ListSerializer(StringSerializer()), pending.toList()))
+            putString("pendingGatewayIdsJson", json.encodeToString(ListSerializer(String.serializer()), pending.toList()))
         }
     }
 
@@ -172,7 +172,7 @@ class RelayTestSnippetService : Service() {
     companion object {
         const val ACTION = "com.example.relay.debug.RELAY_TEST_SNIPPET"
         const val DESCRIPTOR = "com.example.relay.test.RelayTestSnippet"
-        const val TRANSACTION_CALL = Binder.FIRST_CALL_TRANSACTION
+        const val TRANSACTION_CALL = IBinder.FIRST_CALL_TRANSACTION
         const val PROTOCOL_VERSION = 1
         const val DEFAULT_TTL_MILLIS = 24L * 60 * 60 * 1_000
         val SUPPORTED_METHODS = listOf(

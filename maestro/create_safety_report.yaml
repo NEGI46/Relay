@@ -1,0 +1,9 @@
+appId: com.example.relay
+name: Create safety report
+---
+- launchApp
+- tapOn:
+    text: "安全"
+- assertNotVisible:
+    text: "119へ通報済み"
+- takeScreenshot: safety-report

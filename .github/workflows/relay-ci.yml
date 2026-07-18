@@ -53,6 +53,17 @@ jobs:
           cache: gradle
       - run: ./gradlew :composeApp:desktopTest --no-daemon
 
+  accessibility-contract:
+    name: Accessibility and UI safety contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./scripts/check-accessibility.ps1
+      - shell: pwsh
+        run: ./test-lab/run-host-checks.ps1
+
   fuzz-regression:
     name: Parser fuzz regression
     runs-on: ubuntu-latest
