@@ -31,3 +31,9 @@ artifacts/relay-before-device-test.patch
 artifacts/relay-untracked-list.txt
 artifacts/relay_status.pre-run.json
 artifacts/relay-pc-gateway-appimage.exe*
+**/__pycache__/
+**/*.pyc
+**/test-results/
+artifacts/*.apk
+artifacts/*.aab
+artifacts/*.ipa
