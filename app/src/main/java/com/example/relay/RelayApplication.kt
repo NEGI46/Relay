@@ -45,6 +45,7 @@ import com.example.relay.rescue.ble.ShelterDeliveryCoordinator
 import com.example.relay.rescue.nearby.RescueNearbyCoordinator
 import com.google.android.gms.nearby.connection.ConnectionsClient
 import java.util.UUID
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -61,7 +62,10 @@ class RelayApplication : Application() {
     }
 
     val database: RelayDatabase by lazy {
+        System.loadLibrary("sqlcipher")
+        val passphrase = SqlCipherPassphraseStore(this).loadOrCreate()
         Room.databaseBuilder(this, RelayDatabase::class.java, "relay.db")
+            .openHelperFactory(SupportOpenHelperFactory(passphrase))
             .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build()
     }

@@ -70,6 +70,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.google.play.services.nearby)
+    implementation(libs.sqlcipher.android)
+    implementation(libs.androidx.sqlite)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
