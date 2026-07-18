@@ -185,15 +185,16 @@ class RelayTestSnippetService : Service() {
 class RelayTestSnippetBinder(private val service: RelayTestSnippetService) : Binder() {
     fun call(method: String, arguments: Bundle = Bundle()): Bundle = service.dispatch(method, arguments)
 
-    override fun onTransact(code: Int, data: Parcel, reply: Parcel, flags: Int): Boolean {
+    override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
         if (code != RelayTestSnippetService.TRANSACTION_CALL) return super.onTransact(code, data, reply, flags)
+        val output = reply ?: return false
         data.enforceInterface(RelayTestSnippetService.DESCRIPTOR)
         val method = data.readString().orEmpty()
         @Suppress("DEPRECATION")
         val arguments = data.readBundle(javaClass.classLoader) ?: Bundle()
         val result = call(method, arguments)
-        reply.writeNoException()
-        reply.writeBundle(result)
+        output.writeNoException()
+        output.writeBundle(result)
         return true
     }
 }
