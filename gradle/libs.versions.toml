@@ -19,6 +19,8 @@ sqlite = "3.50.3.0"
 composeMultiplatform = "1.8.2"
 sqlcipher = "4.15.0"
 androidxSqlite = "2.6.2"
+maplibreCompose = "0.13.0"
+zxing = "3.5.4"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version = "1.17.0" }
@@ -60,6 +62,8 @@ ktor-server-test-host = { module = "io.ktor:ktor-server-test-host-jvm", version.
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
 sqlcipher-android = { module = "net.zetetic:sqlcipher-android", version.ref = "sqlcipher" }
 androidx-sqlite = { module = "androidx.sqlite:sqlite", version.ref = "androidxSqlite" }
+maplibre-compose = { module = "org.maplibre.compose:maplibre-compose", version.ref = "maplibreCompose" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -43,6 +43,7 @@ kotlin {
             implementation(project(":shared"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.maplibre.compose)
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
