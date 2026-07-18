@@ -29,7 +29,7 @@ def export_bundle(envelope: RelayEnvelope) -> bytes:
             "priority": envelope.priority,
         }}],
     }
-    return json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode()
+    return (json.dumps(bundle, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
 def import_fixture(data: bytes) -> RelayEnvelope:
