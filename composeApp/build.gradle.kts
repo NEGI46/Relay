@@ -49,6 +49,9 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation(libs.kotlinx.coroutines.android)
         }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)

@@ -1,6 +1,7 @@
 package com.example.relay.cmp
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,8 +45,10 @@ import com.example.relay.domain.randomUuid
 import com.example.relay.gateway.DiscoveredGateway
 import com.example.relay.gateway.GatewayPublicClient
 import kotlinx.coroutines.launch
+import org.maplibre.compose.map.MaplibreMap
+import org.maplibre.compose.style.BaseStyle
 
-private enum class Screen { HOME, SAFETY, SUPPLY, REGIONAL }
+private enum class Screen { HOME, SAFETY, SUPPLY, REGIONAL, OFFLINE_MAP }
 
 /**
  * Compose Multiplatform UI shared by iPhone (iosMain) and desktop/Android bridge targets.
@@ -57,6 +60,7 @@ fun RelaySharedApp(
     deviceId: String = remember { randomUuid() },
     gatewayHostOverride: String? = null,
     gatewayPortOverride: Int = 8080,
+    offlineMapPack: VerifiedOfflineMapPack? = null,
 ) {
     val clock = remember { defaultRelayClock() }
     val policy = remember { MessagePolicy(clock) }
@@ -158,6 +162,12 @@ fun RelaySharedApp(
                                 .semantics { contentDescription = "不足している物資を登録" },
                         ) { Text("不足している物資を登録") }
                     }
+                    item {
+                        OfflineMapCard(
+                            pack = offlineMapPack,
+                            onOpen = { if (offlineMapPack != null) screen = Screen.OFFLINE_MAP },
+                        )
+                    }
                     status?.let { err ->
                         item {
                             Card(Modifier.fillMaxWidth()) {
@@ -210,6 +220,53 @@ fun RelaySharedApp(
                 },
                 onBack = { screen = Screen.HOME },
             )
+            Screen.OFFLINE_MAP -> OfflineMapScreen(
+                pack = offlineMapPack,
+                onBack = { screen = Screen.HOME },
+            )
+        }
+    }
+}
+
+@Composable
+private fun OfflineMapCard(pack: VerifiedOfflineMapPack?, onOpen: () -> Unit) {
+    Card(Modifier.fillMaxWidth().semantics { contentDescription = "署名済みオフライン地図" }) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("オフライン地図", style = MaterialTheme.typography.titleLarge)
+            if (pack == null) {
+                Text("署名とハッシュを検証した地図パックがありません。地図は初期化されていません。")
+                Text("style.json と PMTiles を検証済みのローカルパックとして登録してください。")
+            } else {
+                Text("署名済み地図パックを利用できます。通信なしで表示します。")
+                Button(onClick = onOpen, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                    Text("地図を開く")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OfflineMapScreen(pack: VerifiedOfflineMapPack?, onBack: () -> Unit) {
+    Scaffold { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            OutlinedButton(onClick = onBack) { Text("戻る") }
+            Text("オフライン地図", style = MaterialTheme.typography.headlineMedium)
+            if (pack == null) {
+                Text("地図パックが未検証のため表示できません。")
+            } else {
+                Box(Modifier.fillMaxWidth().height(300.dp)) {
+                    MaplibreMap(
+                        modifier = Modifier.fillMaxSize(),
+                        baseStyle = BaseStyle.Uri(pack.styleUri),
+                    )
+                }
+                Text("style: ${pack.styleUri}")
+                Text("PMTiles: ${pack.pmtilesUri}")
+            }
         }
     }
 }
