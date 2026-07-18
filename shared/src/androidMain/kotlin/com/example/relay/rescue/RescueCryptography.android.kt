@@ -202,14 +202,16 @@ actual object RescueCryptography {
         message.copy(reportSignature = ReportSignature(signingKeyPair.publicKey.keyId, publicKey = signingKeyPair.publicKey, signatureBase64 = encode(signature)))
     }
 
-    actual fun verifyReport(message: RelayMessage): Boolean = try {
-        val signed = message.reportSignature ?: return false
-        if (message.recordType != com.example.relay.domain.RelayRecordType.REPORT || signed.validate() != RescueValidationResult.Valid) return false
-        Signature.getInstance("SHA256withECDSA").apply {
-            initVerify(parsePublic(signed.publicKey))
-            update(reportBytes(message))
-        }.verify(decode(signed.signatureBase64))
-    } catch (_: Exception) { false }
+    actual fun verifyReport(message: RelayMessage): Boolean {
+        return try {
+            val signed = message.reportSignature ?: return false
+            if (message.recordType != com.example.relay.domain.RelayRecordType.REPORT || signed.validate() != RescueValidationResult.Valid) return false
+            Signature.getInstance("SHA256withECDSA").apply {
+                initVerify(parsePublic(signed.publicKey))
+                update(reportBytes(message))
+            }.verify(decode(signed.signatureBase64))
+        } catch (_: Exception) { false }
+    }
 
     private fun reportBytes(message: RelayMessage): ByteArray = json.encodeToString(RelayMessage.serializer(), message.copy(reportSignature = null)).encodeToByteArray()
 

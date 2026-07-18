@@ -4,6 +4,8 @@ import com.example.relay.rescue.RescueCryptography
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+private const val CURRENT_SCHEMA_VERSION = 1
+
 /** A QR frame carries only an opaque, already encrypted Relay payload. */
 @Serializable
 data class QrTransferFrame(
@@ -115,5 +117,4 @@ object QrTransferCodec {
 
     private const val HEX = "0123456789abcdef"
 
-    private const val CURRENT_SCHEMA_VERSION = 1
 }

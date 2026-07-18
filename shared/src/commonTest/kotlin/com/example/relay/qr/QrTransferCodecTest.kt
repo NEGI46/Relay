@@ -6,7 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 class QrTransferCodecTest {
-    private val payload = "encrypted-envelope-json-only".encodeToByteArray()
+    private val payload = ByteArray(300) { ((it % 251) + 1).toByte() }
 
     @Test
     fun roundTripAcceptsShuffledFrames() {
