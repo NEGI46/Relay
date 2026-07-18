@@ -1,4 +1,5 @@
 from gateway_meshtastic_adapter.protocol import MessageRejected, MeshMessage, decode_message, dedupe_key, encode_message
+import unittest
 
 
 def message(**overrides):
@@ -7,20 +8,14 @@ def message(**overrides):
     return MeshMessage(**values)
 
 
-def test_round_trip_and_dedupe():
-    encoded = encode_message(message(), now=101)
-    assert decode_message(encoded, now=101) == message()
-    assert dedupe_key(message()) == dedupe_key(message())
+class ProtocolTest(unittest.TestCase):
+    def test_round_trip_and_dedupe(self):
+        encoded = encode_message(message(), now=101)
+        self.assertEqual(decode_message(encoded, now=101), message())
+        self.assertEqual(dedupe_key(message()), dedupe_key(message()))
 
-
-def test_expiry_and_size_rejected():
-    try:
-        encode_message(message(created_at=0), now=1000)
-        assert False
-    except MessageRejected:
-        pass
-    try:
-        encode_message(message(coarse_location="x" * 400), now=101)
-        assert False
-    except MessageRejected:
-        pass
+    def test_expiry_and_size_rejected(self):
+        with self.assertRaises(MessageRejected):
+            encode_message(message(created_at=0), now=1000)
+        with self.assertRaises(MessageRejected):
+            encode_message(message(coarse_location="x" * 400), now=101)

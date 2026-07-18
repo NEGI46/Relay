@@ -13,6 +13,119 @@ env:
   SECURITY_MODE: report-only
 
 jobs:
+  build:
+    name: Build Android and Gateway
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Build debug APK and JVM artifacts
+        run: ./gradlew :app:assembleDebug :pc-gateway:build --no-daemon
+
+  unit:
+    name: Shared unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - run: ./gradlew :shared:jvmTest --no-daemon
+
+  ui:
+    name: Compose UI smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - run: ./gradlew :composeApp:desktopTest --no-daemon
+
+  fuzz-regression:
+    name: Parser fuzz regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - shell: pwsh
+        run: ./scripts/run-jazzer.ps1 -Mode $env:SECURITY_MODE
+
+  apk-scan:
+    name: APK static scan
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./scripts/run-mobsf.ps1 -ArtifactPath distribution -OutputPath artifacts/mobsf.json -Mode $env:SECURITY_MODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relay-apk-scan
+          path: artifacts/
+          if-no-files-found: warn
+
+  deps-scan:
+    name: Dependency vulnerability scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./scripts/run-syft.ps1 -SourcePath . -OutputPath artifacts/syft-sbom.json
+      - shell: pwsh
+        run: ./scripts/run-osv.ps1 -SourcePath . -OutputPath artifacts/osv.json -Mode $env:SECURITY_MODE
+      - shell: pwsh
+        run: ./scripts/run-grype.ps1 -InputPath artifacts/syft-sbom.json -OutputPath artifacts/grype.json -Mode $env:SECURITY_MODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relay-dependency-scan
+          path: artifacts/
+          if-no-files-found: warn
+
+  sbom:
+    name: SBOM generation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./scripts/run-syft.ps1 -SourcePath . -OutputPath artifacts/syft-sbom.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relay-sbom
+          path: artifacts/
+          if-no-files-found: warn
+
+  sign-verify:
+    name: Distribution verification
+    runs-on: ubuntu-latest
+    needs: [build, sbom]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./scripts/verify-distribution-signatures.ps1 -PackageRoot distribution -Mode $env:SECURITY_MODE
+
   quality-gates:
     name: Quality and security gates
     runs-on: ubuntu-latest
