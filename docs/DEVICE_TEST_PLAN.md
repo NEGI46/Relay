@@ -28,7 +28,7 @@ Nearby Transport・権限・FGS・公開 PC 同期は **コード実装済み**�
 
 [runbooks/PHONE_TO_PC_PUBLIC_SYNC_E2E.md](runbooks/PHONE_TO_PC_PUBLIC_SYNC_E2E.md)
 
-### 5. （任意）verified ペアリング
+### 5. （任意）Bridge経路のペアリング（内容検証とは別）
 
 運用者経路のみ。一般 UX の合否条件に含めない。
 

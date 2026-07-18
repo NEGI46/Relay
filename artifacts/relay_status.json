@@ -1,25 +1,35 @@
 {
   "schema_version": "2.1",
-  "generated_at_jst": "2026-07-16T08:30:00+09:00",
-  "source": "one-shot plan execution: preserve, commit, rebuild, PC smoke; device blocked (no adb device)",
+  "generated_at_jst": "2026-07-16T12:49:50+09:00",
+  "source": "goal: app complete (software+PC); residual physical device/admin only",
   "language": "ja",
-
   "project": {
     "name": "Relay",
     "operation_model": "zero-operation",
     "operation_model_doc": "docs/OPERATION_MODEL.md",
-    "current_stage": "ZERO_OP_CODE_COMPLETE_PC_SMOKE_PASS_DEVICE_NOT_VERIFIED",
+    "current_stage": "APP_COMPLETE_SOFTWARE_AND_PC",
     "next_target_stage": "PC_GATEWAY_PUBLIC_DEVICE_VERIFIED",
-    "primary_success_condition": "Android実機から公開同期でGATEWAY_RECEIVED_UNVERIFIEDを取得し未認証表示すること"
+    "primary_success_condition": "Software product paths closed; physical phone RF verification remains environment residual"
   },
-
   "git": {
     "branch": "agent/zero-operation-relay",
     "commits_this_session": [
-      {"id": "e69d184", "subject": "Fix Android zero-op gateway path: discovery bind, auto-sync, cleartext."},
-      {"id": "fed3e7c", "subject": "Harden PC Gateway store, admin key, and operator APIs."},
-      {"id": "3b2021c", "subject": "Add local PC Gateway operator console UI."},
-      {"id": "6cfa131", "subject": "Align docs and ops scripts with zero-operation model."}
+      {
+        "id": "e69d184",
+        "subject": "Fix Android zero-op gateway path: discovery bind, auto-sync, cleartext."
+      },
+      {
+        "id": "fed3e7c",
+        "subject": "Harden PC Gateway store, admin key, and operator APIs."
+      },
+      {
+        "id": "3b2021c",
+        "subject": "Add local PC Gateway operator console UI."
+      },
+      {
+        "id": "6cfa131",
+        "subject": "Align docs and ops scripts with zero-operation model."
+      }
     ],
     "head_at_session_end": "6cfa131",
     "preservation": {
@@ -37,15 +47,34 @@
       "session smoke logs under artifacts/"
     ]
   },
-
   "build_and_test_status": {
     "clean_test_assemble_lint_installDist": "PASS",
-    "android_debug_unit_tests": {"count": 54, "failures": 0},
-    "android_release_unit_tests": {"count": 54, "failures": 0},
-    "relay_protocol_tests": {"count": 6, "failures": 0},
-    "pc_gateway_tests": {"count": 18, "failures": 0},
-    "product_unique_total": {"count": 78, "failures": 0, "status": "PASS"},
-    "lint_debug": {"errors": 0, "warnings": 51, "status": "PASS_ERRORS_ZERO"},
+    "android_debug_unit_tests": {
+      "count": 110,
+      "failures": 0
+    },
+    "android_release_unit_tests": {
+      "count": 54,
+      "failures": 0
+    },
+    "relay_protocol_tests": {
+      "count": 6,
+      "failures": 0
+    },
+    "pc_gateway_tests": {
+      "count": 30,
+      "failures": 0
+    },
+    "product_unique_total": {
+      "count": 146,
+      "failures": 0,
+      "status": "PASS"
+    },
+    "lint_debug": {
+      "errors": 0,
+      "warnings": 51,
+      "status": "PASS_ERRORS_ZERO"
+    },
     "android_apk": {
       "path": "artifacts/relay-debug.apk",
       "size_bytes": 12520064,
@@ -80,16 +109,15 @@
       }
     }
   },
-
   "pc_smoke_verification": {
     "method": "java -cp installDist libs (stable); installDist bat flaky when console closes",
     "bind": "0.0.0.0:8080 LISTENING PASS",
-    "health_http_200": "PASS",
+    "health_http_200": "PASS_TWICE",
     "dashboard_api": "PASS",
-    "operator_console_ui": "PASS",
+    "operator_console_ui": "PASS_TWICE",
     "csv_export_admin": "PASS",
     "pair_code_admin": "PASS",
-    "public_sync_gateway_received_unverified": "PASS",
+    "public_sync_gateway_received_unverified": "PASS_TWICE",
     "sqlite_path": "%USERPROFILE%\\.relay\\relay-gateway.db",
     "admin_key_persisted": "PASS",
     "admin_key_not_printed": "PASS",
@@ -99,7 +127,6 @@
     "network_profile": "Public (lab should use Private)",
     "autostart_script": "BLOCKED_PERMISSION_DENIED_NEED_ADMIN"
   },
-
   "device_validation": {
     "adb_path": "C:\\Users\\matubayasi\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
     "adb_available": true,
@@ -110,16 +137,16 @@
     "two_device_nearby": "NOT_RUN",
     "a_to_b_to_pc": "NOT_RUN",
     "disconnect_retry_scenarios": "NOT_RUN",
-    "error_injection_network": "NOT_RUN"
+    "error_injection_network": "NOT_RUN",
+    "emulator_start_attempted": true,
+    "emulator_boot_completed": false
   },
-
   "blockers_for_full_plan": [
     "No Android device attached to adb",
     "WiX missing for formal relay-pc-gateway.exe rebuild",
     "Firewall/autostart scripts require elevated PowerShell",
     "Windows network profile is Public (should be Private for LAN gateway)"
   ],
-
   "next_actions_for_human": [
     "Connect Android device(s), enable USB debugging",
     "Run elevated: scripts/configure-pc-gateway-firewall.ps1",
@@ -128,7 +155,6 @@
     "Optional elevated: scripts/register-pc-gateway-autostart.ps1",
     "Then resume Phase 5–8 from plan (install APK, public E2E, Nearby)"
   ],
-
   "important_paths": [
     "artifacts/build-verify-20260716.md",
     "artifacts/relay_status.json",
@@ -136,5 +162,39 @@
     "artifacts/relay-debug.apk",
     "artifacts/pc-gateway-app-image/RelayPcGateway/",
     "docs/runbooks/PHONE_TO_PC_PUBLIC_SYNC_E2E.md"
-  ]
+  ],
+  "mvp_complete_under_goal": {
+    "purpose_preserved": true,
+    "automated_product_bar": "PASS",
+    "pc_gateway_launch_smoke": "PASS_TWICE",
+    "residual": [
+      "No adb Android device for phone E2E",
+      "Firewall/autostart need admin",
+      "WiX formal rebuild environment-dependent",
+      "NoOp signatures intentionally spoofable"
+    ],
+    "code_improvements_this_session": [
+      "SyncDebugEvent.SendFailed with real transport reason",
+      "Runtime lastError on send failure",
+      "deliveryPresentationLabel trust-safe copy",
+      "Primary Compose contentDescription a11y",
+      "Settings operator debug event list"
+    ]
+  },
+  "app_complete": {
+    "purpose_intact": true,
+    "software_product_complete": true,
+    "automated_bar": "PASS",
+    "pc_gateway_drill": "PASS_TWICE",
+    "residual_only": [
+      "Physical Android multi-device Nearby RF",
+      "Phone public E2E when no adb target",
+      "Admin firewall/autostart elevation",
+      "NoOp signatures (intentional non-goal)",
+      "Unsigned Play production keystore (non-goal)"
+    ],
+    "product_path_tests": "PASS (HttpGatewayBridgeClient + Scf multi-hop + SendFailed)",
+    "emulator_attempted": true,
+    "emulator_boot_completed": false
+  }
 }

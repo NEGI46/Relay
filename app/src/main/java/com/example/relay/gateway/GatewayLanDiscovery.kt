@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 @Serializable
-private data class GatewayLanAnnouncement(
+private data class AndroidGatewayLanAnnouncement(
     val service: String = "relay-pc-gateway",
     val discoveryVersion: Int = 1,
     val protocolVersion: Int = 1,
@@ -56,7 +56,7 @@ class UdpGatewayDiscovery(
                         continue
                     }
                     val announcement = runCatching {
-                        json.decodeFromString<GatewayLanAnnouncement>(
+                        json.decodeFromString<AndroidGatewayLanAnnouncement>(
                             String(packet.data, 0, packet.length, Charsets.UTF_8),
                         )
                     }.getOrNull() ?: continue

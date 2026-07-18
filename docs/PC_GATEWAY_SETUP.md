@@ -3,7 +3,8 @@
 **正本の運用モデル:** [OPERATION_MODEL.md](OPERATION_MODEL.md)
 
 固定中継地点では、**個々のスマホ登録なし**で Android Bridge が PC へ REPORT を送れます（zero-operation / public ingress）。  
-ペアリング + Bearer token は **運用者向け verified 経路**（任意）です。
+ペアリング + Bearer token は **運用者向けの認証済みBridge経路**（任意）です。
+これは提出Bridgeの経路認証であり、REPORT本文や発信元の内容検証ではありません。
 
 ## 必要環境
 
@@ -11,7 +12,30 @@
 - または jpackage 済み EXE（`artifacts/relay-pc-gateway.exe`、ランタイム同梱）
 - Windows ではネットワークを **Private** にし、Firewall で必要ポートだけ許可
 
-## 起動（ソース / installDist）
+## 起動（推奨・ワンアクション）
+
+**日常の起動はこれだけです。** 管理者権限や Firewall 設定は不要です（localhost / 同一 PC での health・公開同期）。
+
+### Windows（ダブルクリック）
+
+1. エクスプローラーでリポジトリの **`Start-PC-Gateway.cmd`** をダブルクリックする
+   （または PowerShell で `.\Start-PC-Gateway.cmd` / `.\scripts\run-pc-gateway.ps1`）
+2. 初回のみ Gradle が `installDist` を構築します（**JDK 17** が必要）
+3. コンソールが開いたら管理画面 **http://127.0.0.1:8080/** が自動で開きます
+4. Health: **http://127.0.0.1:8080/api/health**
+5. 停止: 起動ウィンドウで **Ctrl+C**
+
+`artifacts/relay-pc-gateway.exe` は **インストール型（固定地点向け・WiX）** の別経路です。開発・日次起動の第一選択は `Start-PC-Gateway.cmd` です。
+
+### macOS / Linux
+
+```bash
+chmod +x scripts/run-pc-gateway.sh
+./scripts/run-pc-gateway.sh
+```
+
+
+## 起動（上級・手動 installDist）
 
 ```powershell
 .\gradlew.bat :pc-gateway:build
@@ -37,15 +61,31 @@ $env:RELAY_GATEWAY_ID = 'pc-gateway-local'
 
 ## 固定地点（推奨手順）
 
-1. EXE をビルドまたは配置する  
-   `.\scripts\build-pc-gateway-exe.ps1`  
-   正式成果物: `artifacts\relay-pc-gateway.exe`  
-   （実行中ロック時の候補: `artifacts\relay-pc-gateway-updated.exe`）
-2. Firewall（管理者 PowerShell）  
-   `.\scripts\configure-pc-gateway-firewall.ps1`
-3. 自動起動  
-   `.\scripts\register-pc-gateway-autostart.ps1 -Executable "C:\Path\To\RelayPcGateway.exe"`
-4. 電源投入で Gateway 起動 → 同一 LAN の Android が自動発見・公開同期
+1. `artifacts\relay-pc-gateway.exe` を実行してインストールする
+2. 接続先が信頼できる固定地点LANであり、Windowsのネットワークプロファイルが **Private** であることを確認する
+3. リポジトリルートの管理者PowerShellで、次の1コマンドを実行する
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-pc-gateway.ps1
+```
+
+このコマンドは、Private限定のTCP 8080 / UDP 42888 Firewall規則、自動起動タスク登録、タスク開始、`/api/health`確認までを順番に行います。同じコマンドを再実行しても同名設定を更新するだけです。タスクはGatewayを同期実行して終了を監視し、異常終了時は1分間隔で再起動します。ログオン前、UPS・バッテリー動作中も起動を継続する設定です。
+
+変更内容だけを非昇格で確認する場合:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-pc-gateway.ps1 -DryRun
+```
+
+Publicプロファイルが1つでも存在する場合、セットアップは **Firewallやタスクを変更する前に停止** します。スクリプトが自動でPrivateへ変更することはありません。固定地点の隔離LANであることを運用者が確認した後、Windows設定でPrivateへ変更して再実行してください。
+
+構文と安全条件だけを検査する場合:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\tests\pc-gateway-setup.tests.ps1
+```
+
+完了後は、電源投入でGatewayが自動起動し、同一LANのAndroidが自動発見・公開同期します。
 
 保存成功時の Receipt は **`GATEWAY_RECEIVED_UNVERIFIED`**（中継拠点保存・未認証）。公式 Gateway 到達や最終配信完了ではありません。
 
@@ -63,7 +103,7 @@ $env:RELAY_GATEWAY_ID = 'pc-gateway-local'
 | `RELAY_GATEWAY_LAN_DISCOVERY` | `true` | UDP ビーコン |
 | `RELAY_GATEWAY_DISCOVERY_PORT` | `42888` | ビーコン port |
 
-## 任意: 運用者向けペアリング（verified）
+## 任意: 運用者向けペアリング（Bridge経路認証）
 
 1. 管理画面または `GET /api/pair/code`（`X-Admin-Key`）でコード生成
 2. Bridge が `POST /api/pair/request`
@@ -73,10 +113,17 @@ $env:RELAY_GATEWAY_ID = 'pc-gateway-local'
 
 一般利用者の Android UI にはペアリング画面はありません。
 
+認証同期の保存成功時は `GATEWAY_RECEIVED` が返ります。意味は
+「認証済みBridge経路から受信し、PCのSQLite保存が完了した」です。
+REPORT内容の署名検証、公式情報、本人確認、最終宛先への配信完了を意味しません。
+管理画面では経路を `AUTHENTICATED_BRIDGE`、内容を `UNVERIFIED` と別々に表示します。
+
 ## セキュリティ注意
 
 - MVP の LAN HTTP は **TLS なし**。信頼できない Wi‑Fi に公開しない
 - Public ネットワークプロファイルでポートを開けない
+- `setup-pc-gateway.ps1` がPublic判定で停止した場合、ネットワークの安全性を確認せずに回避しない
+- 管理者キーの値はScheduled Task引数へ保存せず、ローカルの `%USERPROFILE%\.relay\admin.key` をSYSTEMタスクから参照する
 - 公開経路の情報は **未検証** として扱う
 - 詳細: [PC_GATEWAY_SECURITY.md](PC_GATEWAY_SECURITY.md)
 

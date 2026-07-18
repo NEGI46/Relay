@@ -1,0 +1,291 @@
+{
+  "schema_version": "3.0",
+  "document_type": "codex_handoff",
+  "generated_at_jst": "2026-07-16T09:15:00+09:00",
+  "language": "ja",
+  "audience": "Codex / next AI agent",
+  "source_sessions": [
+    "zero-operation model implementation (c832ff2)",
+    "P0 public-sync fixes + PC operator UI",
+    "preserve/commit/rebuild/device plan execution",
+    "WiX install + EXE rebuild + Program Files install"
+  ],
+
+  "project": {
+    "name": "Relay",
+    "workspace": "C:\\Users\\matubayasi\\Documents\\Relay",
+    "platform": "Android + Windows PC Gateway",
+    "android": { "language": "Kotlin", "ui": "Jetpack Compose" },
+    "pc_gateway": {
+      "stack": ["Kotlin/JVM", "Ktor", "Netty", "SQLite", "Local Web UI"],
+      "modules": ["app", "relay-protocol", "pc-gateway"]
+    },
+    "purpose": "災害時オフラインで近隣Androidが安否・物資不足REPORTをStore-Carry-Forward中継し、固定地点のPC Gatewayへ集約する",
+    "ai_at_runtime": false,
+    "operation_model": "zero-operation",
+    "operation_model_doc": "docs/OPERATION_MODEL.md",
+    "primary_success_condition": "AndroidがIP/token入力なしでPCを発見し、REPORTがSQLite保存され、GATEWAY_RECEIVED_UNVERIFIEDが返り、UIが「中継拠点へ保存済み（未認証）」と表示すること（公式GATEWAY_RECEIVEDと区別）",
+    "current_stage": "ZERO_OP_CODE_COMPLETE_PC_INSTALLED_DEVICE_NOT_VERIFIED",
+    "next_target_stage": "PC_GATEWAY_PUBLIC_DEVICE_VERIFIED"
+  },
+
+  "git": {
+    "branch": "agent/zero-operation-relay",
+    "head": "ccc85d25043cb4a9d92a5e4d97878469099481d1",
+    "head_short": "ccc85d2",
+    "base_zero_op_commit": "c832ff22137771c932135ff3f51ff9928557ad11",
+    "recent_commits": [
+      { "id": "ccc85d2", "msg": "Package PC Gateway Windows installer with local WiX Toolset." },
+      { "id": "724b100", "msg": "Record build verification and validation status after one-shot run." },
+      { "id": "6cfa131", "msg": "Align docs and ops scripts with zero-operation model." },
+      { "id": "3b2021c", "msg": "Add local PC Gateway operator console UI." },
+      { "id": "fed3e7c", "msg": "Harden PC Gateway store, admin key, and operator APIs." },
+      { "id": "e69d184", "msg": "Fix Android zero-op gateway path: discovery bind, auto-sync, cleartext." },
+      { "id": "c832ff2", "msg": "Implement zero-operation Relay gateway model" }
+    ],
+    "working_tree_note": "artifacts/relay-debug.apk, artifacts/relay-pc-gateway.exe (+sha256) がビルド成果物として未コミットの可能性あり。ソースはコミット済み。reset/stash/削除で作業を捨てない。",
+    "absolute_rules": [
+      "git reset --hard / checkout -- / stash / clean -fd で既存変更を捨てない",
+      "実機未実施を PASS と書かない",
+      "HTTP 2xx を公式Gateway到達と混同しない",
+      "ログに REPORT 本文・token・admin key を出さない"
+    ]
+  },
+
+  "what_was_built": {
+    "zero_operation_model": {
+      "nearby": "接続は自動accept（認証コードUIなし）。受信は未検証扱い",
+      "pc_discovery": "UDP 42888 ビーコン。Androidは42888にbindして受信",
+      "public_ingress": "POST /api/public/sync/messages（token不要）",
+      "receipt": "GATEWAY_RECEIVED_UNVERIFIED（中継拠点保存・未認証）",
+      "verified_path_optional": "ペアリング+Bearer → GATEWAY_RECEIVED"
+    },
+    "android_p0_fixes": [
+      "UdpGatewayDiscovery: DatagramSocket bind to 42888, timeout ~6s, multi-packet receive",
+      "GatewaySyncEngine: discovery時 or automaticSyncでループ起動、automaticSync既定true",
+      "cleartext: network_security_config + usesCleartextTraffic",
+      "prepareForGatewayUpload: hop枯渇でもTTL内ならGatewayへ",
+      "REPORTのみ公開upload、receipt保存後pending削除、retainOnly",
+      "HOMEに中継拠点ステータス表示"
+    ],
+    "pc_gateway_improvements": [
+      "admin key: env → %USERPROFILE%\\.relay\\admin.key → 生成永続（コンソールに値を出さない）",
+      "pair/reject・revoke実装",
+      "receiptsForBridge（Bridge単位スコープ）",
+      "source_bridge_id / ingress_trust",
+      "operator console SPA: resources/web/{index.html,app.css,app.js}",
+      "APIs: /api/dashboard, /api/messages, /api/messages/{id}, /api/messages/export.csv",
+      "firewall script, autostart script with env"
+    ]
+  },
+
+  "artifacts": {
+    "android_apk": {
+      "path": "artifacts/relay-debug.apk",
+      "size_bytes": 12520064,
+      "sha256": "EF855BE13CAFF589DA97174F711D3EDE653B4922117B58F378AE71FCB4722CAF",
+      "built_at_jst": "2026-07-16T08:22:34+09:00",
+      "includes_android_p0": true,
+      "signature": "Android Debug",
+      "install_cmd": "adb install -r artifacts/relay-debug.apk",
+      "note": "PC-only commits after APK build; APK still current for Android zero-op"
+    },
+    "pc_gateway_installer": {
+      "path": "artifacts/relay-pc-gateway.exe",
+      "type": "jpackage Windows installer (WiX)",
+      "size_bytes": 78145024,
+      "sha256": "91016CBF2856B2F5EA3B95F719643CC5CA347B0CF8946ECE46FC69A5C929DADC",
+      "built_at_jst": "2026-07-16T08:54:08+09:00",
+      "code_signature": "UNSIGNED",
+      "includes_latest_console_ui": true,
+      "rebuild_cmd": "powershell -ExecutionPolicy Bypass -File scripts/build-pc-gateway-exe.ps1",
+      "prerequisites": [
+        "JDK 17 with jpackage (C:\\Program Files\\Java\\jdk-17\\bin)",
+        "WiX 3.14 binaries in tools/wix314 (gitignored; from wix314-binaries.zip)"
+      ]
+    },
+    "pc_gateway_installed": {
+      "launcher": "C:\\Program Files\\RelayPcGateway\\RelayPcGateway.exe",
+      "installed_at_jst": "2026-07-16T08:53:16+09:00",
+      "product_code": "{86621B98-B26F-31D6-A1BE-27F7864A73A7}",
+      "version": "0.1.0",
+      "reinstall_note": "同一バージョン再インストールは MSI 1638 になる。先に msiexec /x {product} /qn してから /quiet インストール"
+    },
+    "status_docs": [
+      "artifacts/relay_status.json",
+      "artifacts/build-verify-20260716.md",
+      "docs/DEVICE_VALIDATION_REPORT.md",
+      "docs/runbooks/PHONE_TO_PC_PUBLIC_SYNC_E2E.md"
+    ]
+  },
+
+  "how_to_run_pc_gateway": {
+    "start": [
+      "Start Menu: RelayPcGateway",
+      "Or: C:\\Program Files\\RelayPcGateway\\RelayPcGateway.exe"
+    ],
+    "console_url": "http://127.0.0.1:8080/",
+    "health_url": "http://127.0.0.1:8080/api/health",
+    "default_bind": "0.0.0.0:8080",
+    "udp_discovery_port": 42888,
+    "db_path": "%USERPROFILE%\\.relay\\relay-gateway.db",
+    "admin_key": {
+      "not_printed_to_console": true,
+      "file": "%USERPROFILE%\\.relay\\admin.key",
+      "absolute_example": "C:\\Users\\matubayasi\\.relay\\admin.key",
+      "view_cmd": "Get-Content $env:USERPROFILE\\.relay\\admin.key",
+      "ui_usage": "管理画面上部「管理者キー」に貼り付け→保存（メッセージ詳細/CSV/ペアリング用）"
+    },
+    "public_sync_path": "/api/public/sync/messages",
+    "dashboard_api": "/api/dashboard"
+  },
+
+  "build_and_test_status": {
+    "last_full_verify_jst": "2026-07-16",
+    "android_debug_unit_tests": { "count": 54, "failures": 0 },
+    "android_release_unit_tests": { "count": 54, "failures": 0 },
+    "relay_protocol_tests": { "count": 6, "failures": 0 },
+    "pc_gateway_tests": { "count": 18, "failures": 0 },
+    "product_unique_total": { "count": 78, "failures": 0, "status": "PASS" },
+    "lint_debug": { "errors": 0, "warnings": 51, "status": "PASS_ERRORS_ZERO" },
+    "pc_smoke": {
+      "health": "PASS",
+      "operator_ui": "PASS",
+      "public_sync_unverified_receipt": "PASS",
+      "csv_export": "PASS",
+      "pair_code": "PASS",
+      "admin_key_persist": "PASS",
+      "fresh_install_and_launch": "PASS (2026-07-16 reinstall)"
+    }
+  },
+
+  "device_validation": {
+    "adb_path": "C:\\Users\\matubayasi\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+    "adb_available": true,
+    "connected_android_devices": 0,
+    "android_single_device": "NOT_RUN",
+    "android_to_pc_public_sync_e2e": "NOT_RUN",
+    "pc_gateway_public_device_verified": false,
+    "two_device_nearby": "NOT_RUN",
+    "a_to_b_to_pc_multihop": "NOT_RUN",
+    "disconnect_retry": "NOT_RUN",
+    "error_injection": "NOT_RUN"
+  },
+
+  "environment_notes": {
+    "windows_network_profile_last_seen": "Public (should be Private for emergency LAN)",
+    "firewall_script": {
+      "path": "scripts/configure-pc-gateway-firewall.ps1",
+      "status": "needs_elevated_powershell",
+      "rules": ["TCP 8080", "UDP 42888", "Profile Private only"]
+    },
+    "autostart_script": {
+      "path": "scripts/register-pc-gateway-autostart.ps1",
+      "status": "needs_elevated_powershell"
+    },
+    "wix_local": {
+      "path": "tools/wix314",
+      "gitignored": true,
+      "download": "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip"
+    }
+  },
+
+  "critical_code_paths": {
+    "android_discovery": "app/src/main/java/com/example/relay/gateway/GatewayLanDiscovery.kt",
+    "android_sync": "app/src/main/java/com/example/relay/gateway/GatewaySyncEngine.kt",
+    "android_cleartext": "app/src/main/res/xml/network_security_config.xml",
+    "android_ui": "app/src/main/java/com/example/relay/ui/RelayApp.kt",
+    "pc_server": "pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayServer.kt",
+    "pc_store": "pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayStore.kt",
+    "pc_beacon": "pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayLanBeacon.kt",
+    "pc_web_ui": "pc-gateway/src/main/resources/web/",
+    "protocol": "relay-protocol/src/main/kotlin/com/example/relay/gateway/GatewayProtocol.kt"
+  },
+
+  "delivery_semantics": {
+    "nearby_payload_complete": "転送完了のみ",
+    "PEER_RECEIVED": "相手アプリ保存",
+    "GATEWAY_RECEIVED_UNVERIFIED": "PC公開経路で保存（未認証）",
+    "GATEWAY_RECEIVED": "認証Bridge経路で保存（verified）",
+    "critical_rule": "HTTP 2xx / Peer ACK / Payload完了 ≠ 公式最終配信"
+  },
+
+  "next_priority_work": {
+    "p0_device": [
+      "adb devices で実機1台接続",
+      "adb install -r artifacts/relay-debug.apk",
+      "Android単体: 起動・権限・FGS・REPORT・force-stop復元",
+      "WindowsネットワークをPrivate + elevated firewall script",
+      "Phone↔PC public E2E (docs/runbooks/PHONE_TO_PC_PUBLIC_SYNC_E2E.md)",
+      "成功時 current_stage を PC_GATEWAY_PUBLIC_DEVICE_VERIFIED に更新"
+    ],
+    "p0_resilience": [
+      "PC停止中REPORT→復旧再送→重複1件",
+      "Android force-stop後pending復元",
+      "双方再起動後のデータ維持"
+    ],
+    "p1": [
+      "Android 2台 Nearby自動接続同期",
+      "A→B→PC multihopデモ"
+    ],
+    "later": [
+      "TLS",
+      "protocol v2 ECDSA wiring",
+      "code-sign EXE",
+      "pendingをRoom化"
+    ]
+  },
+
+  "public_e2e_pass_criteria": [
+    "AndroidにIP/token入力なしでPC発見",
+    "REPORTがPC SQLiteに保存",
+    "messageId一致・重複1件",
+    "ingress_trust=UNVERIFIED",
+    "receiptType=GATEWAY_RECEIVED_UNVERIFIED",
+    "UI「中継拠点へ保存済み（未認証）」",
+    "GATEWAY_RECEIVED（公式）と表示しない"
+  ],
+
+  "failure_triage_order": [
+    "同一LAN",
+    "Windows network profile Private",
+    "Firewall TCP 8080 + UDP 42888",
+    "PC bind 0.0.0.0:8080",
+    "PC beacon sends to UDP 42888 (PC does not listen on 42888)",
+    "Android discovery bind 42888 + timeout >= beacon interval",
+    "cleartext HTTP enabled on Android",
+    "admin key / token only for verified path",
+    "DB save then receipt"
+  ],
+
+  "do_not_do_yet": [
+    "PCへのNearby互換実装",
+    "未知Peerを公式情報扱い",
+    "コミュニティPKI本番",
+    "SMS / iOS / Bloom Filter / CAP",
+    "大規模アーキ変更",
+    "実機未実施をPASS報告"
+  ],
+
+  "instructions_for_codex": [
+    "最初に git status / branch / HEAD を確認し、このJSONと artifacts/relay_status.json を読む",
+    "既存変更・成果物を破壊しない",
+    "OPERATION_MODEL.md を運用の正本とする",
+    "実機作業が最優先。コード追加より E2E を先に",
+    "PC起動は Program Files の RelayPcGateway.exe、admin key は ~/.relay/admin.key を読む",
+    "EXE再ビルド時は tools/wix314 + jpackage PATH、同一versionは先にアンインストール",
+    "最終報告: 変更ファイル、テスト、APK/EXE SHA、各検証 PASS|FAIL|NOT_RUN、到達段階"
+  ],
+
+  "quick_commands": {
+    "start_gateway": "Start-Process 'C:\\Program Files\\RelayPcGateway\\RelayPcGateway.exe'",
+    "health": "curl.exe http://127.0.0.1:8080/api/health",
+    "admin_key": "Get-Content $env:USERPROFILE\\.relay\\admin.key",
+    "rebuild_exe": "powershell -ExecutionPolicy Bypass -File scripts\\build-pc-gateway-exe.ps1",
+    "rebuild_apk": ".\\gradlew.bat :app:assembleDebug; Copy-Item -Force app\\build\\outputs\\apk\\debug\\app-debug.apk artifacts\\relay-debug.apk",
+    "full_test": ".\\gradlew.bat test :app:lintDebug",
+    "adb_install": "& \"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\" install -r artifacts\\relay-debug.apk",
+    "firewall_elevated": "powershell -ExecutionPolicy Bypass -File scripts\\configure-pc-gateway-firewall.ps1",
+    "uninstall_gateway_msi": "msiexec /x {86621B98-B26F-31D6-A1BE-27F7864A73A7} /qn"
+  }
+}

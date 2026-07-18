@@ -15,6 +15,8 @@ import io.ktor.server.testing.testApplication
 import java.nio.file.Files
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -38,6 +40,19 @@ class AnonymousIngressTest {
         receivedAt = 1_000,
     )
 
+    private fun statusChange(id: String, targetMessageId: String) = message(id).copy(
+        recordType = "STATUS_CHANGE",
+        priority = "CRITICAL",
+        payload = buildJsonObject {
+            put("eventId", "event-$id")
+            put("targetMessageId", targetMessageId)
+            put("newStatus", "RETRACTED")
+            put("reason", "unverified source")
+            put("createdAt", 2_000)
+            put("createdBy", "anonymous-device")
+        },
+    )
+
     @Test fun `public ingress stores without token but returns only unverified receipt and admin remains protected`() = testApplication {
         val config = GatewayConfig(
             dbPath = Files.createTempFile("relay-anonymous", ".db").toString(),
@@ -53,9 +68,14 @@ class AnonymousIngressTest {
             }
             assertEquals(HttpStatusCode.OK, response.status)
             assertEquals("unverified", response.headers["X-Relay-Receipt-Trust"])
+            assertEquals("anonymous_lan", response.headers["X-Relay-Route-Authentication"])
+            assertEquals("unverified", response.headers["X-Relay-Content-Verification"])
+            assertEquals("gateway_saved", response.headers["X-Relay-Receipt-Semantics"])
             val body = GatewayJson.decodeFromString(SyncMessagesResponse.serializer(), response.bodyAsText())
             assertEquals(listOf("anonymous-1"), body.acceptedMessageIds)
             assertEquals(UNVERIFIED_GATEWAY_RECEIPT_TYPE, body.receipts.single().receiptType)
+            assertEquals("ANONYMOUS_LAN", store.messageDetail("anonymous-1")?.routeAuthentication)
+            assertEquals("UNVERIFIED", store.messageDetail("anonymous-1")?.contentVerification)
             assertEquals(HttpStatusCode.Unauthorized, client.get("/api/messages").status)
         } finally {
             store.close()
@@ -80,20 +100,68 @@ class AnonymousIngressTest {
         }
     }
 
-    @Test fun `public ingress rejects status change from unregistered source`() = testApplication {
+    @Test fun `public ingress stores same batch status change as unverified without applying it`() = testApplication {
         val config = GatewayConfig(dbPath = Files.createTempFile("relay-anonymous-status", ".db").toString())
         val store = GatewayStore(config)
         application { gatewayModule(config, store) }
-        val change = message("change-1").copy(recordType = "STATUS_CHANGE")
+        val report = message("report-1")
+        val change = statusChange("change-1", report.messageId)
         try {
             val response = client.post("/api/public/sync/messages") {
                 contentType(ContentType.Application.Json)
-                setBody(GatewayJson.encodeToString(SyncMessagesRequest(bridgeId = "unregistered", bridgeName = "phone", messages = listOf(change))))
+                setBody(
+                    GatewayJson.encodeToString(
+                        SyncMessagesRequest(
+                            bridgeId = "unregistered",
+                            bridgeName = "phone",
+                            messages = listOf(change, report),
+                        ),
+                    ),
+                )
             }
             assertEquals(HttpStatusCode.OK, response.status)
             val decoded = GatewayJson.decodeFromString(SyncMessagesResponse.serializer(), response.bodyAsText())
-            assertEquals("unregistered_status_change_not_allowed", decoded.rejected.single().reason)
-            assertTrue(store.messages().isEmpty())
+            assertEquals(setOf(report.messageId, change.messageId), decoded.acceptedMessageIds.toSet())
+            assertTrue(decoded.rejected.isEmpty())
+            assertEquals(setOf(report.messageId, change.messageId), decoded.receipts.map { it.messageId }.toSet())
+            assertEquals(setOf(UNVERIFIED_GATEWAY_RECEIPT_TYPE), decoded.receipts.map { it.receiptType }.toSet())
+            assertEquals("ACTIVE", store.messageDetail(report.messageId)?.status)
+            assertEquals("UNVERIFIED", store.messageDetail(change.messageId)?.ingressTrust)
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test fun `public sync response keeps store outcomes matched to message IDs after priority sorting`() = testApplication {
+        val config = GatewayConfig(
+            dbPath = Files.createTempFile("relay-anonymous-outcome-ids", ".db").toString(),
+            gatewayId = "gateway-test",
+        )
+        val store = GatewayStore(config)
+        application { gatewayModule(config, store) }
+        val duplicate = message("duplicate-high").copy(priority = "CRITICAL")
+        val storedCollision = message("collision-normal").copy(priority = "NORMAL")
+        store.ingestUnregistered(listOf(duplicate, storedCollision), now = 2_000)
+        val newMessage = message("new-low").copy(priority = "LOW")
+        val collidingMessage = storedCollision.copy(payload = JsonPrimitive("different"))
+        val request = SyncMessagesRequest(
+            bridgeId = "unregistered",
+            bridgeName = "phone",
+            messages = listOf(newMessage, duplicate, collidingMessage),
+        )
+        try {
+            val response = client.post("/api/public/sync/messages") {
+                contentType(ContentType.Application.Json)
+                setBody(GatewayJson.encodeToString(request))
+            }
+            assertEquals(HttpStatusCode.OK, response.status)
+            val decoded = GatewayJson.decodeFromString(SyncMessagesResponse.serializer(), response.bodyAsText())
+
+            assertEquals(listOf("new-low"), decoded.acceptedMessageIds)
+            assertEquals(listOf("duplicate-high"), decoded.duplicateMessageIds)
+            assertEquals(listOf("collision-normal"), decoded.rejected.map { it.messageId })
+            assertEquals("messageId collision", decoded.rejected.single().reason)
+            assertEquals(setOf("new-low", "duplicate-high"), decoded.receipts.map { it.messageId }.toSet())
         } finally {
             store.close()
         }

@@ -45,10 +45,34 @@ class RelayCommunicationRuntimeTest {
         assertEquals(1, session.stops)
         assertFalse(runtime.state.value.running)
     }
+
+    @Test
+    fun `SendFailed debug event sets lastError and is not treated as success`() = runTest {
+        val session = FakeSyncSession()
+        val runtime = RelayCommunicationRuntime(
+            FakeOfflineTransport("local", FakeNetwork()),
+            session,
+            backgroundScope,
+        )
+        runtime.start(RelayRuntimeSettings(OperatingMode.DRILL))
+
+        session.debugEvents.emit(
+            SyncDebugEvent.SendFailed(peerId = "peer-1", reason = "payload transfer timed out", itemId = "msg-1"),
+        )
+        // Allow collector to process
+        testScheduler.runCurrent()
+
+        val state = runtime.state.value
+        assertTrue(state.lastError!!.contains("送信失敗"))
+        assertTrue(state.lastError!!.contains("timed out") || state.lastError!!.contains("payload"))
+        assertTrue(state.debugEvents.any { it.contains("send failed") })
+        // Successful sync markers must not advance from a failure alone.
+        assertEquals(null, state.lastSyncAt)
+    }
 }
 
 private class FakeSyncSession : SyncSession {
-    override val debugEvents = MutableSharedFlow<SyncDebugEvent>()
+    override val debugEvents = MutableSharedFlow<SyncDebugEvent>(extraBufferCapacity = 16)
     var starts = 0
     var stops = 0
     override suspend fun start(settings: RelayRuntimeSettings): Boolean { starts++; return true }

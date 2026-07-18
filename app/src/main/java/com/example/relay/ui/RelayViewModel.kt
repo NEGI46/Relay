@@ -7,16 +7,20 @@ import com.example.relay.domain.MessagePriority
 import com.example.relay.domain.CreateSafetyMessageUseCase
 import com.example.relay.domain.CreateSupplyMessageUseCase
 import com.example.relay.domain.MessagePolicy
+import com.example.relay.domain.LegacyMessageCreationException
+import com.example.relay.domain.Clock
 import com.example.relay.domain.RelayMessage
 import com.example.relay.domain.SafetyState
 import com.example.relay.domain.SupplyKind
 import com.example.relay.domain.SystemClock
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import com.example.relay.domain.DeliveryPresentation
 import com.example.relay.domain.OperatingMode
 import com.example.relay.domain.DeviceRole
@@ -28,11 +32,15 @@ import com.example.relay.gateway.GatewaySettings
 import com.example.relay.gateway.GatewaySettingsStore
 import com.example.relay.gateway.GatewaySyncEngine
 import com.example.relay.gateway.GatewaySyncResult
+import com.example.relay.location.LocationProvider
+import com.example.relay.location.resolveReportLocation
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-enum class RelayScreen { HOME, SAFETY_FORM, SUPPLY_FORM, REGIONAL, SETTINGS, PEERS, DEBUG, GATEWAY }
+/** Primary user flow only. Operator/debug enums retained for navigation demotion (map to HOME). */
+enum class RelayScreen { HOME, RESCUE, SAFETY_FORM, SUPPLY_FORM, REGIONAL, SETTINGS }
 
 data class RelayUiState(
     val screen: RelayScreen = RelayScreen.HOME,
@@ -50,7 +58,35 @@ data class RelayUiState(
     val debugEvents: List<String> = emptyList(),
     /** Last PC Gateway sync outcome (from settings store; public or authenticated path). */
     val gatewayLastResult: String? = null,
+    /** Last internet priority-pull summary for home status (optional). */
+    val internetSyncLabel: String? = null,
 )
+
+internal sealed interface MessageCreationUiResult {
+    data object Success : MessageCreationUiResult
+    data class Failure(val reason: String) : MessageCreationUiResult
+}
+
+internal suspend fun executeMessageCreation(create: suspend () -> Unit): MessageCreationUiResult = try {
+    create()
+    MessageCreationUiResult.Success
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (failure: Exception) {
+    val reason = when (failure) {
+        is LegacyMessageCreationException.InvalidMessage -> "入力内容を確認してください"
+        is LegacyMessageCreationException.StorageRejected -> "保存容量がいっぱいです"
+        is LegacyMessageCreationException.DuplicateMessageId,
+        is LegacyMessageCreationException.MessageIdCollision -> "情報を保存できませんでした。もう一度お試しください"
+        else -> "情報を保存できませんでした"
+    }
+    MessageCreationUiResult.Failure(reason)
+}
+
+internal fun RelayUiState.withMessageCreationResult(result: MessageCreationUiResult): RelayUiState = when (result) {
+    MessageCreationUiResult.Success -> copy(screen = RelayScreen.HOME, lastError = null)
+    is MessageCreationUiResult.Failure -> copy(lastError = result.reason.take(160))
+}
 
 class RelayViewModel(
     private val repository: RoomMessageRepository,
@@ -60,23 +96,34 @@ class RelayViewModel(
     private val gatewaySettingsStore: GatewaySettingsStore,
     private val gatewayCredentialStore: GatewayCredentialStore,
     private val gatewaySyncEngine: GatewaySyncEngine,
+    private val clock: Clock = SystemClock,
+    private val regionalMessageTicks: Flow<Unit> = regionalMessageExpiryTicker(),
+    private val locationProvider: LocationProvider? = null,
 ) : ViewModel() {
-    private val policy = MessagePolicy(SystemClock)
-    private val createSafetyMessage = CreateSafetyMessageUseCase(repository, policy, SystemClock, deviceId)
-    private val createSupplyMessage = CreateSupplyMessageUseCase(repository, policy, SystemClock, deviceId)
+    private val policy = MessagePolicy(clock)
+    private val createSafetyMessage = CreateSafetyMessageUseCase(repository, policy, clock, deviceId)
+    private val createSupplyMessage = CreateSupplyMessageUseCase(repository, policy, clock, deviceId)
     private val _uiState = MutableStateFlow(RelayUiState(role = deviceRoleStore.load()))
     private val _gatewaySettings = MutableStateFlow(gatewaySettingsStore.load())
     val gatewaySettings: StateFlow<GatewaySettings> = _gatewaySettings.asStateFlow()
     private val _gatewayResult = MutableStateFlow<GatewaySyncResult?>(null)
     val gatewayResult: StateFlow<GatewaySyncResult?> = _gatewayResult.asStateFlow()
     val uiState: StateFlow<RelayUiState> = _uiState.asStateFlow()
-    val messages: StateFlow<List<RelayMessage>> = repository.observeAll()
+    val regionalItems: StateFlow<List<RegionalMessageItem>> = regionalMessageItemsFlow(
+        repository.observeAll(),
+        regionalMessageTicks,
+        policy,
+    )
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val messages: StateFlow<List<RelayMessage>> = regionalItems
+        .map { items -> items.map(RegionalMessageItem::report) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val deliveryStates: StateFlow<Map<String, DeliveryPresentation>> = combine(
-        messages,
+        regionalItems,
         repository.observeReceipts(),
-    ) { currentMessages, receipts ->
-        currentMessages.associate { message ->
+    ) { currentItems, receipts ->
+        currentItems.associate { item ->
+            val message = item.report
             message.messageId to repository.deliveryPresentation(receipts.filter { it.messageId == message.messageId })
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
@@ -117,19 +164,20 @@ class RelayViewModel(
         }
     }
 
-    fun navigate(screen: RelayScreen) { _uiState.value = _uiState.value.copy(screen = screen) }
-
-    fun setMode(mode: OperatingMode) { _uiState.value = _uiState.value.copy(mode = mode) }
-    fun setRole(role: DeviceRole) {
-        deviceRoleStore.save(role)
-        _uiState.value = _uiState.value.copy(role = role)
+    fun navigate(screen: RelayScreen) {
+        val allowed = when (screen) {
+            RelayScreen.HOME,
+            RelayScreen.RESCUE,
+            RelayScreen.SAFETY_FORM,
+            RelayScreen.SUPPLY_FORM,
+            RelayScreen.REGIONAL,
+            RelayScreen.SETTINGS,
+            -> screen
+        }
+        _uiState.value = _uiState.value.copy(screen = allowed)
     }
 
     fun reportError(reason: String) { _uiState.value = _uiState.value.copy(lastError = reason.take(160)) }
-    fun connect(peerId: String) = viewModelScope.launch { communicationRuntime.connect(peerId) }
-    fun accept(peerId: String) = viewModelScope.launch { communicationRuntime.accept(peerId) }
-    fun reject(peerId: String) = viewModelScope.launch { communicationRuntime.reject(peerId) }
-    fun disconnect(peerId: String) = viewModelScope.launch { communicationRuntime.disconnect(peerId) }
 
     fun createSafety(
         state: SafetyState,
@@ -137,8 +185,10 @@ class RelayViewModel(
         location: String,
         note: String,
     ) = viewModelScope.launch {
-        createSafetyMessage(state, companions, location, note, MessagePriority.HIGH)
-        navigate(RelayScreen.HOME)
+        createMessageAndReturnHome {
+            val resolved = resolveReportLocation(location, locationProvider)
+            createSafetyMessage(state, companions, resolved, note, MessagePriority.HIGH)
+        }
     }
 
     fun createSupply(
@@ -148,24 +198,13 @@ class RelayViewModel(
         note: String,
         otherLabel: String?,
     ) = viewModelScope.launch {
-        createSupplyMessage(kind, count, location, note, otherLabel, MessagePriority.CRITICAL)
-        navigate(RelayScreen.HOME)
+        createMessageAndReturnHome {
+            val resolved = resolveReportLocation(location, locationProvider)
+            createSupplyMessage(kind, count, resolved, note, otherLabel, MessagePriority.CRITICAL)
+        }
     }
 
-    fun clearAll() = viewModelScope.launch { repository.clearAll() }
-
-    fun saveGateway(settings: GatewaySettings, token: String?) {
-        gatewaySettingsStore.save(settings)
-        if (!token.isNullOrBlank()) gatewayCredentialStore.save(token)
-        _gatewaySettings.value = settings
+    private suspend fun createMessageAndReturnHome(create: suspend () -> Unit) {
+        _uiState.value = _uiState.value.withMessageCreationResult(executeMessageCreation(create))
     }
-    fun clearGateway() { gatewayCredentialStore.clear(); gatewaySettingsStore.save(GatewaySettings()); _gatewaySettings.value = GatewaySettings() }
-    fun pairGateway(code: String) = viewModelScope.launch {
-        val settings = _gatewaySettings.value
-        val ok = gatewaySyncEngine.requestPair(code)
-        reportError(if (ok) "PC Gatewayへのペアリング要求を送信しました。PC側で承認してください" else "ペアリング要求に失敗しました")
-    }
-    fun syncGateway() = viewModelScope.launch { _gatewayResult.value = gatewaySyncEngine.syncOnce() }
-
-
 }

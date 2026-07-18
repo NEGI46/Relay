@@ -12,12 +12,6 @@ data class GatewaySettings(
     val lastSyncResult: String? = null,
 )
 
-data class DiscoveredGateway(
-    val host: String,
-    val port: Int,
-    val gatewayId: String,
-)
-
 sealed interface GatewaySyncResult {
     data class Completed(val sent: Int, val receipts: Int) : GatewaySyncResult
     data class Deferred(val reason: String) : GatewaySyncResult

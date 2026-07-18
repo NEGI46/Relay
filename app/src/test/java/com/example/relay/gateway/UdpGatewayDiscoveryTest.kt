@@ -3,7 +3,6 @@ package com.example.relay.gateway
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
-import java.net.ServerSocket
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -50,7 +49,6 @@ class UdpGatewayDiscoveryTest {
     }
 
     private fun freeUdpPort(): Int {
-        // Borrow an ephemeral TCP port number that is very likely free for UDP in tests.
-        return ServerSocket(0).use { it.localPort }
+        return DatagramSocket(0).use { it.localPort }
     }
 }

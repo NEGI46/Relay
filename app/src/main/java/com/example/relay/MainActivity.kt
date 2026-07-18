@@ -8,6 +8,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.relay.ui.RelayApp
 import com.example.relay.ui.RelayViewModel
+import com.example.relay.ui.rescue.RescueViewModel
+import com.example.relay.service.RescueDeliveryService
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -17,9 +19,28 @@ class MainActivity : ComponentActivity() {
             val relayViewModel: RelayViewModel = viewModel(factory = object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    RelayViewModel(app.messageRepository, app.deviceId, app.deviceRoleStore, app.communicationRuntime, app.gatewaySettingsStore, app.gatewayCredentialStore, app.gatewaySyncEngine) as T
+                    RelayViewModel(
+                        app.messageRepository,
+                        app.deviceId,
+                        app.deviceRoleStore,
+                        app.communicationRuntime,
+                        app.gatewaySettingsStore,
+                        app.gatewayCredentialStore,
+                        app.gatewaySyncEngine,
+                        locationProvider = app.locationProvider,
+                    ) as T
             })
-            RelayApp(relayViewModel, app.deviceId)
+            val rescueViewModel: RescueViewModel = viewModel(factory = object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                    RescueViewModel(
+                        repository = app.rescueRepository,
+                        shelterKeyProvider = app.rescueShelterKeyStore,
+                        onRescueAutomationRequired = { RescueDeliveryService.enableAndStart(app) },
+                        shelterKeyWaitMillis = if (BuildConfig.DEBUG) 8_000 else 0,
+                    ) as T
+            })
+            RelayApp(relayViewModel, rescueViewModel, app.deviceId)
         }
     }
 }

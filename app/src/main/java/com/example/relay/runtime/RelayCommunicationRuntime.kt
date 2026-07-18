@@ -74,8 +74,26 @@ class RelayCommunicationRuntime(
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             syncSession.debugEvents.collect { event ->
                 appendDebug(event.toSafeText())
-                if (event is SyncDebugEvent.PeerAcknowledged || event is SyncDebugEvent.GatewayReceiptRecorded) {
-                    _state.value = _state.value.copy(lastSyncAt = System.currentTimeMillis())
+                when (event) {
+                    is SyncDebugEvent.PeerAcknowledged,
+                    is SyncDebugEvent.GatewayReceiptRecorded,
+                    -> {
+                        _state.value = _state.value.copy(lastSyncAt = System.currentTimeMillis())
+                    }
+                    is SyncDebugEvent.SendFailed -> {
+                        // Surface send failures on the operator-visible lastError path (not as success).
+                        _state.value = _state.value.copy(
+                            lastError = "送信失敗: ${event.reason.take(120)}",
+                        )
+                    }
+                    is SyncDebugEvent.Rejected -> {
+                        if (event.reason.startsWith("transport transfer failed")) {
+                            _state.value = _state.value.copy(
+                                lastError = "送信拒否: ${event.reason.take(120)}",
+                            )
+                        }
+                    }
+                    else -> Unit
                 }
             }
         }
@@ -171,6 +189,7 @@ class RelayCommunicationRuntime(
 
     private fun SyncDebugEvent.toSafeText(): String = when (this) {
         is SyncDebugEvent.Rejected -> "validation rejected: peer=${peerId.take(12)} reason=${reason.take(100)}"
+        is SyncDebugEvent.SendFailed -> "send failed: peer=${peerId.take(12)} item=${itemId.take(12)} reason=${reason.take(80)}"
         is SyncDebugEvent.PayloadTransferCompleted -> "protocol payload transferred: peer=${peerId.take(12)} bytes=$byteCount"
         is SyncDebugEvent.PeerAcknowledged -> "peer ACK: peer=${peerId.take(12)} message=${messageId.take(12)}"
         is SyncDebugEvent.GatewayReceiptRecorded -> "gateway receipt: message=${messageId.take(12)} actor=${actorId.take(12)}"

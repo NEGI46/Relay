@@ -38,3 +38,10 @@
 ## Explicit non-PASS
 
 Real Android installation, automatic discovery from a phone, Nearby pairing-free sync, and multihop A→B→PC were **not** executed in this session.
+
+
+## 2026-07-16 session note (MVP auto+PC complete)
+
+- Send-fail observability and trust labels improved in app code; unit tests cover shipped SyncCoordinator/Runtime paths.
+- Stage remains **device residual**: adb device count 0 → Phone↔PC and Nearby multi-device still NOT_RUN.
+- Do not claim `PC_GATEWAY_PUBLIC_DEVICE_VERIFIED` until real device runbook passes.

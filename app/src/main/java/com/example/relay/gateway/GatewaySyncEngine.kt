@@ -11,6 +11,7 @@ import android.content.Context
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -24,11 +25,12 @@ class GatewaySyncEngine(
     private val client: GatewayBridgeClient,
     private val policy: MessagePolicy,
     private val scope: CoroutineScope,
-    private val pendingStore: GatewayPendingStoreContract,
+    private val deliveryLedger: GatewayDeliveryLedger,
     private val discovery: GatewayDiscovery? = null,
     private val localBridgeId: String = "",
 ) {
     private val mutex = Mutex()
+    private val lifecycleMutex = Mutex()
     private val running = AtomicBoolean(false)
     private var job: Job? = null
 
@@ -37,7 +39,7 @@ class GatewaySyncEngine(
      * Zero-op path always runs the loop (public discovery does not need UI toggles).
      * [GatewaySettings.automaticSync] false is an explicit opt-out for operators only.
      */
-    suspend fun start(runtime: RelayRuntimeSettings): Boolean {
+    suspend fun start(runtime: RelayRuntimeSettings): Boolean = lifecycleMutex.withLock {
         if (runtime.mode == OperatingMode.NORMAL) return false
         if (!running.compareAndSet(false, true)) return true
         val settings = settingsStore.load()
@@ -47,10 +49,11 @@ class GatewaySyncEngine(
         return true
     }
 
-    suspend fun stop() {
+    suspend fun stop() = lifecycleMutex.withLock {
         running.set(false)
-        job?.cancel()
+        val stoppingJob = job
         job = null
+        stoppingJob?.cancelAndJoin()
     }
 
     suspend fun requestPair(code: String): Boolean {
@@ -72,15 +75,19 @@ class GatewaySyncEngine(
         }
         val all = repository.all()
         val knownIds = all.map { it.messageId }.toSet()
-        pendingStore.retainOnly(knownIds)
-        pendingStore.add(all.map { it.messageId })
-        val pendingIds = pendingStore.ids()
+        val pendingIds = deliveryLedger.pendingIds(knownIds)
         val messages = all.asSequence()
             .filter { it.messageId in pendingIds }
-            .filter { it.recordType == RelayRecordType.REPORT }
+            .filter {
+                it.recordType == RelayRecordType.REPORT ||
+                    it.recordType == RelayRecordType.STATUS_CHANGE
+            }
             .mapNotNull(policy::prepareForGatewayUpload)
             .sortedWith(
-                compareByDescending<com.example.relay.domain.RelayMessage> { it.priority }
+                compareByDescending<com.example.relay.domain.RelayMessage> {
+                    it.recordType == RelayRecordType.STATUS_CHANGE
+                }
+                    .thenByDescending { it.priority }
                     .thenByDescending { it.createdAt },
             )
             .take(128)
@@ -128,17 +135,29 @@ class GatewaySyncEngine(
                 }
             }
             // Persist receipts before clearing pending so a crash mid-sync can retry.
-            receipts
+            val persistedReceiptMessageIds = receipts
                 .filter {
                     it.receiptType == ReceiptType.GATEWAY_RECEIVED ||
                         it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED
                 }
                 .filter { repository.find(it.messageId) != null }
-                .forEach { repository.insertReceipt(it) }
-            val doneIds = push.response.acceptedMessageIds +
-                push.response.duplicateMessageIds +
-                push.response.rejected.map { it.messageId }
-            pendingStore.remove(doneIds)
+                .mapNotNull { receipt ->
+                    when (repository.insertReceipt(receipt)) {
+                        com.example.relay.domain.InsertResult.Inserted,
+                        com.example.relay.domain.InsertResult.Duplicate,
+                        -> receipt.messageId
+                        com.example.relay.domain.InsertResult.Collision,
+                        is com.example.relay.domain.InsertResult.Rejected,
+                        -> null
+                    }
+                }
+                .toSet()
+            deliveryLedger.markCompleted(persistedReceiptMessageIds)
+            deliveryLedger.markTerminal(
+                push.response.rejected
+                    .filter { it.reason.isTerminalGatewayRejection() }
+                    .mapTo(linkedSetOf()) { it.messageId },
+            )
             settingsStore.record(
                 "sent=${push.response.acceptedMessageIds.size}, " +
                     "duplicate=${push.response.duplicateMessageIds.size}, " +
@@ -179,32 +198,68 @@ class GatewaySyncEngine(
     }
 }
 
-interface GatewayPendingStoreContract {
-    fun ids(): Set<String>
-    fun add(messageIds: List<String>)
-    fun remove(messageIds: List<String>)
-    /** Drop stale IDs that no longer exist in the message store (TTL purge, clearAll, etc.). */
-    fun retainOnly(messageIds: Set<String>)
+interface GatewayDeliveryLedger {
+    /** Reconciles local messages and returns only IDs that still require a Gateway Receipt. */
+    fun pendingIds(existingMessageIds: Set<String>): Set<String>
+    /** IDs confirmed by a Receipt returned directly from a PC Gateway sync response. */
+    fun markCompleted(messageIds: Set<String>)
+    /** Immutable records rejected by validation must not be retried forever. */
+    fun markTerminal(messageIds: Set<String>)
 }
 
-class SharedPreferencesGatewayPendingStore(context: Context) : GatewayPendingStoreContract {
+class SharedPreferencesGatewayDeliveryLedger(context: Context) : GatewayDeliveryLedger {
     private val preferences = context.getSharedPreferences("relay_gateway_pending", Context.MODE_PRIVATE)
 
     @Synchronized
-    override fun ids(): Set<String> = preferences.getStringSet("ids", emptySet()).orEmpty()
-
-    @Synchronized
-    override fun add(messageIds: List<String>) {
-        preferences.edit().putStringSet("ids", ids() + messageIds).apply()
+    override fun pendingIds(existingMessageIds: Set<String>): Set<String> {
+        val completed = preferences.getStringSet("completed_ids", emptySet()).orEmpty().intersect(existingMessageIds)
+        val terminal = preferences.getStringSet("terminal_ids", emptySet()).orEmpty().intersect(existingMessageIds)
+        preferences.edit()
+            .putStringSet("completed_ids", completed)
+            .putStringSet("terminal_ids", terminal)
+            .apply()
+        return existingMessageIds - completed - terminal
     }
 
     @Synchronized
-    override fun remove(messageIds: List<String>) {
-        preferences.edit().putStringSet("ids", ids() - messageIds.toSet()).apply()
+    override fun markCompleted(messageIds: Set<String>) {
+        if (messageIds.isEmpty()) return
+        val completed = preferences.getStringSet("completed_ids", emptySet()).orEmpty() + messageIds
+        preferences.edit().putStringSet("completed_ids", completed).apply()
     }
 
     @Synchronized
-    override fun retainOnly(messageIds: Set<String>) {
-        preferences.edit().putStringSet("ids", ids().intersect(messageIds)).apply()
+    override fun markTerminal(messageIds: Set<String>) {
+        if (messageIds.isEmpty()) return
+        val terminal = preferences.getStringSet("terminal_ids", emptySet()).orEmpty() + messageIds
+        preferences.edit().putStringSet("terminal_ids", terminal).apply()
     }
+
 }
+
+class InMemoryGatewayDeliveryLedger : GatewayDeliveryLedger {
+    private var completed = emptySet<String>()
+    private var terminal = emptySet<String>()
+
+    override fun pendingIds(existingMessageIds: Set<String>): Set<String> {
+        completed = completed.intersect(existingMessageIds)
+        terminal = terminal.intersect(existingMessageIds)
+        return existingMessageIds - completed - terminal
+    }
+
+    override fun markCompleted(messageIds: Set<String>) { completed += messageIds }
+
+    override fun markTerminal(messageIds: Set<String>) { terminal += messageIds }
+}
+
+private fun String.isTerminalGatewayRejection(): Boolean = this in setOf(
+    "invalid_identifier",
+    "invalid_type",
+    "invalid_enum",
+    "invalid_ttl",
+    "invalid_hop",
+    "expired_or_invalid_ttl",
+    "payload_too_large",
+    "invalid_status_change",
+    "messageId collision",
+)

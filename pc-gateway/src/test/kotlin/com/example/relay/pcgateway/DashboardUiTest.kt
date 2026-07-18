@@ -50,6 +50,11 @@ class DashboardUiTest {
             val body = dash.bodyAsText()
             assertTrue(body.contains("\"gatewayId\":\"gw-ui\""))
             assertTrue(body.contains("\"unverifiedMessages\":1"))
+            assertTrue(body.contains("\"verifiedMessages\":0"))
+            assertTrue(body.contains("\"contentUnverifiedMessages\":1"))
+            assertTrue(body.contains("\"contentVerifiedMessages\":0"))
+            assertTrue(body.contains("\"anonymousRouteMessages\":1"))
+            assertTrue(body.contains("\"authenticatedRouteMessages\":0"))
 
             val index = client.get("/")
             assertEquals(HttpStatusCode.OK, index.status)
@@ -103,6 +108,35 @@ class DashboardUiTest {
             }
             assertEquals(HttpStatusCode.OK, res.status)
             assertTrue(res.bodyAsText().contains("u-1"))
+        }
+    }
+
+    @Test
+    fun `paired route is separately filterable while content remains unverified`() = testApplication {
+        val config = GatewayConfig(
+            dbPath = Files.createTempFile("relay-ui-route", ".db").toString(),
+            adminKey = "admin-secret",
+        )
+        GatewayStore(config).use { store ->
+            val code = store.createPairingCode(1_000)
+            store.requestPair(code, "bridge-a", "Bridge A", 1_001)
+            store.approvePair("bridge-a", code, 1_002)
+            store.ingest("bridge-a", listOf(message("paired-1")), 2_000)
+            application { gatewayModule(config, store) }
+
+            val authenticated = client.get("/api/messages?routeAuthentication=AUTHENTICATED_BRIDGE") {
+                header("X-Admin-Key", "admin-secret")
+            }
+            assertEquals(HttpStatusCode.OK, authenticated.status)
+            assertTrue(authenticated.bodyAsText().contains("paired-1"))
+            assertTrue(authenticated.bodyAsText().contains("\"contentVerification\":\"UNVERIFIED\""))
+            assertTrue(authenticated.bodyAsText().contains("\"routeAuthentication\":\"AUTHENTICATED_BRIDGE\""))
+
+            val contentVerified = client.get("/api/messages?trust=VERIFIED") {
+                header("X-Admin-Key", "admin-secret")
+            }
+            assertEquals(HttpStatusCode.OK, contentVerified.status)
+            assertTrue(!contentVerified.bodyAsText().contains("paired-1"))
         }
     }
 }

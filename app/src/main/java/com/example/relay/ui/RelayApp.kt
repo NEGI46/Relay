@@ -42,22 +42,27 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.relay.domain.DeliveryPresentation
-import com.example.relay.domain.RelayMessage
 import com.example.relay.domain.SafetyPayload
 import com.example.relay.domain.SafetyState
 import com.example.relay.domain.StatusChangePayload
 import com.example.relay.domain.SupplyKind
 import com.example.relay.domain.SupplyPayload
+import com.example.relay.domain.deliveryPresentationLabel
 import com.example.relay.permissions.AndroidNearbyPermissionGate
 import com.example.relay.service.RelayCommunicationService
+import com.example.relay.service.shouldAutoStartCommunication
+import com.example.relay.ui.rescue.RescueFlow
+import com.example.relay.ui.rescue.RescueViewModel
 
 @Composable
-fun RelayApp(viewModel: RelayViewModel, deviceId: String) {
+fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel, deviceId: String) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val rescueState by rescueViewModel.state.collectAsStateWithLifecycle()
+    val regionalItems by viewModel.regionalItems.collectAsStateWithLifecycle()
     val deliveries by viewModel.deliveryStates.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     val permissionGate = remember { AndroidNearbyPermissionGate(context) }
+    val activationStore = remember { RelayCommunicationService.activationStore(context) }
     val activity = remember(context) { context.findActivity() }
     var explainPermissions by rememberSaveable { mutableStateOf(false) }
 
@@ -67,12 +72,15 @@ fun RelayApp(viewModel: RelayViewModel, deviceId: String) {
     }
 
     LaunchedEffect(permissionGate.canUseNearby(), state.transportRunning) {
-        if (permissionGate.canUseNearby() && !state.transportRunning) startCommunication()
+        if (shouldAutoStartCommunication(permissionGate.canUseNearby(), state.transportRunning, activationStore.isEnabled())) {
+            startCommunication()
+        }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
+        // Transport can start without GPS; location may still be denied after partial grant.
         if (permissionGate.canUseNearby()) {
             startCommunication()
         } else {
@@ -83,17 +91,42 @@ fun RelayApp(viewModel: RelayViewModel, deviceId: String) {
         }
     }
 
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { /* create path continues without fix if denied */ }
+
+    fun requestMissingIncludingLocation(thenStart: Boolean) {
+        val missing = permissionGate.missingPermissions()
+        if (missing.isEmpty()) {
+            if (thenStart && permissionGate.canUseNearby()) startCommunication()
+            return
+        }
+        permissionLauncher.launch(missing.toTypedArray())
+    }
+
+    fun ensureLocationForForms() {
+        val missingLoc = permissionGate.missingLocationPermissions()
+        if (missingLoc.isNotEmpty()) {
+            locationPermissionLauncher.launch(missingLoc.toTypedArray())
+        }
+    }
+
     MaterialTheme {
         if (explainPermissions) {
             AlertDialog(
                 onDismissRequest = { explainPermissions = false },
                 title = { Text("災害通信を開始") },
-                text = { Text("近くのRelay端末を自動で探し、情報を保存・中継します。正確な位置情報は取得しません。") },
+                text = {
+                    Text(
+                        "近くのRelay端末を自動で探し、情報を保存・中継します。" +
+                            "登録やペアリングは不要です。位置情報は安否・物資の場所補完に使います（拒否しても登録可能）。",
+                    )
+                },
                 confirmButton = {
                     Button(onClick = {
                         explainPermissions = false
-                        val missing = permissionGate.missingPermissions()
-                        if (missing.isEmpty()) startCommunication() else permissionLauncher.launch(missing.toTypedArray())
+                        // Includes ACCESS_FINE/COARSE on API 32+ so GPS create-path is not dead.
+                        requestMissingIncludingLocation(thenStart = true)
                     }) { Text("許可して開始") }
                 },
                 dismissButton = { OutlinedButton(onClick = { explainPermissions = false }) { Text("あとで") } },
@@ -103,16 +136,34 @@ fun RelayApp(viewModel: RelayViewModel, deviceId: String) {
         when (state.screen) {
             RelayScreen.HOME -> HomeScreen(
                 state = state,
-                count = messages.size,
-                start = { if (permissionGate.canUseNearby()) startCommunication() else explainPermissions = true },
+                count = regionalItems.size,
+                start = {
+                    if (permissionGate.missingPermissions().isEmpty()) {
+                        if (permissionGate.canUseNearby()) startCommunication()
+                    } else {
+                        explainPermissions = true
+                    }
+                },
                 stop = { RelayCommunicationService.stop(context) },
-                safety = { viewModel.navigate(RelayScreen.SAFETY_FORM) },
-                supply = { viewModel.navigate(RelayScreen.SUPPLY_FORM) },
+                rescue = { viewModel.navigate(RelayScreen.RESCUE) },
+                safety = {
+                    ensureLocationForForms()
+                    viewModel.navigate(RelayScreen.SAFETY_FORM)
+                },
+                supply = {
+                    ensureLocationForForms()
+                    viewModel.navigate(RelayScreen.SUPPLY_FORM)
+                },
                 navigate = viewModel::navigate,
+            )
+            RelayScreen.RESCUE -> RescueFlow(
+                state = rescueState,
+                callbacks = rescueViewModel,
+                onExit = { viewModel.navigate(RelayScreen.HOME) },
             )
             RelayScreen.SAFETY_FORM -> SafetyForm(viewModel)
             RelayScreen.SUPPLY_FORM -> SupplyForm(viewModel)
-            RelayScreen.REGIONAL -> RegionalScreen(messages, deviceId, deliveries, viewModel::navigate)
+            RelayScreen.REGIONAL -> RegionalScreen(regionalItems, deviceId, deliveries, viewModel::navigate)
             else -> SettingsScreen(
                 state = state,
                 openAppSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
@@ -135,6 +186,7 @@ private fun HomeScreen(
     count: Int,
     start: () -> Unit,
     stop: () -> Unit,
+    rescue: () -> Unit,
     safety: () -> Unit,
     supply: () -> Unit,
     navigate: (RelayScreen) -> Unit,
@@ -157,17 +209,70 @@ private fun HomeScreen(
                         Text("保存中の情報: ${count}件")
                         Text("接続中の端末: ${state.connectedPeers}台")
                         Text(gatewayStatusLabel(state.gatewayLastResult, state.transportRunning))
+                        state.internetSyncLabel?.let { Text(it) }
                         Button(
                             onClick = if (state.transportRunning) stop else start,
-                            modifier = Modifier.fillMaxWidth().height(56.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .semantics {
+                                    contentDescription = if (state.transportRunning) {
+                                        "災害通信を停止"
+                                    } else {
+                                        "災害通信を開始"
+                                    }
+                                },
                         ) { Text(if (state.transportRunning) "通信を停止" else "災害通信を開始") }
                     }
                 }
             }
-            item { Button(onClick = safety, modifier = Modifier.fillMaxWidth().height(68.dp)) { Text("無事・避難状況を登録") } }
-            item { Button(onClick = supply, modifier = Modifier.fillMaxWidth().height(68.dp)) { Text("不足している物資を登録") } }
-            item { OutlinedButton(onClick = { navigate(RelayScreen.REGIONAL) }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("地域情報を見る（${count}件）") } }
-            state.lastError?.let { error -> item { Card(Modifier.fillMaxWidth()) { Text("通信状態: $error", Modifier.padding(14.dp)) } } }
+            item {
+                Button(
+                    onClick = rescue,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(72.dp)
+                        .semantics { contentDescription = "救助要請を作る、運ぶ、避難所へ提出する" },
+                ) { Text("救助要請を作る・運ぶ・提出する") }
+            }
+            item {
+                Button(
+                    onClick = safety,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(68.dp)
+                        .semantics { contentDescription = "無事・避難状況を登録" },
+                ) { Text("無事・避難状況を登録") }
+            }
+            item {
+                Button(
+                    onClick = supply,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(68.dp)
+                        .semantics { contentDescription = "不足している物資を登録" },
+                ) { Text("不足している物資を登録") }
+            }
+            item {
+                OutlinedButton(
+                    onClick = { navigate(RelayScreen.REGIONAL) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .semantics { contentDescription = "地域情報を見る" },
+                ) { Text("地域情報を見る（${count}件）") }
+            }
+            state.lastError?.let { error ->
+                item {
+                    Card(
+                        Modifier
+                            .fillMaxWidth()
+                            .semantics { contentDescription = "通信状態のエラー" },
+                    ) {
+                        Text("通信状態: $error", Modifier.padding(14.dp))
+                    }
+                }
+            }
         }
     }
 }
@@ -185,9 +290,16 @@ private fun SafetyForm(viewModel: RelayViewModel) {
             else OutlinedButton(onClick = { selected = option }) { Text(option.label()) }
         } }
         NumberChooser("同行者数", companions, 0, 99) { companions = it }
-        OutlinedTextField(location, { location = it.take(100) }, label = { Text("おおまかな場所（任意）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Text("場所が空なら保存時にGPSで補完します（拒否・未取得でも保存できます）", style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(location, { location = it.take(100) }, label = { Text("場所（任意・空ならGPS）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(note, { note = it.take(280) }, label = { Text("短いメモ（任意）") }, minLines = 2, maxLines = 3, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { viewModel.createSafety(selected, companions, location, note) }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("保存する") }
+        Button(
+            onClick = { viewModel.createSafety(selected, companions, location, note) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .semantics { contentDescription = "安否情報を保存する" },
+        ) { Text("保存する") }
     }
 }
 
@@ -206,9 +318,16 @@ private fun SupplyForm(viewModel: RelayViewModel) {
         } }
         if (selected == SupplyKind.OTHER) OutlinedTextField(other, { other = it.take(50) }, label = { Text("物資名") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         NumberChooser("必要数", count, 1, 9999) { count = it }
-        OutlinedTextField(location, { location = it.take(100) }, label = { Text("おおまかな場所（任意）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Text("場所が空なら保存時にGPSで補完します（拒否・未取得でも保存できます）", style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(location, { location = it.take(100) }, label = { Text("場所（任意・空ならGPS）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(note, { note = it.take(280) }, label = { Text("短いメモ（任意）") }, minLines = 2, maxLines = 3, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { viewModel.createSupply(selected, count, location, note, other.takeIf { selected == SupplyKind.OTHER }) }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("保存する") }
+        Button(
+            onClick = { viewModel.createSupply(selected, count, location, note, other.takeIf { selected == SupplyKind.OTHER }) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .semantics { contentDescription = "物資不足情報を保存する" },
+        ) { Text("保存する") }
     }
 }
 
@@ -230,48 +349,52 @@ private fun NumberChooser(label: String, value: Int, min: Int, max: Int, update:
 }
 
 @Composable
-private fun RegionalScreen(messages: List<RelayMessage>, deviceId: String, deliveries: Map<String, DeliveryPresentation>, navigate: (RelayScreen) -> Unit) {
+private fun RegionalScreen(messages: List<RegionalMessageItem>, deviceId: String, deliveries: Map<String, DeliveryPresentation>, navigate: (RelayScreen) -> Unit) {
     MainScaffold(RelayScreen.REGIONAL, navigate) { modifier ->
         LazyColumn(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { Text("地域情報", style = MaterialTheme.typography.headlineMedium) }
             if (messages.isEmpty()) item { Text("保存されている情報はありません") }
-            items(messages, key = { it.messageId }) { MessageCard(it, deviceId, deliveries[it.messageId]) }
+            items(messages, key = { it.report.messageId }) { item ->
+                MessageCard(item, deviceId, deliveries[item.report.messageId])
+            }
         }
     }
 }
 
-private fun gatewayStatusLabel(lastResult: String?, transportRunning: Boolean): String = when {
+internal fun gatewayStatusLabel(lastResult: String?, transportRunning: Boolean): String = when {
     !transportRunning -> "中継拠点: 通信停止中"
     lastResult == null -> "中継拠点: 探索・同期の準備中"
     lastResult == "idle" -> "中継拠点: 送信待ちの情報なし"
     lastResult == "gateway_not_found" -> "中継拠点: 未検出（同じWi‑FiにPC Gatewayがありますか）"
-    lastResult.startsWith("sent=") -> "中継拠点: 同期済み（$lastResult）"
+    lastResult.startsWith("sent=") -> "中継拠点: 同期済み・内容は未検証（$lastResult）"
     lastResult.startsWith("http_") -> "中継拠点: 通信エラー（$lastResult）"
     lastResult == "network_error" -> "中継拠点: ネットワークエラー"
     else -> "中継拠点: $lastResult"
 }
 
 @Composable
-private fun MessageCard(message: RelayMessage, deviceId: String, delivery: DeliveryPresentation?) {
+private fun MessageCard(item: RegionalMessageItem, deviceId: String, delivery: DeliveryPresentation?) {
+    val message = item.report
     val location = when (val payload = message.payload) {
         is SafetyPayload -> payload.approximateLocation.ifBlank { "場所未入力" }
         is SupplyPayload -> payload.approximateLocation.ifBlank { "場所未入力" }
         is StatusChangePayload -> "対象: ${payload.targetMessageId.take(12)}"
     }
-    val deliveryLabel = when (delivery) {
-        DeliveryPresentation.GATEWAY_RECEIVED -> "Gatewayへ保存済み"
-        DeliveryPresentation.GATEWAY_RECEIVED_UNVERIFIED -> "中継拠点へ保存済み（未認証）"
-        DeliveryPresentation.PEER_RECEIVED -> "近くの端末へ保存済み（最終配信ではありません）"
-        DeliveryPresentation.NEARBY_PAYLOAD_COMPLETE -> "転送完了（保存確認前）"
-        else -> "転送待ち"
+    val deliveryLabel = deliveryPresentationLabel(delivery ?: DeliveryPresentation.NOT_CONFIRMED)
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = "地域メッセージ $deliveryLabel" },
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(if (message.messageType.name == "SAFETY") "安否情報" else "物資不足情報", style = MaterialTheme.typography.titleMedium)
+            Text(regionalReportStatusText(item))
+            Text("保存区分: ${message.status.name} / 中継: ${message.hopCount}/${message.maxHopCount}")
+            Text("場所: $location")
+            Text(if (message.originDeviceId == deviceId) "自分が登録" else "他の端末から受信")
+            Text(deliveryLabel)
+        }
     }
-    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text(if (message.messageType.name == "SAFETY") "安否情報" else "物資不足情報", style = MaterialTheme.typography.titleMedium)
-        Text("状態: ${message.status.name} / 中継: ${message.hopCount}/${message.maxHopCount}")
-        Text("場所: $location")
-        Text(if (message.originDeviceId == deviceId) "自分が登録" else "他の端末から受信")
-        Text(deliveryLabel)
-    } }
 }
 
 @Composable
@@ -280,12 +403,44 @@ private fun SettingsScreen(state: RelayUiState, openAppSettings: () -> Unit, ope
         LazyColumn(modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text("設定", style = MaterialTheme.typography.headlineMedium) }
             item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Relayは近くの端末を自動で探して情報を中継します。")
-                Text("接続先の登録や確認コードの入力は必要ありません。")
+                Text("すべてローカル優先です。登録・ペアリングは不要です。")
+                Text("近くの端末と自動中継し、同じWi‑Fi上のPC Gatewayへ公開同期できます。")
+                Text("インターネットが戻ると重要情報を追加受信します（オフライン中継はそのまま）。")
                 Text(if (state.transportRunning) "災害通信: 動作中" else "災害通信: 停止中")
+                Text("中継拠点への保存は未検証の証跡です。公式到達ではありません。")
             } } }
-            item { OutlinedButton(onClick = openBluetoothSettings, modifier = Modifier.fillMaxWidth()) { Text("Bluetooth設定を開く") } }
-            item { OutlinedButton(onClick = openAppSettings, modifier = Modifier.fillMaxWidth()) { Text("Relayの権限設定を開く") } }
+            if (state.debugEvents.isNotEmpty()) {
+                item {
+                    Card(
+                        Modifier
+                            .fillMaxWidth()
+                            .semantics { contentDescription = "最近の通信デバッグログ" },
+                    ) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("最近の通信イベント（最大10件）", style = MaterialTheme.typography.titleSmall)
+                            state.debugEvents.takeLast(10).asReversed().forEach { line ->
+                                Text(line, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                OutlinedButton(
+                    onClick = openBluetoothSettings,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { contentDescription = "Bluetooth設定を開く" },
+                ) { Text("Bluetooth設定を開く") }
+            }
+            item {
+                OutlinedButton(
+                    onClick = openAppSettings,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { contentDescription = "Relayの権限設定を開く" },
+                ) { Text("Relayの権限設定を開く") }
+            }
         }
     }
 }

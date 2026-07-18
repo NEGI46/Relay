@@ -33,7 +33,9 @@
     <section class="banner note">
       <strong>zero-operation 運用</strong>
       一般端末の登録は不要です。Android は UDP ビーコンで本機を発見し、公開同期で REPORT を送ります。
-      公開保存は <em>UNVERIFIED（中継拠点・未認証）</em> です。公式情報としては扱いません。
+      公開経路・ペアリング済み経路のどちらでも、REPORT本文と発信元は
+      <em>CONTENT UNVERIFIED（内容未検証）</em> です。ペアリングはBridge経路だけを認証し、
+      公式情報・本人確認・最終宛先への配信を意味しません。
     </section>
 
     <section class="cards" id="statCards" aria-live="polite"></section>
@@ -66,7 +68,7 @@
             <table>
               <thead>
                 <tr>
-                  <th>優先度</th><th>種別</th><th>Trust</th><th>状態</th><th>Origin</th><th>受信</th>
+                  <th>優先度</th><th>種別</th><th>内容検証</th><th>状態</th><th>Origin（自己申告）</th><th>受信</th>
                 </tr>
               </thead>
               <tbody id="recentBody"></tbody>
@@ -90,9 +92,14 @@
             <option value="RETRACTED">RETRACTED</option>
           </select>
           <select id="msgTrust">
-            <option value="">Trustすべて</option>
-            <option value="UNVERIFIED">UNVERIFIED</option>
-            <option value="VERIFIED">VERIFIED</option>
+            <option value="">内容検証すべて</option>
+            <option value="UNVERIFIED">CONTENT UNVERIFIED</option>
+            <option value="VERIFIED">CONTENT VERIFIED（将来用）</option>
+          </select>
+          <select id="msgRoute">
+            <option value="">受信経路すべて</option>
+            <option value="AUTHENTICATED_BRIDGE">認証済みBridge経路</option>
+            <option value="ANONYMOUS_LAN">匿名LAN経路</option>
           </select>
           <button type="button" class="btn secondary" id="btnFilter">絞り込み</button>
           <button type="button" class="btn secondary" id="btnExport">CSV出力</button>
@@ -101,8 +108,8 @@
           <table>
             <thead>
               <tr>
-                <th>ID</th><th>種別</th><th>優先度</th><th>状態</th><th>Trust</th>
-                <th>Rx</th><th>Bridge</th><th>Origin</th><th>受信</th><th></th>
+                <th>ID</th><th>種別</th><th>優先度</th><th>状態</th><th>内容検証 / 経路</th>
+                <th>Gateway保存</th><th>Bridge</th><th>Origin（自己申告）</th><th>受信</th><th></th>
               </tr>
             </thead>
             <tbody id="messagesBody"></tbody>
@@ -113,8 +120,8 @@
 
       <section id="panel-bridges" class="panel">
         <div class="card">
-          <h2>登録 Bridge（任意の verified 経路）</h2>
-          <p class="muted">一般利用者はここを使いません。運用者が token 経路を使う場合のみ。</p>
+          <h2>登録 Bridge（任意の認証済み経路）</h2>
+          <p class="muted">tokenは接続Bridgeを認証しますが、REPORT本文・発信元の真正性は証明しません。</p>
           <div class="table-wrap">
             <table>
               <thead>

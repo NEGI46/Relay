@@ -2,19 +2,21 @@
 
 ## 信頼モデル（zero-operation）
 
-| 経路 | 認証 | 保存 trust | Receipt |
-|------|------|------------|---------|
-| 公開 Ingress | なし（同一 LAN + レート制限） | `UNVERIFIED` | `GATEWAY_RECEIVED_UNVERIFIED` |
-| ペアリング同期 | Bearer token（管理者承認後） | `VERIFIED` | `GATEWAY_RECEIVED` |
+| 経路 | 経路認証 | 内容検証 | Receipt |
+|------|----------|----------|---------|
+| 公開 Ingress | `ANONYMOUS_LAN`（同一 LAN + レート制限） | `UNVERIFIED` | `GATEWAY_RECEIVED_UNVERIFIED` |
+| ペアリング同期 | `AUTHENTICATED_BRIDGE`（管理者承認後のBearer token） | `UNVERIFIED` | `GATEWAY_RECEIVED` |
 
 - ビーコンと公開同期は **発見・中継拠点保存**であり、身元保証や公式情報ではない
-- Android UI は未認証ラベルを表示する
+- ペアリング済みBridgeも、REPORT本文・claimed origin・本人を保証しない
+- 管理画面は「経路認証」と「内容検証」を別々に表示する
+- `GATEWAY_RECEIVED` は認証済み経路からPC保存が完了した証跡であり、公式情報、内容検証、最終宛先への配信ではない
 - 未導入スマホは中継に参加しない
 
 ## 実装済み制御
 
 - 公開経路: リクエスト/メッセージ/バイトの分単位レート制限（ソケット peer 単位）
-- 公開経路: `STATUS_CHANGE` 拒否、形式・TTL・hop・payload サイズ検証
+- 公開経路: `STATUS_CHANGE` は未検証イベントとして保存するが、対象REPORTの表示状態には適用しない。形式・TTL・hop・payload サイズを検証
 - `messageId` 重複排除・collision 検出
 - DB 件数上限
 - ペアリング: 期限付きコード、管理者キー、token は SHA-256 ハッシュ保存
@@ -27,6 +29,7 @@
 
 - LAN HTTP は **TLS なし**。信頼できない無線 LAN では盗聴・なりすまし可能
 - 公開経路では origin / payload を誰でも送りうる（未検証表示が前提）
+- ペアリング済みBridgeもNearbyで運んだ第三者REPORTを提出するため、Bridge認証を発信元認証として扱えない
 - ビーコンは誰でも偽装できる（discovery ≠ auth）
 - メッセージ署名（protocol v2 ECDSA）はライブラリ実装済みだが **既定パスでは未配線**
 - 複数 Gateway の信頼ランキングは未実装

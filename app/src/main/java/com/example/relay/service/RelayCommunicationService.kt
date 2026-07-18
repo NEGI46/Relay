@@ -30,7 +30,16 @@ import kotlinx.coroutines.launch
 class RelayCommunicationService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var stateJob: Job? = null
+    private var stopServiceJob: Job? = null
     private val app get() = application as RelayApplication
+    private val shutdownCoordinator by lazy(LazyThreadSafetyMode.NONE) {
+        CommunicationShutdownCoordinator(
+            scope = scope,
+            stopGateway = { app.communicationSupervisor.stop() },
+            stopCommunication = {},
+            onFailure = { reason -> app.communicationSupervisor.reportStartFailure(reason) },
+        )
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -39,6 +48,7 @@ class RelayCommunicationService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            activationStore(this).setEnabled(false)
             stopCommunication()
             return START_NOT_STICKY
         }
@@ -61,15 +71,14 @@ class RelayCommunicationService : Service() {
         }
         scope.launch {
             try {
-                if (!app.communicationRuntime.start(RelayRuntimeSettings(mode, role))) {
+                if (!app.communicationSupervisor.start(RelayRuntimeSettings(mode, role))) {
                     stopForegroundCompat()
                     stopSelf()
                     return@launch
                 }
-                app.gatewaySyncEngine.start(RelayRuntimeSettings(mode, role))
                 stateJob?.cancel()
                 stateJob = launch {
-                    app.communicationRuntime.state.collect { state ->
+                    app.communicationSupervisor.state.collect { state ->
                         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(state.transport.connectedPeerIds.size))
                     }
                 }
@@ -84,8 +93,7 @@ class RelayCommunicationService : Service() {
 
     override fun onDestroy() {
         stateJob?.cancel()
-        scope.launch { app.gatewaySyncEngine.stop() }
-        app.communicationRuntime.stopAsync()
+        shutdownCoordinator.requestStop()
         scope.cancel()
         super.onDestroy()
     }
@@ -93,9 +101,10 @@ class RelayCommunicationService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun stopCommunication() {
-        scope.launch {
-            app.gatewaySyncEngine.stop()
-            app.communicationRuntime.stop()
+        if (stopServiceJob?.isActive == true) return
+        val shutdown = shutdownCoordinator.requestStop()
+        stopServiceJob = scope.launch {
+            shutdown.join()
             stopForegroundCompat()
             stopSelf()
         }
@@ -150,6 +159,7 @@ class RelayCommunicationService : Service() {
         private const val EXTRA_ROLE = "role"
 
         fun start(context: Context, mode: OperatingMode, role: DeviceRole): String? = try {
+            activationStore(context).setEnabled(true)
             val intent = Intent(context, RelayCommunicationService::class.java)
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_MODE, mode.name)
@@ -161,8 +171,12 @@ class RelayCommunicationService : Service() {
         }
 
         fun stop(context: Context) {
+            activationStore(context).setEnabled(false)
             context.startService(Intent(context, RelayCommunicationService::class.java).setAction(ACTION_STOP))
         }
+
+        fun activationStore(context: Context): CommunicationActivationStore =
+            SharedPreferencesCommunicationActivationStore(context)
     }
 }
 

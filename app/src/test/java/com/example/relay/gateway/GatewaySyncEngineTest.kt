@@ -7,17 +7,25 @@ import com.example.relay.domain.MessagePolicy
 import com.example.relay.domain.MutableClock
 import com.example.relay.domain.OperatingMode
 import com.example.relay.domain.ReceiptType
+import com.example.relay.domain.MessagePriority
+import com.example.relay.domain.RelayRecordType
+import com.example.relay.domain.ReportStatus
 import com.example.relay.domain.RelayMessage
 import com.example.relay.domain.RelayRuntimeSettings
+import com.example.relay.domain.StatusChangePayload
 import com.example.relay.gateway.protocol.GatewayReceipt
+import com.example.relay.gateway.protocol.GatewayRejection
 import com.example.relay.gateway.protocol.SyncMessagesResponse
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GatewaySyncEngineTest {
-    @Test fun `successful PC save response creates local Gateway Receipt and clears durable pending ids`() = runTest {
+    @Test fun `successful PC save response creates local Gateway Receipt and suppresses future uploads`() = runTest {
         val repository = InMemoryMessageRepository()
         val clock = MutableClock(NOW)
         repository.insert(com.example.relay.message())
@@ -28,7 +36,7 @@ class GatewaySyncEngineTest {
 
         assertTrue(engine.start(RelayRuntimeSettings(OperatingMode.DRILL, DeviceRole.GATEWAY)))
         assertEquals(GatewaySyncResult.Completed(1, 1), engine.syncOnce())
-        assertTrue(pending.removed.contains("message-1"))
+        assertEquals(emptySet<String>(), pending.pendingIds(setOf("message-1")))
         assertEquals(1, repository.allReceipts().size)
         assertEquals("GATEWAY_RECEIVED", repository.allReceipts().single().receiptType.name)
     }
@@ -119,6 +127,150 @@ class GatewaySyncEngineTest {
         assertEquals(GatewaySyncResult.Completed(1, 1), engine.syncOnce())
         assertEquals(1, client.publicPushes)
     }
+
+    @Test fun `gateway receipt prevents successful report from being resent every loop`() = runTest {
+        val repository = InMemoryMessageRepository().also { it.insert(com.example.relay.message()) }
+        val client = FakeClient(publicReceipts = listOf(
+            GatewayReceipt("r-unverified", "message-1", "GATEWAY_RECEIVED_UNVERIFIED", "pc-gateway", NOW),
+        ))
+        val engine = GatewaySyncEngine(
+            repository,
+            FakeSettings(GatewaySettings()),
+            FakeCredentials(null),
+            client,
+            MessagePolicy(MutableClock(NOW)),
+            backgroundScope,
+            FakePending(),
+            discovery = object : GatewayDiscovery {
+                override suspend fun discover(timeoutMs: Int) = DiscoveredGateway("127.0.0.1", 8080, "gateway")
+            },
+            localBridgeId = "bridge-local",
+        )
+
+        assertEquals(GatewaySyncResult.Completed(1, 1), engine.syncOnce())
+        assertEquals(GatewaySyncResult.Completed(0, 0), engine.syncOnce())
+        assertEquals(1, client.publicPushes)
+    }
+
+    @Test fun `status change and its target report are both uploaded with status change first`() = runTest {
+        val repository = InMemoryMessageRepository().also {
+            it.insert(com.example.relay.message(id = "message-1"))
+            it.insert(
+                com.example.relay.message(id = "status-1").copy(
+                    recordType = RelayRecordType.STATUS_CHANGE,
+                    priority = MessagePriority.CRITICAL,
+                    payload = StatusChangePayload(
+                        eventId = "status-1",
+                        targetMessageId = "message-1",
+                        newStatus = ReportStatus.RESOLVED,
+                        reason = "resolved",
+                        createdAt = NOW,
+                        createdBy = "device-A",
+                    ),
+                ),
+            )
+        }
+        val client = FakeClient(
+            publicReceipts = listOf(
+                GatewayReceipt("receipt-report", "message-1", "GATEWAY_RECEIVED_UNVERIFIED", "pc-gateway", NOW),
+                GatewayReceipt("receipt-status", "status-1", "GATEWAY_RECEIVED_UNVERIFIED", "pc-gateway", NOW),
+            ),
+        )
+        val engine = GatewaySyncEngine(
+            repository,
+            FakeSettings(GatewaySettings()),
+            FakeCredentials(null),
+            client,
+            MessagePolicy(MutableClock(NOW)),
+            backgroundScope,
+            FakePending(),
+            discovery = object : GatewayDiscovery {
+                override suspend fun discover(timeoutMs: Int) = DiscoveredGateway("127.0.0.1", 8080, "gateway")
+            },
+            localBridgeId = "bridge-local",
+        )
+
+        assertEquals(GatewaySyncResult.Completed(2, 2), engine.syncOnce())
+        assertEquals(
+            listOf(RelayRecordType.STATUS_CHANGE, RelayRecordType.REPORT),
+            client.lastPublicMessages.map { it.recordType },
+        )
+    }
+
+    @Test fun `terminal gateway rejection is persisted and is not retried every loop`() = runTest {
+        val repository = InMemoryMessageRepository().also { it.insert(com.example.relay.message()) }
+        val pending = FakePending()
+        val client = FakeClient(
+            publicResponse = SyncMessagesResponse(
+                rejected = listOf(GatewayRejection("message-1", "invalid_type")),
+            ),
+        )
+        val engine = GatewaySyncEngine(
+            repository,
+            FakeSettings(GatewaySettings()),
+            FakeCredentials(null),
+            client,
+            MessagePolicy(MutableClock(NOW)),
+            backgroundScope,
+            pending,
+            discovery = object : GatewayDiscovery {
+                override suspend fun discover(timeoutMs: Int) = DiscoveredGateway("127.0.0.1", 8080, "gateway")
+            },
+            localBridgeId = "bridge-local",
+        )
+
+        assertEquals(GatewaySyncResult.Completed(0, 0), engine.syncOnce())
+        assertEquals(GatewaySyncResult.Completed(0, 0), engine.syncOnce())
+        assertEquals(1, client.publicPushes)
+        assertEquals(setOf("message-1"), pending.terminalIds())
+    }
+
+    @Test fun `temporary target missing rejection remains retryable`() = runTest {
+        val repository = InMemoryMessageRepository().also { it.insert(com.example.relay.message()) }
+        val client = FakeClient(
+            publicResponse = SyncMessagesResponse(
+                rejected = listOf(GatewayRejection("message-1", "target_report_not_found")),
+            ),
+        )
+        val engine = GatewaySyncEngine(
+            repository,
+            FakeSettings(GatewaySettings()),
+            FakeCredentials(null),
+            client,
+            MessagePolicy(MutableClock(NOW)),
+            backgroundScope,
+            FakePending(),
+            discovery = object : GatewayDiscovery {
+                override suspend fun discover(timeoutMs: Int) = DiscoveredGateway("127.0.0.1", 8080, "gateway")
+            },
+            localBridgeId = "bridge-local",
+        )
+
+        engine.syncOnce()
+        engine.syncOnce()
+        assertEquals(2, client.publicPushes)
+    }
+
+    @Test fun `stop does not return before the active gateway request is cleaned up`() = runTest {
+        val repository = InMemoryMessageRepository().also { it.insert(com.example.relay.message()) }
+        val client = SuspendingClient()
+        val engine = GatewaySyncEngine(
+            repository,
+            FakeSettings(GatewaySettings("127.0.0.1", 8080, "gateway", "bridge", enabled = true, automaticSync = true)),
+            FakeCredentials("token"),
+            client,
+            MessagePolicy(MutableClock(NOW)),
+            backgroundScope,
+            FakePending(),
+        )
+        engine.start(RelayRuntimeSettings(OperatingMode.DRILL, DeviceRole.GATEWAY))
+        runCurrent()
+        assertTrue(client.requestStarted.isCompleted)
+
+        engine.stop()
+
+        assertTrue(client.requestCleanedUp.isCompleted)
+    }
 }
 
 private class FakeSettings(private var value: GatewaySettings) : GatewaySettingsStoreContract {
@@ -134,24 +286,25 @@ private class FakeCredentials(private val value: String?) : GatewayCredentialSto
     override fun clear() = Unit
     override fun hasToken() = value != null
 }
-private class FakePending : GatewayPendingStoreContract {
-    private val values = linkedSetOf<String>()
-    val removed = mutableListOf<String>()
-    override fun ids() = values.toSet()
-    override fun add(messageIds: List<String>) { values += messageIds }
-    override fun remove(messageIds: List<String>) {
-        values -= messageIds.toSet()
-        removed += messageIds
+private class FakePending : GatewayDeliveryLedger {
+    private val completed = linkedSetOf<String>()
+    private val terminal = linkedSetOf<String>()
+    override fun pendingIds(existingMessageIds: Set<String>): Set<String> {
+        completed.retainAll(existingMessageIds)
+        terminal.retainAll(existingMessageIds)
+        return existingMessageIds - completed - terminal
     }
-    override fun retainOnly(messageIds: Set<String>) {
-        values.retainAll(messageIds)
-    }
+    override fun markCompleted(messageIds: Set<String>) { completed += messageIds }
+    fun terminalIds() = terminal.toSet()
+    override fun markTerminal(messageIds: Set<String>) { terminal += messageIds }
 }
 private class FakeClient(
     private val publicReceipts: List<GatewayReceipt> = emptyList(),
+    private val publicResponse: SyncMessagesResponse? = null,
 ) : GatewayBridgeClient {
     var pushes = 0
     var publicPushes = 0
+    var lastPublicMessages: List<RelayMessage> = emptyList()
     override suspend fun requestPair(settings: GatewaySettings, code: String) = true
     override suspend fun push(settings: GatewaySettings, token: String, messages: List<RelayMessage>): GatewayPushResult {
         pushes++
@@ -167,11 +320,41 @@ private class FakeClient(
         messages: List<RelayMessage>,
     ): GatewayPushResult {
         publicPushes++
+        lastPublicMessages = messages
         return GatewayPushResult(
-            SyncMessagesResponse(
+            publicResponse ?: SyncMessagesResponse(
                 acceptedMessageIds = messages.map { it.messageId },
                 receipts = publicReceipts,
             ),
         )
     }
+}
+
+private class SuspendingClient : GatewayBridgeClient {
+    val requestStarted = CompletableDeferred<Unit>()
+    val requestCleanedUp = CompletableDeferred<Unit>()
+
+    override suspend fun requestPair(settings: GatewaySettings, code: String) = false
+
+    override suspend fun push(
+        settings: GatewaySettings,
+        token: String,
+        messages: List<RelayMessage>,
+    ): GatewayPushResult {
+        requestStarted.complete(Unit)
+        try {
+            awaitCancellation()
+        } finally {
+            requestCleanedUp.complete(Unit)
+        }
+    }
+
+    override suspend fun pullReceipts(settings: GatewaySettings, token: String) = emptyList<com.example.relay.domain.DeliveryReceipt>()
+
+    override suspend fun pushPublic(
+        gateway: DiscoveredGateway,
+        bridgeId: String,
+        bridgeName: String,
+        messages: List<RelayMessage>,
+    ) = error("not used")
 }

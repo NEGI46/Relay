@@ -1,8 +1,10 @@
 package com.example.relay.protocol
 
 import com.example.relay.NOW
+import com.example.relay.domain.DeliveryReceipt
 import com.example.relay.domain.MessagePolicy
 import com.example.relay.domain.MutableClock
+import com.example.relay.domain.ReceiptType
 import com.example.relay.message
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -64,5 +66,45 @@ class PacketCodecTest {
             DecodeError.INVALID_BODY,
             (manifestCodec.decode(manifestCodec.encode("device-A", NOW, ManifestBody(List(513) { entry.copy(messageId = "id-$it") }))) as DecodeResult.Failure).error,
         )
+    }
+
+    @Test
+    fun `peer acknowledgement requires a matching peer received receipt from envelope sender`() {
+        val receipt = DeliveryReceipt(
+            "receipt-peer",
+            "message-1",
+            ReceiptType.PEER_RECEIVED,
+            "device-B",
+            NOW,
+        )
+        val result = codec.decode(
+            codec.encode("device-B", NOW, AckBody("message-1", "data-packet", receipt)),
+        )
+
+        assertTrue(result is DecodeResult.Success)
+    }
+
+    @Test
+    fun `missing or forged peer acknowledgement receipt is rejected`() {
+        val peerReceipt = DeliveryReceipt(
+            "receipt-peer",
+            "message-1",
+            ReceiptType.PEER_RECEIVED,
+            "device-B",
+            NOW,
+        )
+        val invalidBodies = listOf(
+            AckBody("message-1", "data-packet", null),
+            AckBody("message-1", "data-packet", peerReceipt.copy(receiptType = ReceiptType.GATEWAY_RECEIVED)),
+            AckBody("message-1", "data-packet", peerReceipt.copy(actorId = "forged-peer")),
+            AckBody("message-1", "data-packet", peerReceipt.copy(messageId = "other-message")),
+        )
+
+        invalidBodies.forEach { body ->
+            assertEquals(
+                DecodeError.INVALID_BODY,
+                (codec.decode(codec.encode("device-B", NOW, body)) as DecodeResult.Failure).error,
+            )
+        }
     }
 }

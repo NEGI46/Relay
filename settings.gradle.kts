@@ -18,3 +18,5 @@ rootProject.name = "Relay"
 include(":app")
 include(":relay-protocol")
 include(":pc-gateway")
+include(":shared")
+include(":composeApp")

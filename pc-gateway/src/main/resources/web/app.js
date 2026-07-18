@@ -45,10 +45,16 @@
     }
   }
 
-  function trustBadge(trust) {
-    const t = (trust || "").toUpperCase();
-    if (t === "VERIFIED") return `<span class="badge verified">VERIFIED</span>`;
-    return `<span class="badge unverified">UNVERIFIED</span>`;
+  function contentBadge(verification) {
+    const t = (verification || "UNVERIFIED").toUpperCase();
+    if (t === "VERIFIED") return `<span class="badge verified">CONTENT VERIFIED</span>`;
+    return `<span class="badge unverified">CONTENT UNVERIFIED</span>`;
+  }
+
+  function routeBadge(authentication) {
+    const t = (authentication || "ANONYMOUS_LAN").toUpperCase();
+    if (t === "AUTHENTICATED_BRIDGE") return `<span class="badge ok">PAIRED BRIDGE</span>`;
+    return `<span class="badge off">ANONYMOUS LAN</span>`;
   }
 
   function priorityBadge(p) {
@@ -86,8 +92,10 @@
     $("statCards").innerHTML = [
       stat("保存件数", d.totalMessages, ""),
       stat("ACTIVE", d.activeMessages, "active"),
-      stat("UNVERIFIED", d.unverifiedMessages, "unverified"),
-      stat("VERIFIED", d.verifiedMessages, "verified"),
+      stat("Content未検証", d.contentUnverifiedMessages, "unverified"),
+      stat("Content検証済み（MVP未構成）", d.contentVerifiedMessages, "verified"),
+      stat("認証Bridge経路", d.authenticatedRouteMessages, ""),
+      stat("匿名LAN経路", d.anonymousRouteMessages, ""),
       stat("Bridge", `${d.pairedBridgeCount}/${d.bridgeCount}`, ""),
       stat("Receipt", d.receiptCount, ""),
     ].join("");
@@ -134,11 +142,11 @@
     }
     $("recentBody").innerHTML = d.recentMessages
       .map((m) => {
-        const cls = (m.ingressTrust || "").toUpperCase() === "VERIFIED" ? "verified" : "unverified";
+        const cls = (m.contentVerification || "UNVERIFIED").toUpperCase() === "VERIFIED" ? "verified" : "unverified";
         return `<tr class="${cls}">
         <td>${priorityBadge(m.priority)}</td>
         <td>${escapeHtml(typeLabel(m.messageType))}</td>
-        <td>${trustBadge(m.ingressTrust)}</td>
+        <td>${contentBadge(m.contentVerification)}</td>
         <td>${escapeHtml(m.status)}</td>
         <td title="${escapeHtml(m.origin)}">${escapeHtml((m.origin || "").slice(0, 12))}</td>
         <td>${fmtTime(m.receivedAt)}</td>
@@ -193,9 +201,9 @@
     }
     $("messagesBody").innerHTML = list
       .map((m) => {
-        const cls = (m.ingressTrust || "").toUpperCase() === "VERIFIED" ? "verified" : "unverified";
+        const cls = (m.contentVerification || "UNVERIFIED").toUpperCase() === "VERIFIED" ? "verified" : "unverified";
         const rx =
-          [m.gatewayReceived ? "V" : null, m.gatewayReceivedUnverified ? "U" : null]
+          [m.gatewayReceived ? "認証経路で保存" : null, m.gatewayReceivedUnverified ? "匿名経路で保存" : null]
             .filter(Boolean)
             .join("/") || "—";
         return `<tr class="${cls}">
@@ -203,7 +211,7 @@
         <td>${escapeHtml(typeLabel(m.messageType))}</td>
         <td>${priorityBadge(m.priority)}</td>
         <td>${escapeHtml(m.status)}</td>
-        <td>${trustBadge(m.ingressTrust)}</td>
+        <td>${contentBadge(m.contentVerification)}<br>${routeBadge(m.routeAuthentication)}</td>
         <td>${rx}</td>
         <td>${escapeHtml((m.sourceBridgeId || "public").slice(0, 10))}</td>
         <td title="${escapeHtml(m.origin)}">${escapeHtml((m.origin || "").slice(0, 10))}</td>
@@ -228,7 +236,9 @@
           ${row("record", d.recordType)}
           ${row("priority", d.priority)}
           ${row("status", d.status)}
-          ${row("trust", d.ingressTrust)}
+          ${row("content verification", d.contentVerification)}
+          ${row("route authentication", d.routeAuthentication)}
+          ${row("gateway receipt", d.gatewayReceived ? "saved via authenticated Bridge" : (d.gatewayReceivedUnverified ? "saved via anonymous LAN" : "none"))}
           ${row("origin", d.originDeviceId)}
           ${row("bridge", d.sourceBridgeId || "public")}
           ${row("hops", `${d.hopCount} / ${d.hopLimit}`)}
@@ -264,10 +274,12 @@
     const type = $("msgType").value;
     const status = $("msgStatus").value;
     const trust = $("msgTrust").value;
+    const route = $("msgRoute").value;
     if (query) q.set("q", query);
     if (type) q.set("type", type);
     if (status) q.set("status", status);
     if (trust) q.set("trust", trust);
+    if (route) q.set("routeAuthentication", route);
     q.set("limit", "300");
     const data = await api(`/api/messages?${q}`, { headers: authHeaders() });
     renderMessages(data.items || []);

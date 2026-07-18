@@ -10,6 +10,35 @@ object UuidMessageIdGenerator : MessageIdGenerator {
     override fun newId(): String = UUID.randomUUID().toString()
 }
 
+/** A classified creation failure that UI code can handle without relying on `check`. */
+sealed class LegacyMessageCreationException(val reason: String) : RuntimeException(reason) {
+    class InvalidMessage(reason: String) : LegacyMessageCreationException(reason)
+    class DuplicateMessageId(messageId: String) : LegacyMessageCreationException("duplicate message id: $messageId")
+    class MessageIdCollision(messageId: String) : LegacyMessageCreationException("message id collision: $messageId")
+    class StorageRejected(reason: String) : LegacyMessageCreationException(reason)
+}
+
+private suspend fun persistCreatedMessage(
+    repository: MessageRepository,
+    policy: MessagePolicy,
+    message: RelayMessage,
+): RelayMessage {
+    when (val validation = policy.validate(message)) {
+        MessageValidation.Valid -> Unit
+        is MessageValidation.Invalid -> throw LegacyMessageCreationException.InvalidMessage(validation.reason)
+    }
+
+    // Reclaim all conservatively expired records immediately before enforcing
+    // repository capacity. This also removes their delivery/receipt state.
+    repository.pruneExpired(policy)
+    when (val result = repository.insert(message)) {
+        InsertResult.Inserted -> return message
+        InsertResult.Duplicate -> throw LegacyMessageCreationException.DuplicateMessageId(message.messageId)
+        InsertResult.Collision -> throw LegacyMessageCreationException.MessageIdCollision(message.messageId)
+        is InsertResult.Rejected -> throw LegacyMessageCreationException.StorageRejected(result.reason)
+    }
+}
+
 class CreateSafetyMessageUseCase(
     private val repository: MessageRepository,
     private val policy: MessagePolicy,
@@ -47,10 +76,7 @@ class CreateSafetyMessageUseCase(
             receivedElapsedRealtimeMs = clock.elapsedRealtimeMillis(), persistedAtWallClockMs = now,
             elapsedRealtimeSessionId = clock.sessionId(),
         )
-        val validation = policy.validate(message)
-        require(validation is MessageValidation.Valid) { (validation as MessageValidation.Invalid).reason }
-        check(repository.insert(message) == InsertResult.Inserted) { "message id collision" }
-        return message
+        return persistCreatedMessage(repository, policy, message)
     }
 }
 
@@ -81,10 +107,7 @@ class CreateSupplyMessageUseCase(
             receivedElapsedRealtimeMs = clock.elapsedRealtimeMillis(), persistedAtWallClockMs = now,
             elapsedRealtimeSessionId = clock.sessionId(),
         )
-        val validation = policy.validate(message)
-        require(validation is MessageValidation.Valid) { (validation as MessageValidation.Invalid).reason }
-        check(repository.insert(message) == InsertResult.Inserted) { "message id collision" }
-        return message
+        return persistCreatedMessage(repository, policy, message)
     }
 }
 
@@ -107,9 +130,7 @@ class CreateStatusChangeUseCase(
             receivedElapsedRealtimeMs = clock.elapsedRealtimeMillis(), persistedAtWallClockMs = now,
             elapsedRealtimeSessionId = clock.sessionId(),
         )
-        require(policy.validate(message) is MessageValidation.Valid)
-        check(repository.insert(message) == InsertResult.Inserted)
-        return message
+        return persistCreatedMessage(repository, policy, message)
     }
 }
 

@@ -82,6 +82,19 @@ class RelayDesignCorrectionTest {
     }
 
     @Test
+    fun `delivery labels never claim official final delivery or verified content`() {
+        val unverified = deliveryPresentationLabel(DeliveryPresentation.GATEWAY_RECEIVED_UNVERIFIED)
+        val authenticatedRoute = deliveryPresentationLabel(DeliveryPresentation.GATEWAY_RECEIVED)
+        val peer = deliveryPresentationLabel(DeliveryPresentation.PEER_RECEIVED)
+        assertTrue(unverified.contains("未認証") || unverified.contains("未検証"))
+        assertTrue(authenticatedRoute.contains("未検証") || authenticatedRoute.contains("認証経路"))
+        assertFalse(unverified.contains("公式"))
+        assertFalse(authenticatedRoute.contains("最終配信完了"))
+        assertTrue(peer.contains("最終配信ではありません"))
+        assertEquals("転送待ち", deliveryPresentationLabel(DeliveryPresentation.NOT_CONFIRMED))
+    }
+
+    @Test
     fun `prepareForGatewayUpload allows hop exhausted active reports`() {
         val clock = MutableClock(NOW)
         val policy = MessagePolicy(clock)

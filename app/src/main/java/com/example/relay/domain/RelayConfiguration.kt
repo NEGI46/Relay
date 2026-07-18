@@ -6,6 +6,8 @@ data class ResourcePolicy(
     val maxSentBytesPerConnection: Long = 512 * 1024,
     val maxStoredMessages: Int = 2_000,
     val maxStoredMessagesPerOrigin: Int = 300,
+    val maxStoredReceipts: Int = 8_000,
+    val maxStoredReceiptsPerMessage: Int = 64,
 )
 
 enum class OperatingMode { NORMAL, DRILL, RELAY }

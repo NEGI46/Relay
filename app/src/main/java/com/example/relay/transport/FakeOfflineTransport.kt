@@ -61,6 +61,16 @@ class FakeOfflineTransport(
     private val transportEventFlow = MutableSharedFlow<TransportEvent>(extraBufferCapacity = 64)
     private val connected = linkedSetOf<String>()
     private var started = false
+    /**
+     * When non-null, [send] returns [SendResult.Failed] with this reason.
+     * Cleared only via [clearSendFailure] so handshake/MANIFEST retries can be forced to fail.
+     */
+    @Volatile
+    var sendFailureReason: String? = null
+
+    fun clearSendFailure() {
+        sendFailureReason = null
+    }
 
     override val state: StateFlow<OfflineTransportState> = transportState
     override val discoveredPeers: StateFlow<List<Peer>> = peers
@@ -100,6 +110,10 @@ class FakeOfflineTransport(
 
     override suspend fun send(peerId: String, payload: ByteArray): SendResult {
         check(peerId in connected) { "peer is not connected" }
+        val forced = sendFailureReason
+        if (forced != null) {
+            return SendResult.Failed(forced)
+        }
         network.deliver(deviceId, peerId, payload)
         return SendResult.PayloadTransferCompleted
     }

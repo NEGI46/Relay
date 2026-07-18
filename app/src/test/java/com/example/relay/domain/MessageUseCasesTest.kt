@@ -1,9 +1,12 @@
 package com.example.relay.domain
 
 import com.example.relay.NOW
+import com.example.relay.message
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class MessageUseCasesTest {
@@ -21,7 +24,7 @@ class MessageUseCasesTest {
         assertTrue(repository.all().all { it.hopCount == 0 && it.status == MessageStatus.CREATED })
     }
 
-    @Test(expected = IllegalArgumentException::class)
+    @Test(expected = LegacyMessageCreationException.InvalidMessage::class)
     fun `invalid form input is rejected before insertion`() {
         runBlocking {
             val clock = MutableClock(NOW)
@@ -31,5 +34,67 @@ class MessageUseCasesTest {
                 SupplyKind.WATER, 0, "north", "needed",
             )
         }
+    }
+
+    @Test
+    fun `expired records are pruned with delivery state before a full repository accepts a report`() = runBlocking {
+        val clock = MutableClock(NOW)
+        val repository = InMemoryMessageRepository(
+            ResourcePolicy(maxStoredMessages = 1, maxStoredMessagesPerOrigin = 1),
+        )
+        val policy = MessagePolicy(clock)
+        val expired = message(
+            id = "expired-critical",
+            priority = MessagePriority.CRITICAL,
+            expiresAt = NOW + 1_000,
+        )
+        assertEquals(InsertResult.Inserted, repository.insert(expired))
+        repository.markAcknowledged(MessageDelivery(expired.messageId, "peer-B", NOW, "packet-1"))
+        assertEquals(
+            InsertResult.Inserted,
+            repository.insertReceipt(
+                DeliveryReceipt("receipt-1", expired.messageId, ReceiptType.PEER_RECEIVED, "peer-B", NOW),
+            ),
+        )
+        clock.currentMillis = NOW + 1_000
+        clock.currentElapsedRealtimeMillis = NOW + 1_000
+
+        val created = CreateSafetyMessageUseCase(
+            repository,
+            policy,
+            clock,
+            "device-A",
+            MessageIdGenerator { "replacement" },
+        )(SafetyState.SAFE, 0, "north", "ok")
+
+        assertEquals("replacement", created.messageId)
+        assertNull(repository.find(expired.messageId))
+        assertTrue(repository.deliveries().isEmpty())
+        assertTrue(repository.allReceipts().isEmpty())
+        assertEquals(listOf(created), repository.all())
+    }
+
+    @Test
+    fun `active records at capacity return a classified domain failure instead of check failure`() = runBlocking {
+        val clock = MutableClock(NOW)
+        val repository = InMemoryMessageRepository(ResourcePolicy(maxStoredMessages = 1))
+        val policy = MessagePolicy(clock)
+        repository.insert(message(id = "active"))
+        val create = CreateSafetyMessageUseCase(
+            repository,
+            policy,
+            clock,
+            "device-B",
+            MessageIdGenerator { "new-report" },
+        )
+
+        try {
+            create(SafetyState.SAFE, 0, "north", "ok")
+            fail("Expected storage rejection")
+        } catch (failure: LegacyMessageCreationException.StorageRejected) {
+            assertEquals("max stored messages", failure.reason)
+        }
+
+        assertEquals(listOf("active"), repository.all().map { it.messageId })
     }
 }

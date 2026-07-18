@@ -2,6 +2,7 @@ package com.example.relay.protocol
 
 import com.example.relay.domain.MessagePolicy
 import com.example.relay.domain.MessageValidation
+import com.example.relay.domain.ReceiptType
 import java.util.UUID
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -64,12 +65,12 @@ class PacketCodec(
         } catch (_: Exception) {
             return DecodeResult.Failure(DecodeError.INVALID_BODY)
         }
-        val invalid = validateBody(body)
+        val invalid = validateBody(body, envelope.senderDeviceId)
         return if (invalid == null) DecodeResult.Success(DecodedPacket(envelope, body))
         else DecodeResult.Failure(DecodeError.INVALID_BODY, invalid)
     }
 
-    private fun validateBody(body: PacketBody): String? = when (body) {
+    private fun validateBody(body: PacketBody, senderDeviceId: String): String? = when (body) {
         is HelloBody -> if (body.displayName.length <= 64) null else "display name too long"
         is ManifestBody -> when {
             body.entries.size > limits.maxManifestEntries -> "manifest too large"
@@ -91,9 +92,16 @@ class PacketCodec(
         is ReceiptDataBody -> if (validId(body.receipt.receiptId) && validId(body.receipt.messageId) &&
             validId(body.receipt.actorId) && body.receipt.recordedAt >= 0
         ) null else "invalid receipt"
-        is AckBody -> if (validId(body.messageId) && validId(body.dataPacketId) &&
-            (body.peerReceipt == null || (validId(body.peerReceipt.receiptId) && body.peerReceipt.messageId == body.messageId))
-        ) null else "invalid ack"
+        is AckBody -> when {
+            !validId(body.messageId) || !validId(body.dataPacketId) -> "invalid ack"
+            body.peerReceipt == null -> "peer receipt required"
+            !validId(body.peerReceipt.receiptId) || !validId(body.peerReceipt.actorId) -> "invalid peer receipt"
+            body.peerReceipt.receiptType != ReceiptType.PEER_RECEIVED -> "peer receipt type required"
+            body.peerReceipt.messageId != body.messageId -> "peer receipt message mismatch"
+            body.peerReceipt.actorId != senderDeviceId -> "peer receipt actor mismatch"
+            body.peerReceipt.recordedAt < 0 -> "invalid peer receipt time"
+            else -> null
+        }
         is ErrorBody -> if (body.code.length in 1..32 && body.detail.length <= limits.maxErrorDetailChars) null else "invalid error"
     }
 

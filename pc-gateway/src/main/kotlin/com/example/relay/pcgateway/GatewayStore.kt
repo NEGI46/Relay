@@ -4,6 +4,8 @@ import com.example.relay.gateway.protocol.GatewayMessage
 import com.example.relay.gateway.protocol.GatewayReceipt
 import com.example.relay.gateway.protocol.UNVERIFIED_GATEWAY_RECEIPT_TYPE
 import com.example.relay.gateway.protocol.VERIFIED_GATEWAY_RECEIPT_TYPE
+import com.example.relay.pcgateway.rescue.RescuePersistence
+import com.example.relay.pcgateway.rescue.SqliteRescuePersistence
 import java.io.File
 import java.security.MessageDigest
 import java.sql.Connection
@@ -15,7 +17,16 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-data class StoreOutcome(val disposition: String, val receipt: GatewayReceipt? = null, val reason: String? = null)
+private const val ROUTE_AUTHENTICATED_BRIDGE = "AUTHENTICATED_BRIDGE"
+private const val ROUTE_ANONYMOUS_LAN = "ANONYMOUS_LAN"
+private const val CONTENT_UNVERIFIED = "UNVERIFIED"
+
+data class StoreOutcome(
+    val messageId: String,
+    val disposition: String,
+    val receipt: GatewayReceipt? = null,
+    val reason: String? = null,
+)
 @kotlinx.serialization.Serializable
 data class BridgeSummary(
     val bridgeId: String,
@@ -39,7 +50,10 @@ data class MessageSummary(
     val hopCount: Int,
     val gatewayReceived: Boolean,
     val gatewayReceivedUnverified: Boolean,
+    /** @deprecated Use [contentVerification]. Kept for JSON clients from the first PC Gateway MVP. */
     val ingressTrust: String,
+    val routeAuthentication: String,
+    val contentVerification: String,
     val sourceBridgeId: String? = null,
 )
 
@@ -58,7 +72,10 @@ data class MessageDetail(
     val hopCount: Int,
     val hopLimit: Int,
     val receivedAt: Long,
+    /** @deprecated Use [contentVerification]. Kept for JSON clients from the first PC Gateway MVP. */
     val ingressTrust: String,
+    val routeAuthentication: String,
+    val contentVerification: String,
     val sourceBridgeId: String?,
     val gatewayReceived: Boolean,
     val gatewayReceivedUnverified: Boolean,
@@ -69,13 +86,20 @@ data class MessageDetail(
 @kotlinx.serialization.Serializable
 data class TypeCount(val messageType: String, val count: Int)
 
+data class RouteAuthenticationCounts(val authenticatedBridge: Int, val anonymousLan: Int)
+
 @kotlinx.serialization.Serializable
 data class DashboardSnapshot(
     val gatewayId: String,
     val totalMessages: Int,
     val activeMessages: Int,
+    /** Legacy aliases; both fields count content verification, not route authentication. */
     val verifiedMessages: Int,
     val unverifiedMessages: Int,
+    val contentVerifiedMessages: Int,
+    val contentUnverifiedMessages: Int,
+    val authenticatedRouteMessages: Int,
+    val anonymousRouteMessages: Int,
     val bridgeCount: Int,
     val pairedBridgeCount: Int,
     val receiptCount: Int,
@@ -94,6 +118,15 @@ data class DashboardSnapshot(
 class GatewayStore(private val config: GatewayConfig, private val json: Json = GatewayJson) : AutoCloseable {
     private val lock = Any()
     private val connection: Connection
+    private val rescuePersistenceDelegate = lazy {
+        SqliteRescuePersistence(config.dbPath, json)
+    }
+
+    /**
+     * Durable rescue storage sharing the gateway database file, but using its own
+     * WAL-configured connection so legacy gateway work cannot hold a rescue intake lock.
+     */
+    fun rescuePersistence(): RescuePersistence = rescuePersistenceDelegate.value
 
     init {
         File(config.dbPath).parentFile?.mkdirs()
@@ -109,13 +142,43 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                   record_type TEXT NOT NULL, priority TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL,
                   expires_at INTEGER NOT NULL, lifetime_ms INTEGER NOT NULL, accumulated_age_ms INTEGER NOT NULL,
                   hop_count INTEGER NOT NULL, hop_limit INTEGER NOT NULL, origin_id TEXT NOT NULL, received_at INTEGER NOT NULL,
-                  ingress_trust TEXT NOT NULL DEFAULT 'VERIFIED',
-                  source_bridge_id TEXT
+                  ingress_trust TEXT NOT NULL DEFAULT 'UNVERIFIED',
+                  route_authentication TEXT NOT NULL DEFAULT 'ANONYMOUS_LAN',
+                  content_verification TEXT NOT NULL DEFAULT 'UNVERIFIED',
+                  source_bridge_id TEXT,
+                  status_event_created_at INTEGER NOT NULL DEFAULT -1,
+                  status_event_id TEXT NOT NULL DEFAULT ''
                 )
                 """.trimIndent(),
             )
-            ensureColumn(statement, "messages", "ingress_trust", "TEXT NOT NULL DEFAULT 'VERIFIED'")
+            ensureColumn(statement, "messages", "ingress_trust", "TEXT NOT NULL DEFAULT 'UNVERIFIED'")
             ensureColumn(statement, "messages", "source_bridge_id", "TEXT")
+            val routeColumnAdded = ensureColumn(
+                statement,
+                "messages",
+                "route_authentication",
+                "TEXT NOT NULL DEFAULT 'ANONYMOUS_LAN'",
+            )
+            ensureColumn(statement, "messages", "content_verification", "TEXT NOT NULL DEFAULT 'UNVERIFIED'")
+            if (routeColumnAdded) {
+                // Legacy ingress_trust represented whether the transport Bridge was authenticated,
+                // not whether the report content or claimed origin had been verified.
+                statement.execute(
+                    """
+                    UPDATE messages
+                    SET route_authentication = CASE
+                      WHEN ingress_trust='VERIFIED' OR source_bridge_id IS NOT NULL
+                        THEN 'AUTHENTICATED_BRIDGE'
+                      ELSE 'ANONYMOUS_LAN'
+                    END
+                    """.trimIndent(),
+                )
+            }
+            // No deployed MVP version cryptographically verified report content. Preserve route
+            // evidence in route_authentication, and conservatively migrate every legacy row.
+            statement.execute("UPDATE messages SET content_verification='UNVERIFIED', ingress_trust='UNVERIFIED'")
+            ensureColumn(statement, "messages", "status_event_created_at", "INTEGER NOT NULL DEFAULT -1")
+            ensureColumn(statement, "messages", "status_event_id", "TEXT NOT NULL DEFAULT ''")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(priority, created_at, expires_at)")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_messages_source_bridge ON messages(source_bridge_id)")
             statement.execute(
@@ -143,13 +206,14 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         }
     }
 
-    private fun ensureColumn(statement: java.sql.Statement, table: String, column: String, ddl: String) {
+    private fun ensureColumn(statement: java.sql.Statement, table: String, column: String, ddl: String): Boolean {
         val has = statement.executeQuery("PRAGMA table_info($table)").use { columns ->
             var found = false
             while (columns.next()) if (columns.getString("name") == column) found = true
             found
         }
         if (!has) statement.execute("ALTER TABLE $table ADD COLUMN $column $ddl")
+        return !has
     }
 
     fun createPairingCode(now: Long = System.currentTimeMillis()): String = synchronized(lock) {
@@ -246,13 +310,15 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         synchronized(lock) {
             connection.autoCommit = false
             try {
-                val ordered = messages.sortedWith(
-                    compareBy<GatewayMessage> { if (it.recordType == "STATUS_CHANGE") 0 else 1 }
-                        .thenByDescending { priorityRank(it.priority) }
-                        .thenByDescending { it.createdAt },
-                )
-                val results = ordered.map { message ->
-                    ingestOne(message, now, VERIFIED_GATEWAY_RECEIPT_TYPE, sourceBridgeId = bridgeId)
+                val results = MutableList<StoreOutcome?>(messages.size) { null }
+                persistenceOrder(messages).forEach { indexed ->
+                    results[indexed.index] = ingestOne(
+                        indexed.value,
+                        now,
+                        VERIFIED_GATEWAY_RECEIPT_TYPE,
+                        sourceBridgeId = bridgeId,
+                        applyTargetStatus = true,
+                    )
                 }
                 connection.prepareStatement(
                     "UPDATE bridges SET connected=1,last_sync_at=?,received_count=received_count+? WHERE bridge_id=?",
@@ -263,7 +329,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                     it.executeUpdate()
                 }
                 connection.commit()
-                results
+                results.map { requireNotNull(it) }
             } catch (error: Exception) {
                 connection.rollback()
                 throw error
@@ -277,15 +343,18 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         synchronized(lock) {
             connection.autoCommit = false
             try {
-                val ordered = messages.sortedWith(
-                    compareByDescending<GatewayMessage> { priorityRank(it.priority) }
-                        .thenByDescending { it.createdAt },
-                )
-                val results = ordered.map { message ->
-                    ingestOne(message, now, UNVERIFIED_GATEWAY_RECEIPT_TYPE, sourceBridgeId = null)
+                val results = MutableList<StoreOutcome?>(messages.size) { null }
+                persistenceOrder(messages).forEach { indexed ->
+                    results[indexed.index] = ingestOne(
+                        indexed.value,
+                        now,
+                        UNVERIFIED_GATEWAY_RECEIPT_TYPE,
+                        sourceBridgeId = null,
+                        applyTargetStatus = false,
+                    )
                 }
                 connection.commit()
-                results
+                results.map { requireNotNull(it) }
             } catch (error: Exception) {
                 connection.rollback()
                 throw error
@@ -293,6 +362,18 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                 connection.autoCommit = true
             }
         }
+
+    /**
+     * Transmission keeps STATUS_CHANGE at higher priority. Only the atomic persistence pass is
+     * dependency ordered so a newly received REPORT exists before its STATUS_CHANGE is checked.
+     * Results are written back to their original request positions by the callers.
+     */
+    private fun persistenceOrder(messages: List<GatewayMessage>): List<IndexedValue<GatewayMessage>> =
+        messages.withIndex().sortedWith(
+            compareBy<IndexedValue<GatewayMessage>> { if (it.value.recordType == "REPORT") 0 else 1 }
+                .thenByDescending { priorityRank(it.value.priority) }
+                .thenByDescending { it.value.createdAt },
+        )
 
     private fun priorityRank(priority: String): Int = when (priority) {
         "CRITICAL" -> 4
@@ -306,33 +387,95 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         now: Long,
         receiptType: String,
         sourceBridgeId: String?,
+        applyTargetStatus: Boolean,
     ): StoreOutcome {
-        val ingressTrust = if (receiptType == VERIFIED_GATEWAY_RECEIPT_TYPE) "VERIFIED" else "UNVERIFIED"
+        val routeAuthentication = if (receiptType == VERIFIED_GATEWAY_RECEIPT_TYPE) {
+            ROUTE_AUTHENTICATED_BRIDGE
+        } else {
+            ROUTE_ANONYMOUS_LAN
+        }
+        // Bridge authentication proves only which paired transport submitted the bytes. The MVP
+        // has no report signature/issuer verifier, so content and claimed origin stay unverified.
+        val contentVerification = CONTENT_UNVERIFIED
         if (message.messageId.isBlank() || message.messageId.length > 64 || message.originDeviceId.length !in 1..64) {
-            return StoreOutcome("REJECTED", reason = "invalid_identifier")
+            return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_identifier")
         }
         if (message.lifetimeMs !in 1..604_800_000L ||
             message.accumulatedAgeMs !in 0..message.lifetimeMs ||
             message.accumulatedAgeMs >= message.lifetimeMs
         ) {
-            return StoreOutcome("REJECTED", reason = "expired_or_invalid_ttl")
+            return StoreOutcome(message.messageId, "REJECTED", reason = "expired_or_invalid_ttl")
         }
         if (message.hopLimit !in 1..32 || message.hopCount !in 0..message.hopLimit) {
-            return StoreOutcome("REJECTED", reason = "invalid_hop")
+            return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_hop")
         }
         if (message.recordType == "STATUS_CHANGE") {
             val target = message.payload.jsonObject["targetMessageId"]?.jsonPrimitive?.content
-                ?: return StoreOutcome("REJECTED", reason = "invalid_status_change")
+                ?: return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_status_change")
             val newStatus = message.payload.jsonObject["newStatus"]?.jsonPrimitive?.content
-                ?: return StoreOutcome("REJECTED", reason = "invalid_status_change")
+                ?: return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_status_change")
             if (newStatus !in setOf("ACTIVE", "RESOLVED", "RETRACTED")) {
-                return StoreOutcome("REJECTED", reason = "invalid_status_change")
+                return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_status_change")
             }
-            val exists = connection.prepareStatement("SELECT 1 FROM messages WHERE message_id=?").use { ps ->
+            val exists = connection.prepareStatement(
+                "SELECT 1 FROM messages WHERE message_id=? AND record_type='REPORT'",
+            ).use { ps ->
                 ps.setString(1, target)
                 ps.executeQuery().use { it.next() }
             }
-            if (!exists) return StoreOutcome("REJECTED", reason = "target_report_not_found")
+            if (!exists) return StoreOutcome(message.messageId, "REJECTED", reason = "target_report_not_found")
+        }
+        val existing = connection.prepareStatement("SELECT canonical_json FROM messages WHERE message_id=?").use { ps ->
+            ps.setString(1, message.messageId)
+            ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+        }
+        if (existing != null) {
+            val storedMessage = runCatching {
+                json.decodeFromString(GatewayMessage.serializer(), existing)
+            }.getOrNull() ?: return StoreOutcome(
+                message.messageId,
+                "COLLISION",
+                reason = "stored message unreadable",
+            )
+            if (!sameImmutableMessage(storedMessage, message)) {
+                return StoreOutcome(message.messageId, "COLLISION", reason = "messageId collision")
+            }
+            val mergedMessage = message.copy(
+                // A younger copy must never make an old report live longer.
+                accumulatedAgeMs = maxOf(storedMessage.accumulatedAgeMs, message.accumulatedAgeMs),
+                // Keep the conservative path value; a shorter duplicate must not regain relay budget.
+                hopCount = maxOf(storedMessage.hopCount, message.hopCount),
+                receivedAt = maxOf(storedMessage.receivedAt, message.receivedAt),
+            )
+            connection.prepareStatement(
+                "UPDATE messages SET canonical_json=?, accumulated_age_ms=?, hop_count=?, received_at=? WHERE message_id=?",
+            ).use { ps ->
+                ps.setString(1, json.encodeToString(mergedMessage))
+                ps.setLong(2, mergedMessage.accumulatedAgeMs)
+                ps.setInt(3, mergedMessage.hopCount)
+                ps.setLong(4, mergedMessage.receivedAt)
+                ps.setString(5, message.messageId)
+                ps.executeUpdate()
+            }
+            if (routeAuthentication == ROUTE_AUTHENTICATED_BRIDGE) {
+                connection.prepareStatement(
+                    """
+                    UPDATE messages
+                    SET route_authentication='AUTHENTICATED_BRIDGE',
+                        content_verification='UNVERIFIED', ingress_trust='UNVERIFIED',
+                        source_bridge_id=COALESCE(?, source_bridge_id)
+                    WHERE message_id=?
+                    """.trimIndent(),
+                ).use { ps ->
+                    ps.setString(1, sourceBridgeId)
+                    ps.setString(2, message.messageId)
+                    ps.executeUpdate()
+                }
+            }
+            if (applyTargetStatus && message.recordType == "STATUS_CHANGE") {
+                applyStatusChange(message)
+            }
+            return StoreOutcome(message.messageId, "DUPLICATE", receiptFor(message.messageId, now, receiptType))
         }
         val total = connection.createStatement().use {
             it.executeQuery("SELECT COUNT(*) FROM messages").use { rs ->
@@ -340,29 +483,13 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                 rs.getInt(1)
             }
         }
-        if (total >= config.maxStoredMessages) return StoreOutcome("REJECTED", reason = "db_message_limit")
-        val existing = connection.prepareStatement("SELECT canonical_json FROM messages WHERE message_id=?").use { ps ->
-            ps.setString(1, message.messageId)
-            ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
-        }
-        if (existing != null) {
-            val canonical = json.encodeToString(message)
-            if (existing != canonical) return StoreOutcome("COLLISION", reason = "messageId collision")
-            if (ingressTrust == "VERIFIED") {
-                connection.prepareStatement(
-                    "UPDATE messages SET ingress_trust='VERIFIED', source_bridge_id=COALESCE(?, source_bridge_id) WHERE message_id=?",
-                ).use { ps ->
-                    ps.setString(1, sourceBridgeId)
-                    ps.setString(2, message.messageId)
-                    ps.executeUpdate()
-                }
-            }
-            return StoreOutcome("DUPLICATE", receiptFor(message.messageId, now, receiptType))
+        if (total >= config.maxStoredMessages) {
+            return StoreOutcome(message.messageId, "REJECTED", reason = "db_message_limit")
         }
         connection.prepareStatement(
             """
-            INSERT INTO messages(message_id,canonical_json,message_type,record_type,priority,status,created_at,expires_at,lifetime_ms,accumulated_age_ms,hop_count,hop_limit,origin_id,received_at,ingress_trust,source_bridge_id)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO messages(message_id,canonical_json,message_type,record_type,priority,status,created_at,expires_at,lifetime_ms,accumulated_age_ms,hop_count,hop_limit,origin_id,received_at,ingress_trust,route_authentication,content_verification,source_bridge_id)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """.trimIndent(),
         ).use { ps ->
             ps.setString(1, message.messageId)
@@ -379,21 +506,53 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
             ps.setInt(12, message.hopLimit)
             ps.setString(13, message.originDeviceId)
             ps.setLong(14, message.receivedAt)
-            ps.setString(15, ingressTrust)
-            ps.setString(16, sourceBridgeId)
+            ps.setString(15, contentVerification)
+            ps.setString(16, routeAuthentication)
+            ps.setString(17, contentVerification)
+            ps.setString(18, sourceBridgeId)
             ps.executeUpdate()
         }
-        if (message.recordType == "STATUS_CHANGE") {
-            val target = message.payload.jsonObject["targetMessageId"]!!.jsonPrimitive.content
-            val newStatus = message.payload.jsonObject["newStatus"]!!.jsonPrimitive.content
-            connection.prepareStatement("UPDATE messages SET status=? WHERE message_id=?").use { ps ->
-                ps.setString(1, newStatus)
-                ps.setString(2, target)
-                ps.executeUpdate()
-            }
+        if (applyTargetStatus && message.recordType == "STATUS_CHANGE") {
+            applyStatusChange(message)
         }
-        return StoreOutcome("STORED", receiptFor(message.messageId, now, receiptType))
+        return StoreOutcome(message.messageId, "STORED", receiptFor(message.messageId, now, receiptType))
     }
+
+    private fun applyStatusChange(message: GatewayMessage) {
+        val target = message.payload.jsonObject["targetMessageId"]!!.jsonPrimitive.content
+        val newStatus = message.payload.jsonObject["newStatus"]!!.jsonPrimitive.content
+        // Store-carry-forward can deliver events out of order. Apply only the
+        // newest event; messageId is a deterministic tie-breaker for equal clocks.
+        connection.prepareStatement(
+            """
+            UPDATE messages
+            SET status=?, status_event_created_at=?, status_event_id=?
+            WHERE message_id=? AND record_type='REPORT'
+              AND (status_event_created_at < ? OR
+                   (status_event_created_at = ? AND status_event_id < ?))
+            """.trimIndent(),
+        ).use { ps ->
+            ps.setString(1, newStatus)
+            ps.setLong(2, message.createdAt)
+            ps.setString(3, message.messageId)
+            ps.setString(4, target)
+            ps.setLong(5, message.createdAt)
+            ps.setLong(6, message.createdAt)
+            ps.setString(7, message.messageId)
+            ps.executeUpdate()
+        }
+    }
+
+    /**
+     * Store-carry-forward updates age, hop count and the receiving device's wall-clock timestamp.
+     * The wall clock is deliberately not ordered because independent Android clocks can be skewed.
+     */
+    private fun sameImmutableMessage(stored: GatewayMessage, incoming: GatewayMessage): Boolean =
+        stored.copy(
+            accumulatedAgeMs = incoming.accumulatedAgeMs,
+            hopCount = incoming.hopCount,
+            receivedAt = incoming.receivedAt,
+        ) == incoming
 
     private fun receiptFor(messageId: String, now: Long, receiptType: String): GatewayReceipt {
         val existing = connection.prepareStatement(
@@ -495,13 +654,14 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         }
     }
 
+    /** Legacy API name: these are content-verification counts, never transport-authentication counts. */
     fun trustCounts(): Pair<Int, Int> = synchronized(lock) {
         connection.createStatement().use { st ->
             st.executeQuery(
                 """
                 SELECT
-                  COALESCE(SUM(CASE WHEN ingress_trust='VERIFIED' THEN 1 ELSE 0 END),0),
-                  COALESCE(SUM(CASE WHEN ingress_trust='UNVERIFIED' THEN 1 ELSE 0 END),0)
+                  COALESCE(SUM(CASE WHEN content_verification='VERIFIED' THEN 1 ELSE 0 END),0),
+                  COALESCE(SUM(CASE WHEN content_verification='UNVERIFIED' THEN 1 ELSE 0 END),0)
                 FROM messages
                 """.trimIndent(),
             ).use { rs ->
@@ -511,11 +671,28 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         }
     }
 
+    fun routeAuthenticationCounts(): RouteAuthenticationCounts = synchronized(lock) {
+        connection.createStatement().use { st ->
+            st.executeQuery(
+                """
+                SELECT
+                  COALESCE(SUM(CASE WHEN route_authentication='AUTHENTICATED_BRIDGE' THEN 1 ELSE 0 END),0),
+                  COALESCE(SUM(CASE WHEN route_authentication='ANONYMOUS_LAN' THEN 1 ELSE 0 END),0)
+                FROM messages
+                """.trimIndent(),
+            ).use { rs ->
+                rs.next()
+                RouteAuthenticationCounts(rs.getInt(1), rs.getInt(2))
+            }
+        }
+    }
+
     fun messages(
         type: String? = null,
         status: String? = null,
         query: String? = null,
         trust: String? = null,
+        routeAuthentication: String? = null,
         limit: Int = 500,
     ): List<MessageSummary> = synchronized(lock) {
         val rows = connection.prepareStatement(
@@ -523,7 +700,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
             SELECT m.message_id,m.message_type,m.record_type,m.priority,m.status,m.origin_id,m.created_at,m.received_at,m.hop_count,
               EXISTS(SELECT 1 FROM receipts r WHERE r.message_id=m.message_id AND r.receipt_type='GATEWAY_RECEIVED'),
               EXISTS(SELECT 1 FROM receipts r WHERE r.message_id=m.message_id AND r.receipt_type='GATEWAY_RECEIVED_UNVERIFIED'),
-              m.ingress_trust,m.source_bridge_id
+              m.ingress_trust,m.route_authentication,m.content_verification,m.source_bridge_id
             FROM messages m
             ORDER BY CASE priority WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'NORMAL' THEN 2 ELSE 1 END DESC, created_at DESC
             """.trimIndent(),
@@ -546,6 +723,8 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                                 rs.getInt(11) == 1,
                                 rs.getString(12),
                                 rs.getString(13),
+                                rs.getString(14),
+                                rs.getString(15),
                             ),
                         )
                     }
@@ -555,7 +734,11 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         rows.asSequence()
             .filter { type == null || it.messageType == type }
             .filter { status == null || it.status == status }
-            .filter { trust == null || it.ingressTrust.equals(trust, ignoreCase = true) }
+            .filter { trust == null || it.contentVerification.equals(trust, ignoreCase = true) }
+            .filter {
+                routeAuthentication == null ||
+                    it.routeAuthentication.equals(routeAuthentication, ignoreCase = true)
+            }
             .filter {
                 query.isNullOrBlank() ||
                     it.messageId.contains(query, true) ||
@@ -570,8 +753,8 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         connection.prepareStatement(
             """
             SELECT m.message_id,m.message_type,m.record_type,m.priority,m.status,m.origin_id,m.created_at,m.expires_at,
-              m.lifetime_ms,m.accumulated_age_ms,m.hop_count,m.hop_limit,m.received_at,m.ingress_trust,m.source_bridge_id,
-              m.canonical_json,
+              m.lifetime_ms,m.accumulated_age_ms,m.hop_count,m.hop_limit,m.received_at,m.ingress_trust,
+              m.route_authentication,m.content_verification,m.source_bridge_id,m.canonical_json,
               EXISTS(SELECT 1 FROM receipts r WHERE r.message_id=m.message_id AND r.receipt_type='GATEWAY_RECEIVED'),
               EXISTS(SELECT 1 FROM receipts r WHERE r.message_id=m.message_id AND r.receipt_type='GATEWAY_RECEIVED_UNVERIFIED')
             FROM messages m WHERE m.message_id=?
@@ -600,7 +783,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                         }
                     }
                 }
-                val canonical = rs.getString(16)
+                val canonical = rs.getString(18)
                 val payloadJson = runCatching {
                     val element = json.parseToJsonElement(canonical)
                     val payload = element.jsonObject["payload"]
@@ -621,9 +804,11 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                     hopLimit = rs.getInt(12),
                     receivedAt = rs.getLong(13),
                     ingressTrust = rs.getString(14),
-                    sourceBridgeId = rs.getString(15),
-                    gatewayReceived = rs.getInt(17) == 1,
-                    gatewayReceivedUnverified = rs.getInt(18) == 1,
+                    routeAuthentication = rs.getString(15),
+                    contentVerification = rs.getString(16),
+                    sourceBridgeId = rs.getString(17),
+                    gatewayReceived = rs.getInt(19) == 1,
+                    gatewayReceivedUnverified = rs.getInt(20) == 1,
                     payloadJson = payloadJson.take(8_192),
                     receipts = receipts,
                 )
@@ -655,6 +840,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
     fun dashboard(config: GatewayConfig, recentLimit: Int = 12): DashboardSnapshot {
         val counts = counts()
         val trust = trustCounts()
+        val routes = routeAuthenticationCounts()
         val bridges = summaries()
         return DashboardSnapshot(
             gatewayId = config.gatewayId,
@@ -662,6 +848,10 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
             activeMessages = counts.second,
             verifiedMessages = trust.first,
             unverifiedMessages = trust.second,
+            contentVerifiedMessages = trust.first,
+            contentUnverifiedMessages = trust.second,
+            authenticatedRouteMessages = routes.authenticatedBridge,
+            anonymousRouteMessages = routes.anonymousLan,
             bridgeCount = bridges.size,
             pairedBridgeCount = bridges.count { it.paired },
             receiptCount = receiptCount(),
@@ -680,7 +870,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
 
     fun exportCsv(limit: Int = 5_000): String = synchronized(lock) {
         val header = listOf(
-            "messageId", "messageType", "recordType", "priority", "status", "ingressTrust",
+            "messageId", "messageType", "recordType", "priority", "status", "contentVerification", "routeAuthentication",
             "origin", "sourceBridgeId", "createdAt", "receivedAt", "hopCount",
             "gatewayReceived", "gatewayReceivedUnverified",
         ).joinToString(",")
@@ -691,7 +881,8 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                 m.recordType,
                 m.priority,
                 m.status,
-                m.ingressTrust,
+                m.contentVerification,
+                m.routeAuthentication,
                 m.origin,
                 m.sourceBridgeId.orEmpty(),
                 m.createdAt.toString(),
@@ -710,6 +901,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
     }
 
     override fun close() {
+        if (rescuePersistenceDelegate.isInitialized()) rescuePersistenceDelegate.value.close()
         synchronized(lock) { connection.close() }
     }
 

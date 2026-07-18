@@ -7,7 +7,10 @@ captures/
 .externalNativeBuild/
 .cxx/
 .kotlin/
-data/
+/data/
+.ua/
+mcps/
+terminals/
 *.db
 *.db-shm
 *.db-wal
@@ -17,6 +20,8 @@ artifacts/pc-gateway-exe/
 artifacts/~relay-pc-gateway.DDF
 # Local WiX 3.14 binaries (download wix314-binaries.zip into tools/wix314)
 tools/wix314/
+signing/*.jks
+signing/*.pfx
 artifacts/*.txt
 artifacts/gw-*.txt
 artifacts/export-test.csv

@@ -5,6 +5,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +21,9 @@ class NearbyConnectionsTransport(
     private val scope: CoroutineScope,
     private val maxPayloadBytes: Int = 32 * 1024,
     private val transferTimeoutMs: Long = 30_000,
+    private val connectionAttemptTimeoutMs: Long = 30_000,
+    private val reconnectBaseDelayMs: Long = 1_000,
+    private val reconnectMaxDelayMs: Long = 30_000,
 ) : OfflineTransport {
     private val lifecycleMutex = Mutex()
     private val _state = MutableStateFlow(OfflineTransportState())
@@ -30,6 +34,10 @@ class NearbyConnectionsTransport(
     private val peerToEndpoint = linkedMapOf<String, String>()
     private val endpointToPeer = linkedMapOf<String, String>()
     private val pendingTransfers = ConcurrentHashMap<Long, CompletableDeferred<SendResult>>()
+    private val connectingPeerIds = ConcurrentHashMap.newKeySet<String>()
+    private val connectionAttemptTimeoutJobs = ConcurrentHashMap<String, Job>()
+    private val reconnectAttempts = ConcurrentHashMap<String, Int>()
+    private val reconnectJobs = ConcurrentHashMap<String, Job>()
     private var eventJob: Job? = null
 
     override val state: StateFlow<OfflineTransportState> = _state
@@ -68,13 +76,7 @@ class NearbyConnectionsTransport(
     }
 
     override suspend fun connect(peerId: String) {
-        val endpointId = peerToEndpoint[peerId] ?: return fail("connect", "unknown peer")
-        try {
-            platform.requestConnection(localDeviceId, endpointId)
-        } catch (error: Exception) {
-            fail("connect", error.safeReason())
-            _connectionEvents.emit(ConnectionEvent.Failed(peerId, error.safeReason()))
-        }
+        requestPeerConnection(peerId)
     }
 
     override suspend fun acceptConnection(peerId: String) {
@@ -128,6 +130,12 @@ class NearbyConnectionsTransport(
             is NearbyPlatformEvent.EndpointLost -> removeDiscoveredEndpoint(event.endpointId)
             is NearbyPlatformEvent.ConnectionInitiated -> handleInitiated(event)
             is NearbyPlatformEvent.ConnectionSucceeded -> endpointToPeer[event.endpointId]?.let { peerId ->
+                if (!connectingPeerIds.remove(peerId)) {
+                    platform.disconnect(event.endpointId)
+                    return@let
+                }
+                cancelConnectionAttemptTimeout(peerId)
+                cancelReconnect(peerId, resetAttempts = true)
                 _state.value = _state.value.copy(
                     connectedPeerIds = _state.value.connectedPeerIds + peerId,
                     pendingVerifications = _state.value.pendingVerifications - peerId,
@@ -135,12 +143,18 @@ class NearbyConnectionsTransport(
                 _connectionEvents.emit(ConnectionEvent.Connected(Peer(peerId)))
             }
             is NearbyPlatformEvent.ConnectionFailed -> endpointToPeer[event.endpointId]?.let { peerId ->
+                val wasActive = peerId in connectingPeerIds || peerId in _state.value.connectedPeerIds
                 clearPeerConnection(peerId)
+                if (!wasActive) return@let
                 _connectionEvents.emit(ConnectionEvent.Failed(peerId, event.reason))
+                scheduleReconnect(peerId)
             }
             is NearbyPlatformEvent.Disconnected -> endpointToPeer[event.endpointId]?.let { peerId ->
+                val wasActive = peerId in connectingPeerIds || peerId in _state.value.connectedPeerIds
                 clearPeerConnection(peerId)
+                if (!wasActive) return@let
                 _connectionEvents.emit(ConnectionEvent.Disconnected(peerId))
+                scheduleReconnect(peerId)
             }
             is NearbyPlatformEvent.BytesReceived -> endpointToPeer[event.endpointId]?.let { peerId ->
                 val bytes = event.bytes.copyOf()
@@ -164,7 +178,7 @@ class NearbyConnectionsTransport(
         }
     }
 
-    private suspend fun addPeer(endpointId: String, peerId: String) {
+    private suspend fun addPeer(endpointId: String, peerId: String, initiateConnection: Boolean = true) {
         if (peerId.isBlank() || peerId == localDeviceId) return
         val existing = peerToEndpoint[peerId]
         if (existing != null && existing != endpointId) {
@@ -177,19 +191,17 @@ class NearbyConnectionsTransport(
         _transportEvents.emit(TransportEvent.PeerFound(peerId))
         // Disaster mode is intentionally hands-off: use a deterministic initiator
         // so both devices do not race to request the same connection.
-        if (localDeviceId < peerId && peerId !in _state.value.connectedPeerIds && peerId !in _state.value.pendingVerifications) {
-            try {
-                platform.requestConnection(localDeviceId, endpointId)
-            } catch (error: Exception) {
-                fail("connect", error.safeReason())
-                _connectionEvents.emit(ConnectionEvent.Failed(peerId, error.safeReason()))
-            }
+        if (initiateConnection && isDeterministicInitiator(peerId)) {
+            requestPeerConnection(peerId)
         }
     }
 
     private suspend fun removeDiscoveredEndpoint(endpointId: String) {
         val peerId = endpointToPeer[endpointId] ?: return
         if (peerId in _state.value.connectedPeerIds || peerId in _state.value.pendingVerifications) return
+        cancelReconnect(peerId, resetAttempts = true)
+        cancelConnectionAttemptTimeout(peerId)
+        connectingPeerIds -= peerId
         endpointToPeer.remove(endpointId)
         peerToEndpoint.remove(peerId)
         _discoveredPeers.value = peerToEndpoint.keys.map(::Peer)
@@ -197,12 +209,19 @@ class NearbyConnectionsTransport(
     }
 
     private suspend fun handleInitiated(event: NearbyPlatformEvent.ConnectionInitiated) {
-        addPeer(event.endpointId, event.endpointName)
+        // A connection request is already in flight when this callback arrives.
+        // Register the endpoint without issuing a second request.
+        addPeer(event.endpointId, event.endpointName, initiateConnection = false)
         val peerId = endpointToPeer[event.endpointId] ?: return
+        connectingPeerIds += peerId
+        ensureConnectionAttemptTimeout(peerId)
+        reconnectJobs.remove(peerId)?.cancel()
         val digits = event.authenticationDigits?.takeIf { it.isNotBlank() }
         if (digits == null) {
             platform.rejectConnection(event.endpointId)
+            clearPeerConnection(peerId)
             _connectionEvents.emit(ConnectionEvent.Failed(peerId, "authentication code unavailable"))
+            scheduleReconnect(peerId)
             return
         }
         // Nearby authentication digits remain available for diagnostics, but are
@@ -219,11 +238,82 @@ class NearbyConnectionsTransport(
     }
 
     private fun clearPeerConnection(peerId: String) {
+        cancelConnectionAttemptTimeout(peerId)
+        connectingPeerIds -= peerId
         _state.value = _state.value.copy(
             connectedPeerIds = _state.value.connectedPeerIds - peerId,
             pendingVerifications = _state.value.pendingVerifications - peerId,
         )
     }
+
+    private suspend fun requestPeerConnection(peerId: String) {
+        val endpointId = peerToEndpoint[peerId] ?: return fail("connect", "unknown peer")
+        if (!_state.value.started || peerId in _state.value.connectedPeerIds || !connectingPeerIds.add(peerId)) return
+        val timeoutJob = prepareConnectionAttemptTimeout(peerId)
+        try {
+            platform.requestConnection(localDeviceId, endpointId)
+            timeoutJob.start()
+        } catch (error: Exception) {
+            cancelConnectionAttemptTimeout(peerId)
+            connectingPeerIds -= peerId
+            fail("connect", error.safeReason())
+            _connectionEvents.emit(ConnectionEvent.Failed(peerId, error.safeReason()))
+            scheduleReconnect(peerId)
+        }
+    }
+
+    private fun prepareConnectionAttemptTimeout(peerId: String): Job {
+        val timeoutJob = scope.launch(start = CoroutineStart.LAZY) {
+            delay(connectionAttemptTimeoutMs)
+            connectionAttemptTimeoutJobs.remove(peerId)
+            if (!connectingPeerIds.remove(peerId) || !_state.value.started) return@launch
+            _state.value = _state.value.copy(
+                connectedPeerIds = _state.value.connectedPeerIds - peerId,
+                pendingVerifications = _state.value.pendingVerifications - peerId,
+            )
+            peerToEndpoint[peerId]?.let { endpointId -> runCatching { platform.disconnect(endpointId) } }
+            fail("connect", "connection attempt timed out")
+            _connectionEvents.emit(ConnectionEvent.Failed(peerId, "connection attempt timed out"))
+            scheduleReconnect(peerId)
+        }
+        connectionAttemptTimeoutJobs.put(peerId, timeoutJob)?.cancel()
+        return timeoutJob
+    }
+
+    private fun ensureConnectionAttemptTimeout(peerId: String) {
+        val timeoutJob = connectionAttemptTimeoutJobs[peerId]
+            ?: prepareConnectionAttemptTimeout(peerId)
+        timeoutJob.start()
+    }
+
+    private fun cancelConnectionAttemptTimeout(peerId: String) {
+        connectionAttemptTimeoutJobs.remove(peerId)?.cancel()
+    }
+
+    private fun scheduleReconnect(peerId: String) {
+        if (!_state.value.started || !isDeterministicInitiator(peerId) || peerId !in peerToEndpoint) return
+        if (peerId in _state.value.connectedPeerIds || reconnectJobs[peerId]?.isActive == true) return
+        val attempt = reconnectAttempts[peerId] ?: 0
+        reconnectAttempts[peerId] = attempt + 1
+        val multiplier = 1L shl attempt.coerceAtMost(30)
+        val delayMs = if (reconnectBaseDelayMs > reconnectMaxDelayMs / multiplier) {
+            reconnectMaxDelayMs
+        } else {
+            (reconnectBaseDelayMs * multiplier).coerceAtMost(reconnectMaxDelayMs)
+        }
+        reconnectJobs[peerId] = scope.launch {
+            delay(delayMs)
+            reconnectJobs.remove(peerId)
+            requestPeerConnection(peerId)
+        }
+    }
+
+    private fun cancelReconnect(peerId: String, resetAttempts: Boolean) {
+        reconnectJobs.remove(peerId)?.cancel()
+        if (resetAttempts) reconnectAttempts.remove(peerId)
+    }
+
+    private fun isDeterministicInitiator(peerId: String): Boolean = localDeviceId < peerId
 
     private suspend fun fail(operation: String, reason: String) {
         _state.value = _state.value.copy(lastError = reason)
@@ -235,6 +325,14 @@ class NearbyConnectionsTransport(
         eventJob = null
         pendingTransfers.values.forEach { it.complete(SendResult.Failed("transport stopped")) }
         pendingTransfers.clear()
+        val scheduledReconnects = reconnectJobs.values.toList()
+        reconnectJobs.clear()
+        scheduledReconnects.forEach { it.cancel() }
+        val connectionTimeouts = connectionAttemptTimeoutJobs.values.toList()
+        connectionAttemptTimeoutJobs.clear()
+        connectionTimeouts.forEach { it.cancel() }
+        reconnectAttempts.clear()
+        connectingPeerIds.clear()
         peerToEndpoint.clear()
         endpointToPeer.clear()
         _discoveredPeers.value = emptyList()

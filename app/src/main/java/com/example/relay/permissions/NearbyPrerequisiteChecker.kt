@@ -29,7 +29,7 @@ class NearbyPrerequisiteChecker(
             ?: return NearbyPrerequisite.BluetoothUnavailable
         val enabled = try { adapter.isEnabled } catch (_: SecurityException) { false }
         if (!enabled) return NearbyPrerequisite.BluetoothDisabled
-        if (Build.VERSION.SDK_INT <= 30) {
+        if (Build.VERSION.SDK_INT <= 31) {
             val location = context.getSystemService(LocationManager::class.java)
             val locationEnabled = if (Build.VERSION.SDK_INT >= 28) location?.isLocationEnabled == true
             else location?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true || location?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true

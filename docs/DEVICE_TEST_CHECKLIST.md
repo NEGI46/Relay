@@ -34,10 +34,12 @@
 - [ ] 同一 messageId の重複が 1 件
 - [ ] （推奨）PC 停止中作成 → 復旧後再送
 
-## D. 任意: verified ペアリング
+## D. 任意: Bridge経路のペアリング
 
 - [ ] 管理画面でコード生成・承認
-- [ ] 認証同期で `GATEWAY_RECEIVED`（verified）
+- [ ] 認証同期で `GATEWAY_RECEIVED`（PC保存）
+- [ ] PC管理画面で経路は `AUTHENTICATED_BRIDGE`、内容は `UNVERIFIED`
+- [ ] `GATEWAY_RECEIVED`を公式情報・最終配信と表示しない
 - [ ] reject/revoke 後は同期拒否
 
 ## E. ログ・プライバシー

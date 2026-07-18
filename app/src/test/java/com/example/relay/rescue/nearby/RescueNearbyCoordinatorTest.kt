@@ -1,0 +1,155 @@
+package com.example.relay.rescue.nearby
+
+import com.example.relay.rescue.EncryptedRescueEnvelope
+import com.example.relay.rescue.InMemoryRescueEnvelopeRepository
+import com.example.relay.rescue.RescueCryptography
+import com.example.relay.rescue.RescueEnvelopeRepository
+import com.example.relay.rescue.RescueRequestCreator
+import com.example.relay.rescue.RescueRequestDraft
+import com.example.relay.rescue.RescueRequestKey
+import com.example.relay.rescue.RescueStoreResult
+import com.example.relay.rescue.RescueSubmissionStatus
+import com.example.relay.rescue.RescueSupportNeed
+import com.example.relay.rescue.RescueUrgency
+import com.example.relay.rescue.StoredRescueRecord
+import com.example.relay.rescue.forwardRescueEnvelope
+import com.example.relay.transport.ConnectionEvent
+import com.example.relay.transport.OfflineTransport
+import com.example.relay.transport.OfflineTransportState
+import com.example.relay.transport.Peer
+import com.example.relay.transport.ReceivedPayload
+import com.example.relay.transport.SendResult
+import com.example.relay.transport.TransportEvent
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class RescueNearbyCoordinatorTest {
+    @Test
+    fun `inventory is metadata only and never exposes encrypted rescue plaintext`() = runTest {
+        val store = InMemoryRescueEnvelopeRepository()
+        createAndStore(store, freeText = "secret location and injury details")
+        val transport = RecordingTransport()
+        val coordinator = RescueNearbyCoordinator(store, transport, nowEpochMillis = { NOW })
+
+        coordinator.onPeerConnected("courier-b")
+
+        val sent = transport.sent.single()
+        val packet = RescueNearbyPacketCodec().decode(sent.second)
+        val inventory = packet as RescueNearbyPacket.Inventory
+        assertEquals("courier-b", sent.first)
+        assertEquals(1, inventory.entries.size)
+        assertEquals("request-1", inventory.entries.single().requestId)
+        assertFalse(sent.second.decodeToString().contains("secret location"))
+        assertFalse(sent.second.decodeToString().contains("injury details"))
+        assertFalse(sent.second.decodeToString().contains("ciphertextBase64"))
+    }
+
+    @Test
+    fun `incoming encrypted envelope is durably stored before acknowledgement`() = runTest {
+        val source = InMemoryRescueEnvelopeRepository()
+        val envelope = createAndStore(source, freeText = "do not reveal")
+        val transferredEnvelope = requireNotNull(forwardRescueEnvelope(envelope))
+        require(envelope.expiresAtEpochMillis > System.currentTimeMillis())
+        val durableStore = InMemoryRescueEnvelopeRepository()
+        var ackWasSentAfterStore = false
+        val transport = RecordingTransport { _, bytes ->
+            val packet = RescueNearbyPacketCodec().decode(bytes)
+            if (packet is RescueNearbyPacket.Ack) {
+                assertNotNull(durableStore.get(packet.key))
+                ackWasSentAfterStore = true
+            }
+            SendResult.PayloadTransferCompleted
+        }
+        val coordinator = RescueNearbyCoordinator(durableStore, transport, nowEpochMillis = System::currentTimeMillis)
+
+        coordinator.handlePayload(
+            "member-a",
+            RescueNearbyPacketCodec().encode(RescueNearbyPacket.Envelope(transferredEnvelope)),
+        )
+
+        assertTrue(ackWasSentAfterStore)
+        assertEquals(RescueSubmissionStatus.PENDING, durableStore.get(RescueRequestKey("request-1", 1))!!.state.submissionStatus)
+    }
+
+    @Test
+    fun `mesh hop advances only after matching durable peer acknowledgement`() = runTest {
+        val store = InMemoryRescueEnvelopeRepository()
+        val envelope = createAndStore(store, freeText = "confidential")
+        val transport = RecordingTransport()
+        val coordinator = RescueNearbyCoordinator(store, transport, nowEpochMillis = { NOW })
+        val key = RescueRequestKey("request-1", 1)
+
+        coordinator.handlePayload(
+            "courier-b",
+            RescueNearbyPacketCodec().encode(RescueNearbyPacket.Request(listOf(RescueRequestKeyWire(key.requestId, key.requestVersion)))),
+        )
+
+        assertEquals(0, store.get(key)!!.envelope.hopCount)
+        val sentEnvelope = RescueNearbyPacketCodec().decode(transport.sent.single().second) as RescueNearbyPacket.Envelope
+        assertEquals(1, sentEnvelope.envelope.hopCount)
+
+        coordinator.handlePayload(
+            "courier-b",
+            RescueNearbyPacketCodec().encode(
+                RescueNearbyPacket.Ack(key, envelope.envelopeId, envelope.ciphertextSha256Hex, exportedHopCount = 1),
+            ),
+        )
+
+        assertEquals(1, store.get(key)!!.envelope.hopCount)
+        assertEquals(RescueSubmissionStatus.IN_TRANSIT, store.get(key)!!.state.submissionStatus)
+    }
+
+    private fun createAndStore(store: InMemoryRescueEnvelopeRepository, freeText: String): EncryptedRescueEnvelope {
+        val keyPair = RescueCryptography.generateRecipientKeyPair()
+        val result = RescueRequestCreator(store).create(
+            RescueRequestDraft(
+                requestId = "request-1",
+                senderDeviceId = "member-a",
+                destinationShelterId = "shelter-1",
+                createdAtEpochMillis = NOW - 100,
+                expiresAtEpochMillis = NOW + 3_600_000,
+                urgency = RescueUrgency.URGENT,
+                personCount = 2,
+                supportNeeds = setOf(RescueSupportNeed.WATER),
+                freeText = freeText,
+            ),
+            keyPair.publicKey,
+            envelopeId = "envelope-1",
+        ) as com.example.relay.rescue.RescueCreationResult.Stored
+        return result.record.envelope
+    }
+
+    private companion object {
+        val NOW: Long
+            get() = System.currentTimeMillis()
+    }
+}
+
+private class RecordingTransport(
+    private val sendResult: suspend (String, ByteArray) -> SendResult = { _, _ -> SendResult.PayloadTransferCompleted },
+) : OfflineTransport {
+    override val state = MutableStateFlow(OfflineTransportState())
+    override val discoveredPeers: Flow<List<Peer>> = emptyFlow()
+    override val connectionEvents: Flow<ConnectionEvent> = emptyFlow()
+    override val receivedPayloads: Flow<ReceivedPayload> = emptyFlow()
+    override val transportEvents: Flow<TransportEvent> = emptyFlow()
+    val sent = mutableListOf<Pair<String, ByteArray>>()
+
+    override suspend fun start() = Unit
+    override suspend fun stop() = Unit
+    override suspend fun connect(peerId: String) = Unit
+    override suspend fun acceptConnection(peerId: String) = Unit
+    override suspend fun rejectConnection(peerId: String) = Unit
+    override suspend fun disconnect(peerId: String) = Unit
+    override suspend fun send(peerId: String, payload: ByteArray): SendResult {
+        sent += peerId to payload
+        return sendResult(peerId, payload)
+    }
+}

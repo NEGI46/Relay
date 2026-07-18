@@ -6,6 +6,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.relay.data.local.RelayDatabase
 import com.example.relay.data.repository.RoomMessageRepository
+import com.example.relay.data.repository.RoomRescueEnvelopeRepository
 import com.example.relay.domain.DeviceRoleStore
 import com.example.relay.domain.StringDeviceRoleStore
 import com.example.relay.domain.MessagePolicy
@@ -20,16 +21,34 @@ import com.example.relay.transport.GoogleNearbyPlatform
 import com.example.relay.transport.NearbyConnectionsTransport
 import com.example.relay.gateway.GatewayBridgeClient
 import com.example.relay.gateway.GatewayCredentialStore
-import com.example.relay.gateway.SharedPreferencesGatewayPendingStore
+import com.example.relay.gateway.SharedPreferencesGatewayDeliveryLedger
 import com.example.relay.gateway.GatewaySettingsStore
 import com.example.relay.gateway.GatewaySyncEngine
 import com.example.relay.gateway.HttpGatewayBridgeClient
 import com.example.relay.gateway.UdpGatewayDiscovery
+import com.example.relay.cloud.AndroidNetworkOnlineDetector
+import com.example.relay.cloud.EmptyPriorityMessageSource
+import com.example.relay.cloud.InternetPrioritySync
+import com.example.relay.cloud.ServerSyncGateway
+import com.example.relay.location.AndroidLocationProvider
+import com.example.relay.location.LocationProvider
+import com.example.relay.service.CommunicationSupervisor
+import com.example.relay.service.RescueDeliveryService
+import com.example.relay.rescue.RescueShelterKeyStore
+import com.example.relay.rescue.DebugShelterManifestBootstrap
+import com.example.relay.rescue.HttpShelterManifestClient
+import com.example.relay.rescue.ShelterManifestEnrollment
+import com.example.relay.rescue.RegionalShelterDirectoryResolver
+import com.example.relay.rescue.ble.AndroidShelterBleClient
+import com.example.relay.rescue.ble.SharedPreferencesCourierDeliveryIdStore
+import com.example.relay.rescue.ble.ShelterDeliveryCoordinator
+import com.example.relay.rescue.nearby.RescueNearbyCoordinator
 import com.google.android.gms.nearby.connection.ConnectionsClient
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class RelayApplication : Application() {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -43,10 +62,28 @@ class RelayApplication : Application() {
 
     val database: RelayDatabase by lazy {
         Room.databaseBuilder(this, RelayDatabase::class.java, "relay.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build()
     }
     val messageRepository: RoomMessageRepository by lazy { RoomMessageRepository(database) }
+    val rescueRepository: RoomRescueEnvelopeRepository by lazy { RoomRescueEnvelopeRepository(database) }
+    val rescueShelterKeyStore: RescueShelterKeyStore by lazy { RescueShelterKeyStore(this) }
+    val shelterManifestEnrollment: ShelterManifestEnrollment by lazy {
+        ShelterManifestEnrollment(HttpShelterManifestClient(), rescueShelterKeyStore)
+    }
+    /** Populated by signed regional provisioning; empty configuration fails closed. */
+    val regionalShelterDirectoryResolver: RegionalShelterDirectoryResolver by lazy {
+        RegionalShelterDirectoryResolver(emptyList())
+    }
+    val rescueDeliveryCoordinator: ShelterDeliveryCoordinator by lazy {
+        ShelterDeliveryCoordinator(
+            client = AndroidShelterBleClient(this),
+            repository = rescueRepository,
+            directoryResolver = regionalShelterDirectoryResolver,
+            carrierId = deviceId,
+            deliveryIds = SharedPreferencesCourierDeliveryIdStore(this),
+        )
+    }
 
     val deviceRoleStore: DeviceRoleStore by lazy {
         val preferences = getSharedPreferences("relay_settings", MODE_PRIVATE)
@@ -66,6 +103,20 @@ class RelayApplication : Application() {
             maxPayloadBytes = ConnectionsClient.MAX_BYTES_DATA_SIZE,
         )
     }
+    /**
+     * Uses the existing Nearby transport only after it is available. A construction failure leaves
+     * the ordinary relay coordinator operational; rescue envelopes remain safely persisted for a
+     * later retry rather than being downgraded or exposed.
+     */
+    val rescueNearbyCoordinator: RescueNearbyCoordinator? by lazy {
+        runCatching {
+            RescueNearbyCoordinator(
+                repository = rescueRepository,
+                transport = nearbyTransport,
+                nowEpochMillis = SystemClock::nowMillis,
+            )
+        }.getOrNull()
+    }
     val syncCoordinator: SyncCoordinator by lazy {
         val policy = MessagePolicy(SystemClock)
         SyncCoordinator(
@@ -78,6 +129,7 @@ class RelayApplication : Application() {
             clock = SystemClock,
             scope = applicationScope,
             incomingPayloadPolicy = FixedWindowIncomingPayloadPolicy(SystemClock),
+            rescueNearbyCoordinator = rescueNearbyCoordinator,
         )
     }
     val communicationRuntime: RelayCommunicationRuntime by lazy {
@@ -93,10 +145,41 @@ class RelayApplication : Application() {
             HttpGatewayBridgeClient(),
             MessagePolicy(SystemClock),
             applicationScope,
-            SharedPreferencesGatewayPendingStore(this),
+            SharedPreferencesGatewayDeliveryLedger(this),
             discovery = UdpGatewayDiscovery(),
             localBridgeId = deviceId,
         )
+    }
+    val communicationSupervisor: CommunicationSupervisor by lazy {
+        CommunicationSupervisor(communicationRuntime, gatewaySyncEngine)
+    }
+
+    val locationProvider: LocationProvider by lazy { AndroidLocationProvider(this) }
+
+    /** When online, merge priority remote messages into local Room store. */
+    val internetPrioritySync: ServerSyncGateway by lazy {
+        InternetPrioritySync(
+            detector = AndroidNetworkOnlineDetector(this),
+            source = EmptyPriorityMessageSource,
+            repository = messageRepository,
+            policy = MessagePolicy(SystemClock),
+        )
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        if (BuildConfig.DEBUG) {
+            applicationScope.launch {
+                DebugShelterManifestBootstrap(
+                    discovery = UdpGatewayDiscovery(),
+                    client = HttpShelterManifestClient(),
+                    loadExisting = rescueShelterKeyStore::load,
+                    saveManifest = rescueShelterKeyStore::saveVerifiedManifest,
+                ).enrollFromLocalTestGateway()
+            }
+        }
+        // A process restart must not require a courier to open a transfer screen.
+        RescueDeliveryService.startIfEnabled(this)
     }
 }
 
@@ -118,5 +201,35 @@ private val MIGRATION_1_2 = object : Migration(1, 2) {
 private val MIGRATION_2_3 = object : Migration(2, 3) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE messages ADD COLUMN elapsedRealtimeSessionId TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+private val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS rescue_envelopes (
+                requestId TEXT NOT NULL,
+                requestVersion INTEGER NOT NULL,
+                envelopeId TEXT NOT NULL,
+                ciphertextSha256Hex TEXT NOT NULL,
+                createdAtEpochMillis INTEGER NOT NULL,
+                expiresAtEpochMillis INTEGER NOT NULL,
+                storageSizeBytes INTEGER NOT NULL,
+                envelopeJson TEXT NOT NULL,
+                receivedAtEpochMillis INTEGER NOT NULL,
+                submissionStatus TEXT NOT NULL,
+                submissionCount INTEGER NOT NULL,
+                signedReceiptJson TEXT,
+                PRIMARY KEY(requestId, requestVersion)
+            )""",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_rescue_envelopes_expiresAtEpochMillis " +
+                "ON rescue_envelopes(expiresAtEpochMillis)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_rescue_envelopes_submissionStatus " +
+                "ON rescue_envelopes(submissionStatus)",
+        )
     }
 }

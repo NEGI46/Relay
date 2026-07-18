@@ -4,7 +4,7 @@
 
 Relay は、災害時にインターネット接続がなくても、近くの Android 端末同士で安否情報と物資不足情報を交換する Store–Carry–Forward 型の実証用アプリです。受信した情報を端末内に保存し、利用者が移動して別の端末と接続した際に再転送します。リアルタイムチャットではありません。
 
-このプロジェクトは AI 機能を使用しません。電話番号、メールアドレス、正確な GPS 位置、端末の永続的なハードウェア ID も必須にしません。
+このプロジェクトは AI 機能を使用しません。電話番号・メール・ハードウェア ID は必須にしません。安否・物資登録時は許可されていれば GPS で場所を補完します（拒否・未取得でも登録可能）。
 
 ## フェーズと現在の範囲
 
@@ -13,11 +13,37 @@ Relay は、災害時にインターネット接続がなくても、近くの A
 | 1 | 要件、責務境界、データモデル、同期プロトコル、技術リスクの設計 | 設計済み |
 | 2 | Android 基盤、Compose UI、Room、Repository、UseCase、Fake transport、同期ロジックと単体テスト | 実装・自動テスト済み |
 | 3 | Nearby Connections 実通信、OS 権限、Foreground Service | 実装済み。Android 2台実機同期は未検証 |
-| 4 | 防御的処理の強化、デバッグ機能、ログ、電池消費、アクセシビリティ改善 | 未実装・次フェーズ |
+| 4 | 防御的観測性、信頼表示、オペレータ向けデバッグ、基本 a11y、PC Gateway zero-op | **アプリ完成（ソフトウェア + PC Gateway ゲート）** |
+| 5 | 実機 RF 検証（Phone public sync、2台 Nearby） | residual（物理端末/エミュレータ RF 環境依存） |
 
-フェーズ2では、実機の Nearby Connections に依存せず、`FakeOfflineTransport` を使って同一テストプロセス内で複数端末の同期を検証します。インターネット復旧後のサーバー同期、電子署名、暗号方式の追加点はインターフェースとして用意し、MVPでは NoOp 実装とします。
+フェーズ2では、実機の Nearby Connections に依存せず、`FakeOfflineTransport` を使って同一テストプロセス内で複数端末の同期を検証します。インターネット復旧後のサーバー同期、電子署名、暗号方式の追加点はインターフェースとして用意し、現行では NoOp 実装とします。
 
 詳細設計は [docs/architecture.md](docs/architecture.md) を参照してください。
+
+## 完成判定（このアプリの完成）
+
+**アプリ完成** とは、災害時 Store–Carry–Forward と zero-operation PC Gateway の **製品パスがコード上閉じている** ことです。
+
+ゲート:
+
+1. `testDebugUnitTest` / `:relay-protocol:test` / `:pc-gateway:test` / `assembleDebug` が 0 failures
+2. 実 `installDist` 起動で `GET /api/health` + 公開 `POST` が `GATEWAY_RECEIVED_UNVERIFIED`（連続 2 回）
+3. 多段 SCF・送信失敗観測・HTTP 公開クライアント・信頼ラベルが shipped コードの自動テストで証明済み
+
+**残差（製品バグではなく環境限界のみ）**
+
+- 物理 Android / Nearby RF の multi-device 成功は端末が無いと証明できない（ソフトウェア側は Fake 多段 + Nearby 実装で完了）
+- Firewall / 自動起動スクリプトは管理者権限が必要
+- メッセージ署名は NoOp（spoofable は設計上の非ゴール）
+- Play Store 署名・本番 PKI は非ゴール
+
+現状: [artifacts/relay_status.json](artifacts/relay_status.json)
+
+## ローカル優先とインターネット復帰
+
+- **既定はすべてローカル**: Nearby 自動中継 + 同一LANの PC Gateway 公開同期（登録・ペアリング不要）
+- **GPS**: 作成時に場所が空ならワンショットで補完（連続追跡しない）
+- **インターネット復帰**: 接続検知時に重要度 HIGH/CRITICAL の優先情報をローカルDBへ追加取り込み（`InternetPrioritySync`）。オフライン SCF は継続
 
 ## MVP の主要機能
 
@@ -44,15 +70,29 @@ Relay は、災害時にインターネット接続がなくても、近くの A
 
 Android `app`、共有DTO `relay-protocol`、PC Gateway `pc-gateway`の3モジュールです。Android通信処理は`OfflineTransport`、PC同期は`GatewaySyncEngine`、HTTP契約は`relay-protocol`で分離しています。
 
+## Apple / マルチプラットフォーム
+
+SwiftUI の別アプリではなく:
+
+| 端末 | 対応 |
+|------|------|
+| **iPhone** | Kotlin Multiplatform + Compose Multiplatform（`shared` + `composeApp`）と、`apple/RelayAppleKit`のSwift配送基盤。Android版と同じドメイン・公開Gatewayクライアント・Compose UI系統、およびWindows BLE bridge互換の不透明配送フレーム |
+| **Mac（PC Gateway）** | 既存 `:pc-gateway` JVM をそのまま。`scripts/run-pc-gateway.sh` / `scripts/setup-pc-gateway-macos.sh` |
+| **Android 本番** | 従来どおり `:app`（Room / Nearby / FGS） |
+
+詳細: [docs/APPLE_TARGETS.md](docs/APPLE_TARGETS.md)
+
+
+
 ## PC Gateway
 
-固定中継の主経路は **zero-operation** です。PC は UDP ビーコン（42888）で自らを広告し、Android は token なしで `POST /api/public/sync/messages` に REPORT を送れます。保存成功時は `GATEWAY_RECEIVED_UNVERIFIED`（中継拠点・未認証）です。ペアリング + Bearer は任意の verified 経路です。
+固定中継の主経路は **zero-operation** です。PC は UDP ビーコン（42888）で自らを広告し、Android は token なしで `POST /api/public/sync/messages` に REPORT を送れます。保存成功時は `GATEWAY_RECEIVED_UNVERIFIED`（匿名LAN経路でPC保存）です。ペアリング + Bearer は任意の認証済みBridge経路で、保存成功時は `GATEWAY_RECEIVED` です。どちらもREPORT本文・発信元の真正性は検証せず、現アプリの内容検証状態は `UNVERIFIED` です。Gateway ReceiptはPC保存の証跡であり、公式情報や最終宛先への配信完了ではありません。
 
-起動例: `.\gradlew.bat :pc-gateway:installDist` 後の `pc-gateway/build/install/pc-gateway/bin/pc-gateway.bat`、または `artifacts/relay-pc-gateway.exe`。管理画面 `http://127.0.0.1:8080/`、Health `/api/health`。既定 bind は `0.0.0.0:8080`（Firewall で Private のみ許可）。
+**起動（推奨）:** Windows はリポジトリ直下の **`Start-PC-Gateway.cmd`** をダブルクリック（中身は `scripts/run-pc-gateway.ps1`）。macOS/Linux は `./scripts/run-pc-gateway.sh`。初回のみ installDist を自動構築。管理画面 `http://127.0.0.1:8080/`、Health `/api/health`。固定地点の EXE インストーラは `artifacts/relay-pc-gateway.exe`（任意）。上級の手動手順は [PC_GATEWAY_SETUP.md](docs/PC_GATEWAY_SETUP.md)。
 
 詳細: [OPERATION_MODEL.md](docs/OPERATION_MODEL.md)、[PC_GATEWAY_SETUP.md](docs/PC_GATEWAY_SETUP.md)、[PC_GATEWAY_ARCHITECTURE.md](docs/PC_GATEWAY_ARCHITECTURE.md)、[PC_GATEWAY_SECURITY.md](docs/PC_GATEWAY_SECURITY.md)。
 
-Android 実機から PC への同期は **未検証** です。HTTP 送信成功だけでは公式到達と表示しません。
+Android 実機から PC への同期は **端末接続時に runbook で検証**（未接続時は residual）。ソフトウェア経路（公開 HTTP クライアント + PC Gateway）は自動テスト済みです。HTTP 送信成功だけでは公式到達と表示しません。
 
 ## 前提とMVP既定値
 
@@ -122,7 +162,7 @@ Nearby Connections自体の接続特性に加えて、アプリ層の入力検�
 
 - REPORTの有効期間は端末ごとの受信時刻でリセットしない。`lifetimeMs`と`accumulatedAgeMs`を転送し、送信前にその端末での保持時間を累積する。
 - 再起動後は単調時計を直接比較しない。保存時の壁時計差分を非負の場合に限り利用し、復元不能または時計が戻った場合は安全側で期限切れにする。
-- Payload転送完了、Peer保存（`PEER_RECEIVED`）、中継拠点未認証（`GATEWAY_RECEIVED_UNVERIFIED`）、認証 Gateway（`GATEWAY_RECEIVED`）は別状態。
+- Payload転送完了、Peer保存（`PEER_RECEIVED`）、匿名LAN経路でのPC保存（`GATEWAY_RECEIVED_UNVERIFIED`）、認証済みBridge経路でのPC保存（`GATEWAY_RECEIVED`）は別状態。いずれのReceiptもREPORT内容の検証済み・公式情報・最終配信を意味しない。
 - 業務メッセージは`REPORT`と`STATUS_CHANGE`。STATUS_CHANGEはREPORTより先に中継する。
 - 権限許可済みならアプリ起動時に通信（RELAY）を自動開始する。一般利用者は接続承認・Gateway 登録をしない。
 

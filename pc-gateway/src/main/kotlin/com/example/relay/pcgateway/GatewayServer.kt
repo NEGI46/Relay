@@ -5,6 +5,7 @@ import com.example.relay.gateway.protocol.GatewayRejection
 import com.example.relay.gateway.protocol.ReceiptResponse
 import com.example.relay.gateway.protocol.SyncMessagesRequest
 import com.example.relay.gateway.protocol.SyncMessagesResponse
+import com.example.relay.rescue.ShelterPublicKeyManifest
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -35,20 +36,31 @@ import kotlinx.serialization.Serializable
     val database: String,
     val anonymousIngress: Boolean = true,
     val lanDiscoveryPort: Int = 42888,
+    /** Fail-closed until an authenticated local BLE bridge heartbeat is wired. */
+    val bleBridgeStatus: String = "unavailable",
 )
 
 @Serializable
 data class MessagesListResponse(
     val messages: Int,
     val active: Int,
+    /** Legacy aliases; both fields count content verification, not route authentication. */
     val verified: Int,
     val unverified: Int,
+    val contentVerified: Int,
+    val contentUnverified: Int,
+    val authenticatedRoute: Int,
+    val anonymousRoute: Int,
     val items: List<MessageSummary>,
 )
 
 fun Application.gatewayModule(
     config: GatewayConfig,
     store: GatewayStore,
+    /** Maintenance compatibility only. General-user rescue delivery never trusts this unsigned document. */
+    rescueManifest: ShelterPublicKeyManifest? = null,
+    /** True only after startup verified a root-signed manifest against this PC's local keys. */
+    rescueBleReady: Boolean = false,
     anonymousLimiter: AnonymousIngressRateLimiter = AnonymousIngressRateLimiter(
         config.maxAnonymousRequestsPerMinute,
         config.maxAnonymousMessagesPerMinute,
@@ -65,8 +77,14 @@ fun Application.gatewayModule(
                     database = "ready",
                     anonymousIngress = config.anonymousIngressEnabled,
                     lanDiscoveryPort = config.lanDiscoveryPort,
+                    bleBridgeStatus = if (rescueBleReady) "awaiting_sidecar" else "not_ready",
                 ),
             )
+        }
+        get("/api/public/rescue/manifest") {
+            val manifest = rescueManifest ?: return@get call.respond(HttpStatusCode.NotFound)
+            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            call.respond(manifest)
         }
         get("/api/pair/code") {
             if (call.request.headers["X-Admin-Key"] != config.adminKey) {
@@ -118,14 +136,19 @@ fun Application.gatewayModule(
             val now = System.currentTimeMillis()
             val outcomes = request.messages.map { message ->
                 val reason = validate(message, config.maxPayloadBytes, now)
-                if (reason != null) StoreOutcome("REJECTED", reason = reason) else null
+                if (reason != null) StoreOutcome(message.messageId, "REJECTED", reason = reason) else null
             }
             val accepted = request.messages.zip(outcomes).filter { it.second == null }.map { it.first }
             val stored = runCatching { store.ingest(request.bridgeId, accepted, now) }
                 .getOrElse { return@post call.respond(HttpStatusCode.ServiceUnavailable) }
             val all = request.messages.zip(outcomes)
             val rejected = all.filter { it.second != null }.map { GatewayRejection(it.first.messageId, it.second!!.reason!!) }
-            call.respond(syncResponse(accepted, stored, rejected))
+            // Authentication covers the Bridge transport only. REPORT content and claimed origin
+            // remain unverified until a future signature/issuer verifier is configured.
+            call.response.headers.append("X-Relay-Route-Authentication", "authenticated_bridge")
+            call.response.headers.append("X-Relay-Content-Verification", "unverified")
+            call.response.headers.append("X-Relay-Receipt-Semantics", "gateway_saved")
+            call.respond(syncResponse(stored, rejected))
         }
         post("/api/public/sync/messages") {
             if (!config.anonymousIngressEnabled) return@post call.respond(HttpStatusCode.NotFound)
@@ -157,18 +180,19 @@ fun Application.gatewayModule(
                 return@post call.respond(HttpStatusCode.TooManyRequests, mapOf("error" to "anonymous_rate_limit"))
             }
             val now = System.currentTimeMillis()
-            val validation = request.messages.associateWith {
-                if (it.recordType != "REPORT") "unregistered_status_change_not_allowed"
-                else validate(it, config.maxPayloadBytes, now)
-            }
+            val validation = request.messages.associateWith { validate(it, config.maxPayloadBytes, now) }
             val accepted = validation.filterValues { it == null }.keys.toList()
             val rejected = validation.filterValues { it != null }.map { (message, reason) ->
                 GatewayRejection(message.messageId, reason!!)
             }
             val stored = runCatching { store.ingestUnregistered(accepted, now) }
                 .getOrElse { return@post call.respond(HttpStatusCode.ServiceUnavailable) }
+            // Keep the legacy header for old clients, but expose the independent axes explicitly.
             call.response.headers.append("X-Relay-Receipt-Trust", "unverified")
-            call.respond(syncResponse(accepted, stored, rejected))
+            call.response.headers.append("X-Relay-Route-Authentication", "anonymous_lan")
+            call.response.headers.append("X-Relay-Content-Verification", "unverified")
+            call.response.headers.append("X-Relay-Receipt-Semantics", "gateway_saved")
+            call.respond(syncResponse(stored, rejected))
         }
         get("/api/sync/receipts") {
             val bridgeId = call.request.headers["X-Bridge-Id"]
@@ -195,6 +219,7 @@ fun Application.gatewayModule(
             }
             val counts = store.counts()
             val trust = store.trustCounts()
+            val routes = store.routeAuthenticationCounts()
             val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 300
             call.respond(
                 MessagesListResponse(
@@ -202,11 +227,16 @@ fun Application.gatewayModule(
                     active = counts.second,
                     verified = trust.first,
                     unverified = trust.second,
+                    contentVerified = trust.first,
+                    contentUnverified = trust.second,
+                    authenticatedRoute = routes.authenticatedBridge,
+                    anonymousRoute = routes.anonymousLan,
                     items = store.messages(
                         type = call.request.queryParameters["type"],
                         status = call.request.queryParameters["status"],
                         query = call.request.queryParameters["q"],
                         trust = call.request.queryParameters["trust"],
+                        routeAuthentication = call.request.queryParameters["routeAuthentication"],
                         limit = limit,
                     ),
                 ),
@@ -245,18 +275,16 @@ fun Application.gatewayModule(
 }
 
 private fun syncResponse(
-    accepted: List<com.example.relay.gateway.protocol.GatewayMessage>,
     stored: List<StoreOutcome>,
     rejectedBeforeStore: List<GatewayRejection>,
 ): SyncMessagesResponse {
-    val paired = accepted.zip(stored)
-    val storeRejected = paired.filter { (_, outcome) -> outcome.disposition !in setOf("STORED", "DUPLICATE") }
-        .map { (message, outcome) -> GatewayRejection(message.messageId, outcome.reason ?: outcome.disposition.lowercase()) }
+    val storeRejected = stored.filter { it.disposition !in setOf("STORED", "DUPLICATE") }
+        .map { outcome -> GatewayRejection(outcome.messageId, outcome.reason ?: outcome.disposition.lowercase()) }
     return SyncMessagesResponse(
-        acceptedMessageIds = paired.filter { it.second.disposition == "STORED" }.map { it.first.messageId },
-        duplicateMessageIds = paired.filter { it.second.disposition == "DUPLICATE" }.map { it.first.messageId },
+        acceptedMessageIds = stored.filter { it.disposition == "STORED" }.map { it.messageId },
+        duplicateMessageIds = stored.filter { it.disposition == "DUPLICATE" }.map { it.messageId },
         rejected = rejectedBeforeStore + storeRejected,
-        receipts = paired.mapNotNull { it.second.receipt },
+        receipts = stored.mapNotNull { it.receipt },
     )
 }
 
