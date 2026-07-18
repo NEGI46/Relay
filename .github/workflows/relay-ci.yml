@@ -1,0 +1,59 @@
+name: Relay CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SECURITY_MODE: report-only
+
+jobs:
+  quality-gates:
+    name: Quality and security gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PowerShell
+        uses: PowerShell/PowerShell@v1
+        with:
+          pwsh-version: '7.4'
+
+      - name: Run Syft SBOM
+        shell: pwsh
+        run: ./scripts/run-syft.ps1 -SourcePath . -OutputPath artifacts/syft-sbom.json
+
+      - name: Run Grype vulnerability scan
+        shell: pwsh
+        run: ./scripts/run-grype.ps1 -InputPath artifacts/syft-sbom.json -OutputPath artifacts/grype.json -Mode $env:SECURITY_MODE
+
+      - name: Run OSV-Scanner
+        shell: pwsh
+        run: ./scripts/run-osv.ps1 -SourcePath . -OutputPath artifacts/osv.json -Mode $env:SECURITY_MODE
+
+      - name: Run MobSF scan when configured
+        shell: pwsh
+        run: ./scripts/run-mobsf.ps1 -ArtifactPath distribution -OutputPath artifacts/mobsf.json -Mode $env:SECURITY_MODE
+
+      - name: Run Jazzer fuzz target when configured
+        shell: pwsh
+        run: ./scripts/run-jazzer.ps1 -Mode $env:SECURITY_MODE
+
+      - name: Verify distribution signatures
+        shell: pwsh
+        run: ./scripts/verify-distribution-signatures.ps1 -PackageRoot distribution -Mode $env:SECURITY_MODE
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-security-reports
+          path: artifacts/
+          if-no-files-found: warn
