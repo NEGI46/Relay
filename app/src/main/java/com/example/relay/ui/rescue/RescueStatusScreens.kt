@@ -20,15 +20,18 @@ import java.text.DateFormat
 import java.util.Date
 
 @Composable
-internal fun RescueBroadcastingScreen(state: RescueBroadcastUiState, callbacks: RescueCallbacks, modifier: Modifier = Modifier) {
-    RescuePage(title = if (state.isActive) "救助要請を発信中" else "救助要請を保存しました", modifier = modifier, onBack = { callbacks.onNavigate(RescueScreen.HOME) }) { contentModifier ->
+internal fun RescueBroadcastingScreen(state: RescueUiState, callbacks: RescueCallbacks, modifier: Modifier = Modifier) {
+    val broadcast = state.broadcast
+    RescuePage(title = if (broadcast.isActive) "救助要請を自動送信中" else "救助要請を保存しました", modifier = modifier, onBack = { callbacks.onNavigate(RescueScreen.HOME) }) { contentModifier ->
         RescueScrollableColumn(contentModifier) {
-            Text(if (state.isActive) "発信中" else "発信の準備ができました", style = MaterialTheme.typography.headlineSmall)
-            Text(state.statusMessage, style = MaterialTheme.typography.bodyLarge)
-            StatusCard("近くのRelay端末", "${state.nearbyDeviceCount}台")
-            StatusCard("渡した回数", "${state.transferCount}回")
-            Text("アプリを閉じても、利用できる範囲で自動発信を続けます。")
-            if (state.isActive) OutlinedButton(onClick = callbacks::onStopBroadcasting, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text("発信を停止する") }
+            Text(if (broadcast.isActive) "自動送信中" else "取消情報を送信中", style = MaterialTheme.typography.headlineSmall)
+            Text(broadcast.statusMessage, style = MaterialTheme.typography.bodyLarge)
+            StatusCard("近くのRelay端末", "${broadcast.nearbyDeviceCount}台")
+            StatusCard("中継した回数", "${broadcast.transferCount}回")
+            state.ownRequest?.let { own ->
+                StatusCard("GPS位置", "%.5f, %.5f".format(own.latitude, own.longitude))
+            }
+            Text("アプリを閉じても自動で中継します。止める場合はホームの「救助依頼を取り消す」を使ってください。")
             LargeActionButton("ホームへ戻る") { callbacks.onNavigate(RescueScreen.HOME) }
         }
     }
@@ -40,7 +43,7 @@ internal fun CourierInventoryScreen(items: List<CourierRescueItem>, automation: 
     RescuePage(title = "運んでいる情報", modifier = modifier, onBack = { callbacks.onNavigate(RescueScreen.HOME) }) { contentModifier ->
         RescueScrollableColumn(contentModifier) {
             Text("内容は表示されません", style = MaterialTheme.typography.titleMedium)
-            Text("受信した救助要請は、避難所PCを見つけると自動で安全に提出されます。あなたの操作は不要です。")
+            Text("受信した救助要請は、府中町の避難所PCを見つけると自動で安全に提出されます。あなたの操作は不要です。")
             StatusCard("自動提出", if (automation.isEnabled) automation.statusMessage else "自動提出の準備中です")
             automation.lastDeliveredAtEpochMillis?.let { StatusCard("最後に提出した時刻", formatTime(it)) }
             if (items.isEmpty()) {
@@ -62,7 +65,7 @@ private fun CourierItemCard(item: CourierRescueItem) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("受信した救助要請", style = MaterialTheme.typography.titleMedium)
             Text("状態: ${item.submissionStatus.label()}")
-            Text("送信先: ${item.destinationShelterId}")
+            Text("送信先: 府中町の救助拠点")
             Text("受信: ${formatTime(item.receivedAtEpochMillis)}")
             Text("期限: ${formatTime(item.expiresAtEpochMillis)}")
         }

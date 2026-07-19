@@ -17,6 +17,7 @@ data class GeoFix(
     val latitude: Double,
     val longitude: Double,
     val accuracyMeters: Float? = null,
+    val capturedAtEpochMillis: Long = System.currentTimeMillis(),
 )
 
 /** Pure formatter for payload.approximateLocation (≤ maxChars). */

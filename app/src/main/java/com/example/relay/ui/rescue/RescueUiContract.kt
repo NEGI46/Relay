@@ -2,6 +2,8 @@ package com.example.relay.ui.rescue
 
 import com.example.relay.rescue.CourierRescueItem
 import com.example.relay.rescue.RescueRequestDraft
+import com.example.relay.rescue.RescueSubmissionStatus
+import com.example.relay.rescue.RescueUrgency
 
 /** Screens available in the ordinary rescue flow.
  *
@@ -24,6 +26,20 @@ data class RescueBroadcastUiState(
     val statusMessage: String = "周囲のRelay端末を待っています",
 )
 
+data class OwnRescueRequestUiState(
+    val requestId: String,
+    val requestVersion: Int,
+    val urgency: RescueUrgency,
+    val personCount: Int,
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyMeters: Float?,
+    val locationCapturedAtEpochMillis: Long,
+    val createdAtEpochMillis: Long,
+    val submissionStatus: RescueSubmissionStatus,
+    val isCancelled: Boolean = false,
+)
+
 /** Metadata-only, passive status shown to a courier. */
 data class CourierAutomationUiState(
     val isEnabled: Boolean = false,
@@ -37,6 +53,7 @@ data class RescueUiState(
     val broadcast: RescueBroadcastUiState = RescueBroadcastUiState(),
     val courierItems: List<CourierRescueItem> = emptyList(),
     val courierAutomation: CourierAutomationUiState = CourierAutomationUiState(),
+    val ownRequest: OwnRescueRequestUiState? = null,
     val isRequestSubmitting: Boolean = false,
     val formMessage: String? = null,
 )
@@ -46,5 +63,9 @@ interface RescueCallbacks {
     fun onNavigate(screen: RescueScreen)
     fun onDraftChange(draft: RescueRequestDraft)
     fun onSubmitRequest()
+    fun onSendSos()
+    fun onPrepareUpdate()
+    fun onCancelRequest()
+    fun onRefreshStatus()
     fun onStopBroadcasting()
 }

@@ -1,9 +1,11 @@
 package com.example.relay.rescue
 
 import com.example.relay.rescue.RescueCryptography
+import com.example.relay.rescue.RescueCondition
 import com.example.relay.rescue.RescueLocation
 import com.example.relay.rescue.RescuePayload
 import com.example.relay.rescue.RescuePublicKey
+import com.example.relay.rescue.RescueRequestAction
 import com.example.relay.rescue.RescueSupportNeed
 import com.example.relay.rescue.RescueUrgency
 
@@ -17,6 +19,8 @@ data class RescueRequestDraft(
     val expiresAtEpochMillis: Long,
     val urgency: RescueUrgency,
     val personCount: Int = 1,
+    val conditions: Set<RescueCondition> = emptySet(),
+    val action: RescueRequestAction = RescueRequestAction.ACTIVE,
     val injured: Boolean = false,
     val seriouslyInjured: Boolean = false,
     val mobilityImpaired: Boolean = false,
@@ -68,6 +72,8 @@ private fun RescueRequestDraft.toPayload(): RescuePayload = RescuePayload(
     expiresAtEpochMillis = expiresAtEpochMillis,
     urgency = urgency,
     personCount = personCount,
+    conditions = conditions,
+    action = action,
     injured = injured,
     seriouslyInjured = seriouslyInjured,
     mobilityImpaired = mobilityImpaired,

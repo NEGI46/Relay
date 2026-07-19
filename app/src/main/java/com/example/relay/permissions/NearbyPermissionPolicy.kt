@@ -9,10 +9,10 @@ import com.example.relay.transport.NearbyPermissionGate
 /**
  * Runtime permissions for disaster Relay:
  * - Nearby / Bluetooth (transport)
- * - Location (one-shot GPS fill on report create; also required for legacy Nearby APIs)
+ * - Location (mandatory rescue location; also required for legacy Nearby APIs)
  *
  * Location is requested together with Nearby on start so GPS is not a dead path on targetSdk 36.
- * Denying location must not permanently block create (create still works without fix).
+ * Legacy report creation may continue without a fix; the rescue flow enforces location separately.
  */
 object NearbyPermissionPolicy {
     fun requiredRuntimePermissions(sdkInt: Int = Build.VERSION.SDK_INT): List<String> {

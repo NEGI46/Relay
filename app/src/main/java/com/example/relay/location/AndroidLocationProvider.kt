@@ -19,11 +19,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * One-shot location for report create:
+ * Bounded location lookup used by reports and by the rescue tracker's periodic fixes:
  * 1) Prefer a fresh last-known fix
  * 2) Otherwise [requestOneShotUpdate] (getCurrentLocation / requestLocationUpdates) within timeout
  *
- * Not continuous tracking. Unit tests inject [FixedLocationProvider].
+ * The rescue ViewModel calls this repeatedly while a request is active. Unit tests inject
+ * [FixedLocationProvider].
  */
 class AndroidLocationProvider(
     private val context: Context,
@@ -138,6 +139,7 @@ class AndroidLocationProvider(
         latitude = latitude,
         longitude = longitude,
         accuracyMeters = if (hasAccuracy()) accuracy else null,
+        capturedAtEpochMillis = time.takeIf { it > 0 } ?: System.currentTimeMillis(),
     )
 }
 

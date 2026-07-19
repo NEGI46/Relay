@@ -65,6 +65,7 @@ fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel, device
     val activationStore = remember { RelayCommunicationService.activationStore(context) }
     val activity = remember(context) { context.findActivity() }
     var explainPermissions by rememberSaveable { mutableStateOf(false) }
+    var openRescueAfterPermission by rememberSaveable { mutableStateOf(false) }
 
     fun startCommunication() {
         RelayCommunicationService.start(context, com.example.relay.domain.OperatingMode.RELAY, state.role)
@@ -93,7 +94,15 @@ fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel, device
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { /* create path continues without fix if denied */ }
+    ) {
+        if (openRescueAfterPermission && permissionGate.hasLocationPermission()) {
+            openRescueAfterPermission = false
+            viewModel.navigate(RelayScreen.RESCUE)
+        } else if (openRescueAfterPermission) {
+            openRescueAfterPermission = false
+            viewModel.reportError("救助依頼にはGPS位置情報が必要です。設定から位置情報を許可してください。")
+        }
+    }
 
     fun requestMissingIncludingLocation(thenStart: Boolean) {
         val missing = permissionGate.missingPermissions()
@@ -145,14 +154,14 @@ fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel, device
                     }
                 },
                 stop = { RelayCommunicationService.stop(context) },
-                rescue = { viewModel.navigate(RelayScreen.RESCUE) },
-                safety = {
-                    ensureLocationForForms()
-                    viewModel.navigate(RelayScreen.SAFETY_FORM)
-                },
-                supply = {
-                    ensureLocationForForms()
-                    viewModel.navigate(RelayScreen.SUPPLY_FORM)
+                rescue = {
+                    if (permissionGate.hasLocationPermission()) {
+                        viewModel.navigate(RelayScreen.RESCUE)
+                    } else {
+                        openRescueAfterPermission = true
+                        val missing = permissionGate.missingLocationPermissions()
+                        if (missing.isNotEmpty()) locationPermissionLauncher.launch(missing.toTypedArray())
+                    }
                 },
                 navigate = viewModel::navigate,
             )
@@ -187,15 +196,22 @@ private fun HomeScreen(
     start: () -> Unit,
     stop: () -> Unit,
     rescue: () -> Unit,
-    safety: () -> Unit,
-    supply: () -> Unit,
     navigate: (RelayScreen) -> Unit,
 ) {
     MainScaffold(RelayScreen.HOME, navigate) { modifier ->
         LazyColumn(modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item { Text("Relay", style = MaterialTheme.typography.headlineLarge) }
             item {
-                Card(Modifier.fillMaxWidth().semantics { contentDescription = "災害通信の状態" }) {
+                Button(
+                    onClick = rescue,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(88.dp)
+                        .semantics { contentDescription = "救助を求める" },
+                ) { Text("救助を求める", style = MaterialTheme.typography.titleLarge) }
+            }
+            item {
+                Card(Modifier.fillMaxWidth().semantics { contentDescription = "自動通信の状態" }) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             when {
@@ -210,7 +226,7 @@ private fun HomeScreen(
                         Text("接続中の端末: ${state.connectedPeers}台")
                         Text(gatewayStatusLabel(state.gatewayLastResult, state.transportRunning))
                         state.internetSyncLabel?.let { Text(it) }
-                        Button(
+                        OutlinedButton(
                             onClick = if (state.transportRunning) stop else start,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -222,36 +238,9 @@ private fun HomeScreen(
                                         "災害通信を開始"
                                     }
                                 },
-                        ) { Text(if (state.transportRunning) "通信を停止" else "災害通信を開始") }
+                        ) { Text(if (state.transportRunning) "自動通信を停止" else "自動通信を開始") }
                     }
                 }
-            }
-            item {
-                Button(
-                    onClick = rescue,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(72.dp)
-                        .semantics { contentDescription = "救助要請を作る、運ぶ、避難所へ提出する" },
-                ) { Text("救助要請を作る・運ぶ・提出する") }
-            }
-            item {
-                Button(
-                    onClick = safety,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(68.dp)
-                        .semantics { contentDescription = "無事・避難状況を登録" },
-                ) { Text("無事・避難状況を登録") }
-            }
-            item {
-                Button(
-                    onClick = supply,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(68.dp)
-                        .semantics { contentDescription = "不足している物資を登録" },
-                ) { Text("不足している物資を登録") }
             }
             item {
                 OutlinedButton(

@@ -38,6 +38,8 @@ class MainActivity : ComponentActivity() {
                         repository = app.rescueRepository,
                         shelterKeyProvider = app.rescueShelterKeyStore,
                         onRescueAutomationRequired = { RescueDeliveryService.enableAndStart(app) },
+                        locationProvider = app.locationProvider,
+                        senderDeviceId = app.deviceId,
                         shelterKeyWaitMillis = if (BuildConfig.DEBUG) 8_000 else 0,
                     ) as T
             })

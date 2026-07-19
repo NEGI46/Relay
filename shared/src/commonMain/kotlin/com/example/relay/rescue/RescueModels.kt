@@ -14,12 +14,27 @@ enum class RescueUrgency { ROUTINE, URGENT, IMMEDIATE }
 @Serializable
 enum class RescueSupportNeed { WATER, FOOD, MEDICINE, RESCUE_TEAM, TRANSPORT }
 
+/** The four plain-language conditions shown in the v1 request flow. */
+@Serializable
+enum class RescueCondition {
+    LIFE_THREATENING,
+    INJURED_OR_UNWELL,
+    MOBILITY_IMPAIRED,
+    SUPPORT_NEEDED,
+}
+
+/** A later request version can update or cancel an earlier version. */
+@Serializable
+enum class RescueRequestAction { ACTIVE, CANCELLED }
+
 @Serializable
 data class RescueLocation(
     val latitude: Double? = null,
     val longitude: Double? = null,
     val accuracyMeters: Float? = null,
     val description: String = "",
+    /** Time of the GPS fix. Allows receivers to distinguish a live fix from a fallback. */
+    val capturedAtEpochMillis: Long? = null,
 )
 
 @Serializable
@@ -32,7 +47,10 @@ data class RescuePayload(
     val createdAtEpochMillis: Long,
     val expiresAtEpochMillis: Long,
     val urgency: RescueUrgency,
+    /** Zero means unknown. This keeps v1 wire compatibility with the existing integer field. */
     val personCount: Int = 1,
+    val conditions: Set<RescueCondition> = emptySet(),
+    val action: RescueRequestAction = RescueRequestAction.ACTIVE,
     val injured: Boolean = false,
     val seriouslyInjured: Boolean = false,
     val mobilityImpaired: Boolean = false,
@@ -154,19 +172,19 @@ fun RescuePayload.validate(): RescueValidationResult = validationResult {
     require(protocolVersion == RESCUE_PROTOCOL_VERSION, "unsupported_protocol")
     requireIdentifier(requestId, "invalid_request_id")
     require(requestVersion in 1..1_000_000, "invalid_request_version")
-    require(requestVersion in 1..1_000_000, "invalid_request_version")
     requireIdentifier(senderDeviceId, "invalid_sender_id")
     requireIdentifier(destinationShelterId, "invalid_shelter_id")
     require(createdAtEpochMillis > 0, "invalid_created_at")
     require(expiresAtEpochMillis > createdAtEpochMillis, "invalid_expiry")
     require(expiresAtEpochMillis - createdAtEpochMillis <= 7L * 24 * 60 * 60 * 1_000, "lifetime_too_long")
-    require(personCount in 1..1_000, "invalid_person_count")
+    require(personCount in 0..1_000, "invalid_person_count")
     require(freeText.length <= 2_000, "message_too_long")
     location?.let {
         require(it.description.length <= 256, "location_too_long")
         require(it.latitude == null || it.latitude in -90.0..90.0, "invalid_latitude")
         require(it.longitude == null || it.longitude in -180.0..180.0, "invalid_longitude")
         require(it.accuracyMeters == null || it.accuracyMeters in 0f..100_000f, "invalid_accuracy")
+        require(it.capturedAtEpochMillis == null || it.capturedAtEpochMillis > 0, "invalid_location_time")
     }
 }
 
