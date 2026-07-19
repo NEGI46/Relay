@@ -1,7 +1,50 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="280" viewBox="0 0 960 280" role="img" aria-labelledby="title desc">
   <title id="title">Relay</title>
-  <desc id="desc">Relay project logo showing information moving between mobile devices and a fixed gateway.</desc>
+  <desc id="desc">Relay logo with connected nodes representing store, carry, and forward communication.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#071426"/>
-      <stop offset="0.55" stop-color="#102
+      <stop offset="0.55" stop-color="#102A43"/>
+      <stop offset="1" stop-color="#0B3B4A"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38BDF8"/>
+      <stop offset="0.5" stop-color="#67E8F9"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="960" height="280" rx="32" fill="url(#bg)"/>
+  <path d="M54 218 C190 125 260 238 386 126 S590 52 710 132 S835 204 910 76" fill="none" stroke="#FFFFFF" stroke-opacity="0.07" stroke-width="42" stroke-linecap="round"/>
+
+  <g transform="translate(62 46)">
+    <path d="M38 108 C82 34 138 34 181 108 S280 182 324 108" fill="none" stroke="url(#signal)" stroke-width="13" stroke-linecap="round" filter="url(#glow)"/>
+    <path d="M38 108 C82 34 138 34 181 108 S280 182 324 108" fill="none" stroke="url(#signal)" stroke-width="7" stroke-linecap="round"/>
+
+    <g fill="#E6F8FF" stroke="#38BDF8" stroke-width="5">
+      <rect x="11" y="76" width="54" height="68" rx="12"/>
+      <rect x="154" y="76" width="54" height="68" rx="12"/>
+      <rect x="297" y="76" width="54" height="68" rx="12"/>
+    </g>
+    <g fill="#0E7490">
+      <circle cx="38" cy="132" r="4"/>
+      <circle cx="181" cy="132" r="4"/>
+      <circle cx="324" cy="132" r="4"/>
+    </g>
+    <g fill="#67E8F9" filter="url(#glow)">
+      <circle cx="38" cy="108" r="8"/>
+      <circle cx="181" cy="108" r="8"/>
+      <circle cx="324" cy="108" r="8"/>
+    </g>
+  </g>
+
+  <g transform="translate(450 69)">
+    <text x="0" y="74" fill="#F8FAFC" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="86" font-weight="800" letter-spacing="8">RELAY</text>
+    <text x="4" y="116" fill="#A5F3FC" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="21" font-weight="600" letter-spacing="3">STORE  •  CARRY  •  FORWARD</text>
+    <text x="4" y="151" fill="#CBD5E1" font-family="Noto Sans JP, Yu Gothic, Meiryo, sans-serif" font-size="18">切れた通信を、次の接点へ。</text>
+  </g>
+</svg>
