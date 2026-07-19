@@ -5,14 +5,26 @@ param(
     [string]$Cosign = 'cosign',
     [string]$PublicKey,
     [switch]$RequireBundles,
-    [switch]$Offline
+    [switch]$Offline,
+    [switch]$RequireVerification,
+    [string]$OutputPath = 'artifacts/signature-verification.json'
 )
 $ErrorActionPreference = 'Stop'
-if (-not (Test-Path -LiteralPath $PackageRoot)) { if($Mode -eq 'block-high-critical'){throw "Distribution directory is missing: $PackageRoot"}; Write-Warning "Distribution directory is missing; skipping signature verification: $PackageRoot"; exit 0 }
+function Write-VerificationStatus([string]$Status, [string]$Reason, [object]$Files = @()) {
+    $out = [IO.Path]::GetFullPath($OutputPath)
+    New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
+    [ordered]@{ status = $Status; reason = $Reason; files = @($Files) } | ConvertTo-Json | Set-Content -LiteralPath $out
+}
+function Stop-OrWarnBlocked([string]$Reason) {
+    Write-VerificationStatus 'BLOCKED' $Reason
+    if ($Mode -eq 'block-high-critical' -or $RequireBundles -or $RequireVerification) { throw $Reason }
+    Write-Warning $Reason
+}
+if (-not (Test-Path -LiteralPath $PackageRoot)) { Stop-OrWarnBlocked "Distribution directory is missing; signature verification is BLOCKED: $PackageRoot"; exit 0 }
 $files = Get-ChildItem -LiteralPath $PackageRoot -Recurse -File | Where-Object Extension -in '.apk','.aab','.ipa','.msix','.zip'
-if (-not $files) { if($Mode -eq 'block-high-critical'){throw 'No signed distribution candidates found.'}; Write-Warning 'No signed distribution candidates found; skipping cosign.'; exit 0 }
+if (-not $files) { Stop-OrWarnBlocked 'No signed distribution candidates found; signature verification is BLOCKED.'; exit 0 }
 $cosignCommand=Get-Command $Cosign -ErrorAction SilentlyContinue
-if (-not $cosignCommand) { if($Mode -eq 'block-high-critical' -or $RequireBundles){throw "cosign is required but was not found: $Cosign"}; Write-Warning 'cosign is not installed; signature verification not performed.'; exit 0 }
+if (-not $cosignCommand) { Stop-OrWarnBlocked "cosign is not installed; signature verification is BLOCKED: $Cosign"; exit 0 }
 $failed=@()
 foreach($file in $files) {
     $sig="$($file.FullName).sig"; $bundle="$($file.FullName).bundle"
@@ -24,5 +36,13 @@ foreach($file in $files) {
     & $Cosign @args 2>&1 | Out-Null
     if($LASTEXITCODE -ne 0){$failed+=$file.FullName}
 }
-if($failed.Count -gt 0){$failed|ForEach-Object{Write-Warning "Cosign signature/bundle missing or invalid: $_"}; if($Mode -eq 'block-high-critical' -or $RequireBundles){throw 'cosign bundle verification failed.'}}
-else{Write-Output "Cosign bundle verification passed: $($files.Count) artifact(s) (offline=$Offline)"}
+if($failed.Count -gt 0){
+    $reason = 'cosign signature/bundle missing or invalid.'
+    Write-VerificationStatus 'FAIL' $reason $failed
+    $failed|ForEach-Object{Write-Warning "Cosign signature/bundle missing or invalid: $_"}
+    if($Mode -eq 'block-high-critical' -or $RequireBundles -or $RequireVerification){throw $reason}
+}
+else{
+    Write-VerificationStatus 'PASS' 'cosign bundles verified' $files.FullName
+    Write-Output "Cosign bundle verification passed: $($files.Count) artifact(s) (offline=$Offline)"
+}

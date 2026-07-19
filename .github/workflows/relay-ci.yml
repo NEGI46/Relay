@@ -161,7 +161,13 @@ jobs:
           name: relay-build-artifacts
           path: distribution
       - shell: pwsh
-        run: ./scripts/verify-distribution-signatures.ps1 -PackageRoot distribution -Mode $env:SECURITY_MODE
+        run: ./scripts/verify-distribution-signatures.ps1 -PackageRoot distribution -Mode $env:SECURITY_MODE -RequireVerification
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relay-signature-verification
+          path: artifacts/signature-verification.json
+          if-no-files-found: warn
 
   gateway-recovery:
     name: Gateway recovery and transport fixtures
