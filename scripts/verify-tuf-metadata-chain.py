@@ -109,7 +109,35 @@ def validate_target_names(targets: dict[str, Any]) -> None:
             raise MetadataError(f"target {name} has an invalid SHA-256")
 
 
-def verify(metadata_dir: Path, artifact: Path | None, target_name: str | None, allow_expired: bool) -> str:
+def check_rollback(docs: dict[str, dict[str, Any]], state_path: Path | None) -> None:
+    if state_path is None or not state_path.exists():
+        return
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        previous = state.get("versions", {})
+    except (OSError, json.JSONDecodeError) as exc:
+        raise MetadataError(f"cannot read rollback state: {exc}") from exc
+    if not isinstance(previous, dict):
+        raise MetadataError("rollback state versions must be an object")
+    for role, envelope in docs.items():
+        old = previous.get(role)
+        if old is not None and (not isinstance(old, int) or version(envelope["signed"], role) < old):
+            raise MetadataError(f"rollback detected for {role}.json")
+
+
+def save_versions(docs: dict[str, dict[str, Any]], state_path: Path | None) -> None:
+    if state_path is None:
+        return
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = state_path.with_name(f".{state_path.name}.tmp")
+    temporary.write_text(
+        json.dumps({"schema": 1, "versions": {role: version(doc["signed"], role) for role, doc in docs.items()}}, sort_keys=True),
+        encoding="utf-8",
+    )
+    temporary.replace(state_path)
+
+
+def verify(metadata_dir: Path, artifact: Path | None, target_name: str | None, allow_expired: bool, state_path: Path | None) -> str:
     docs = {role: load(metadata_dir / f"{role}.json") for role in ROLES}
     for role, envelope in docs.items():
         signed = envelope["signed"]
@@ -117,6 +145,7 @@ def verify(metadata_dir: Path, artifact: Path | None, target_name: str | None, a
             raise MetadataError(f"{role}.json has the wrong role type")
         version(signed, role)
         expiry(signed, role, allow_expired)
+    check_rollback(docs, state_path)
     validate_root(docs["root"])
 
     targets_signed = docs["targets"]["signed"]
@@ -164,6 +193,7 @@ def verify(metadata_dir: Path, artifact: Path | None, target_name: str | None, a
         raw = artifact.read_bytes()
         if len(raw) != target_length or hashlib.sha256(raw).hexdigest() != target_hash:
             raise MetadataError(f"artifact does not match target metadata: {name}")
+    save_versions(docs, state_path)
     return f"TUF metadata chain verified: {len(targets)} target(s)"
 
 
@@ -173,9 +203,10 @@ def main() -> int:
     parser.add_argument("--artifact", type=Path)
     parser.add_argument("--target-name")
     parser.add_argument("--allow-expired", action="store_true")
+    parser.add_argument("--state-path", type=Path, help="persist accepted role versions to reject rollback")
     args = parser.parse_args()
     try:
-        print(verify(args.metadata_dir, args.artifact, args.target_name, args.allow_expired))
+        print(verify(args.metadata_dir, args.artifact, args.target_name, args.allow_expired, args.state_path))
     except MetadataError as exc:
         print(f"TUF metadata verification failed: {exc}", file=sys.stderr)
         return 1

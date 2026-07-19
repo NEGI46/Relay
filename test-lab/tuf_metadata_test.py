@@ -78,6 +78,14 @@ class TestTufMetadataContract(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("timestamp snapshot version", result.stderr)
 
+    def test_rejects_role_rollback_from_state(self):
+        directory, _ = self.make_set()
+        state = directory / "accepted-versions.json"
+        state.write_text(json.dumps({"schema": 1, "versions": {role: 2 for role in ("root", "targets", "snapshot", "timestamp")}}), encoding="utf-8")
+        result = self.run_command(directory, None, "--state-path", str(state))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rollback detected", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
