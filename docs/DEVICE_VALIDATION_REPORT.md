@@ -62,4 +62,5 @@ The emulator result verifies application startup and encrypted-database reopen b
 
 - **PASS**: `PlaintextDatabaseMigrationTest` — 1 test passed after rebuilding both APKs and resetting the AVD.
 - **PASS**: `SqlCipherPassphraseStoreTest` — 2 tests passed.
+- **PASS**: full Android instrumentation suite — 11 tests passed, 0 failures.
 - The earlier failures were caused by stale APK artifacts and a corrupted Play Store AVD state. After `-wipe-data`, the headless AVD booted and the tests ran without the prior Bluetooth/radio crash.
