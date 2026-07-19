@@ -3,6 +3,7 @@ param(
     [string]$SourcePath = '.',
     [string]$OutputPath = 'artifacts/syft-sbom.json',
     [string]$SpdxOutputPath = 'artifacts/syft-sbom.spdx.json',
+    [ValidateSet('report-only','block-high-critical')][string]$Mode = 'report-only',
     [switch]$RequireTool
 )
 $ErrorActionPreference = 'Stop'
@@ -12,7 +13,7 @@ New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
 if (-not (Get-Command syft -ErrorAction SilentlyContinue)) {
     @{status='BLOCKED';reason='syft-not-installed';source=$source} | ConvertTo-Json | Set-Content -LiteralPath $out
     $message = 'Syft is not installed; SBOM generation is BLOCKED.'
-    if ($RequireTool) { throw $message }
+    if ($RequireTool -or $Mode -eq 'block-high-critical') { throw $message }
     Write-Warning $message
     exit 0
 }
@@ -22,5 +23,7 @@ $spdx = [IO.Path]::GetFullPath($SpdxOutputPath)
 New-Item -ItemType Directory -Force -Path (Split-Path $spdx) | Out-Null
 & syft "$source" -o "spdx-json=$spdx"
 if ($LASTEXITCODE -ne 0) { throw "Syft SPDX generation failed with exit code $LASTEXITCODE" }
+$statusPath = "$out.status.json"
+@{status='PASS';tool='syft';sbom=$out;spdx=$spdx} | ConvertTo-Json | Set-Content -LiteralPath $statusPath
 $version = (& syft version 2>&1 | Out-String).Trim()
 Write-Output "Syft ($version) reports: $out and $spdx"

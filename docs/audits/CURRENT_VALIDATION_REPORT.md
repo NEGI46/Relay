@@ -25,6 +25,7 @@ Validation rule: only a command that completed successfully at the current code 
 | SBOM / OSV / Grype | local scan scripts | BLOCKED | Syft, OSV-Scanner, and Grype are not installed. Scripts emitted `BLOCKED`; required mode also failed as intended. |
 | MobSF | `scripts/run-mobsf.ps1` | BLOCKED | `MOBSF_URL` and `MOBSF_API_KEY` are not configured. Required mode emitted `BLOCKED` and failed as intended. |
 | Distribution signature verification | `scripts/verify-distribution-signatures.ps1 -RequireVerification` | BLOCKED | No distribution/signing evidence or cosign verification setup is available. Required mode emitted `BLOCKED` and failed as intended. |
+| PC Gateway smoke | Gateway start, health, SQLite, and ingress smoke at this HEAD | NOT_RUN | A dated smoke exists in the repository documentation, but it was not re-executed for this audit HEAD. |
 
 ## Reproduction prerequisites and next steps
 

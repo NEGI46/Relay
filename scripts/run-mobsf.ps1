@@ -13,7 +13,7 @@ New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
 if ([string]::IsNullOrWhiteSpace($MobSFUrl) -or [string]::IsNullOrWhiteSpace($MobSFApiKey)) {
     @{status='BLOCKED';reason='MOBSF_URL or MOBSF_API_KEY is not configured'} | ConvertTo-Json | Set-Content -LiteralPath $out
     $message = 'MOBSF_URL and MOBSF_API_KEY are not configured; MobSF scanning is BLOCKED.'
-    if ($RequireTool) { throw $message }
+    if ($RequireTool -or $Mode -eq 'block-high-critical') { throw $message }
     Write-Warning $message
     exit 0
 }
@@ -21,7 +21,7 @@ $artifact = Get-ChildItem -LiteralPath $ArtifactPath -Recurse -File -ErrorAction
 if (-not $artifact) {
     @{status='BLOCKED';reason='no mobile package found';artifactRoot=$ArtifactPath} | ConvertTo-Json | Set-Content -LiteralPath $out
     $message = "No mobile package found under $ArtifactPath; MobSF scanning is BLOCKED."
-    if ($RequireTool) { throw $message }
+    if ($RequireTool -or $Mode -eq 'block-high-critical') { throw $message }
     Write-Warning $message
     exit 0
 }
