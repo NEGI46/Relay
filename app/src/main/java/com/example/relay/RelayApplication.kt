@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.relay.data.local.RelayDatabase
+import com.example.relay.data.local.PlaintextDatabaseMigration
 import com.example.relay.data.repository.RoomMessageRepository
 import com.example.relay.data.repository.RoomRescueEnvelopeRepository
 import com.example.relay.data.local.SqlCipherPassphraseStore
@@ -68,7 +69,8 @@ class RelayApplication : Application() {
     val database: RelayDatabase by lazy {
         System.loadLibrary("sqlcipher")
         val passphrase = SqlCipherPassphraseStore(this).loadOrCreate()
-        Room.databaseBuilder(this, RelayDatabase::class.java, "relay.db")
+        PlaintextDatabaseMigration.migrateIfNeeded(this, DATABASE_NAME, passphrase)
+        Room.databaseBuilder(this, RelayDatabase::class.java, DATABASE_NAME)
             .openHelperFactory(SupportOpenHelperFactory(passphrase))
             .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
@@ -195,6 +197,10 @@ class RelayApplication : Application() {
         }
         // A process restart must not require a courier to open a transfer screen.
         RescueDeliveryService.startIfEnabled(this)
+    }
+
+    private companion object {
+        const val DATABASE_NAME = "relay.db"
     }
 }
 

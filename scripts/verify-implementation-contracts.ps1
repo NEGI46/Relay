@@ -24,6 +24,8 @@ $versions = Read-Text 'gradle/libs.versions.toml'
 $application = Read-Text 'app/src/main/java/com/example/relay/RelayApplication.kt'
 $passphrase = Read-Text 'app/src/main/java/com/example/relay/data/local/SqlCipherPassphraseStore.kt'
 $androidDatabaseTest = Read-Text 'app/src/androidTest/java/com/example/relay/data/local/SqlCipherPassphraseStoreTest.kt'
+$migrationSource = Read-Text 'app/src/main/java/com/example/relay/data/local/PlaintextDatabaseMigration.kt'
+$migrationTest = Read-Text 'app/src/androidTest/java/com/example/relay/data/local/PlaintextDatabaseMigrationTest.kt'
 $manifest = Read-Text 'app/src/main/AndroidManifest.xml'
 $workflow = Read-Text '.github/workflows/relay-ci.yml'
 $backup = Read-Text 'scripts/backup-gateway.ps1'
@@ -39,6 +41,9 @@ Require-Text $passphrase 'AndroidKeyStore' 'SQLCipher key material is protected 
 Require-Text $passphrase 'AES/GCM/NoPadding' 'passphrase record uses authenticated encryption'
 Require-Text $androidDatabaseTest 'DoesNotExposePlaintextSqliteHeader' 'instrumentation test checks the encrypted database header'
 Require-Text $androidDatabaseTest 'SupportOpenHelperFactory' 'instrumentation test opens Room through SQLCipher'
+Require-Text $migrationSource 'OPEN_READONLY' 'legacy database is opened read-only during migration'
+Require-Text $migrationSource 'installEncryptedFile' 'legacy database is replaced only after encrypted copy succeeds'
+Require-Text $migrationTest 'plaintextMessagesAreCopiedIntoEncryptedRoomDatabase' 'plaintext-to-encrypted migration instrumentation test'
 Require-Text $manifest 'android:allowBackup="false"' 'Android backup is disabled for encrypted application data'
 
 # Runtime communication must have an explicit foreground-service and permission boundary.

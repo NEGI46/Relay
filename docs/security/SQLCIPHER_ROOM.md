@@ -14,6 +14,11 @@ Migration acceptance criteria:
 - an in-memory Room test remains available for repository unit tests;
 - backups use the Litestream + age flow and never copy the live DB directly.
 
-The current repository keeps database construction in
-`app/src/main/.../RelayApplication.kt`; the SQLCipher factory must be inserted
-there as one isolated change after the exact dependency/API version is pinned.
+The current repository constructs the database in
+`app/src/main/.../RelayApplication.kt` through
+`PlaintextDatabaseMigration` and `SupportOpenHelperFactory`. A pre-SQLCipher
+database is opened read-only, copied into a new encrypted Room database, and
+removed only after the encrypted file has been installed at the original path.
+The migration contract is covered by
+`app/src/androidTest/.../PlaintextDatabaseMigrationTest.kt`; the device run
+must still be executed on a sufficiently provisioned emulator or phone.
