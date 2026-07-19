@@ -52,6 +52,7 @@ Real Android installation, automatic discovery from a phone, Nearby pairing-free
 - **PASS**: headless Android 16 emulator launched the current APK and kept the Relay process alive.
 - **PASS**: the Room database header was encrypted (not `SQLite format 3`) and remained identical after force-stop/relaunch.
 - **NOT_RUN / environment-limited**: instrumentation execution was not accepted as a test pass because the low-memory Play Store AVD killed the instrumentation process while Android/GMS services were also being reclaimed.
+- The migration test was retried alone on the 2 GB AVD, including once with nonessential Google apps disabled; both runs returned `INSTRUMENTATION_RESULT: shortMsg=Process crashed` without a Relay Java exception. This remains an environment-limited result, not a test pass.
 - **Policy**: future routine device checks use the screenless, low-load emulator first. A physical device is reserved for RF/Bluetooth, multi-device, or hardware-specific behavior that an emulator cannot reproduce.
 
 The emulator result verifies application startup and encrypted-database reopen behavior; it does not claim Nearby or physical-radio E2E verification.
