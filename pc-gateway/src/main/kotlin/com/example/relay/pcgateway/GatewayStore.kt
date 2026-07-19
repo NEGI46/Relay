@@ -20,6 +20,7 @@ import kotlinx.serialization.json.jsonPrimitive
 private const val ROUTE_AUTHENTICATED_BRIDGE = "AUTHENTICATED_BRIDGE"
 private const val ROUTE_ANONYMOUS_LAN = "ANONYMOUS_LAN"
 private const val CONTENT_UNVERIFIED = "UNVERIFIED"
+private const val CONTENT_SIGNED_UNVERIFIED = "SIGNED_UNVERIFIED"
 
 data class StoreOutcome(
     val messageId: String,
@@ -396,7 +397,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         }
         // Bridge authentication proves only which paired transport submitted the bytes. The MVP
         // has no report signature/issuer verifier, so content and claimed origin stay unverified.
-        val contentVerification = CONTENT_UNVERIFIED
+        val contentVerification = if (message.reportSignature != null) CONTENT_SIGNED_UNVERIFIED else CONTENT_UNVERIFIED
         if (message.messageId.isBlank() || message.messageId.length > 64 || message.originDeviceId.length !in 1..64) {
             return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_identifier")
         }

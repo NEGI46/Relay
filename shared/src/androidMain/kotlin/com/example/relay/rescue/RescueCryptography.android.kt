@@ -213,7 +213,7 @@ actual object RescueCryptography {
         } catch (_: Exception) { false }
     }
 
-    private fun reportBytes(message: RelayMessage): ByteArray = json.encodeToString(RelayMessage.serializer(), message.copy(reportSignature = null)).encodeToByteArray()
+    private fun reportBytes(message: RelayMessage): ByteArray = reportSigningBytes(message)
 
     private fun generate(jcaAlgorithm: String, algorithm: RescueKeyAlgorithm, initialize: KeyPairGenerator.() -> Unit): RescueKeyPair = guarded("key_generation_failed") {
         val pair = KeyPairGenerator.getInstance(jcaAlgorithm).apply(initialize).generateKeyPair()

@@ -70,6 +70,16 @@ class GatewayProtocolTest {
         assertEquals(GatewayVerificationResult.INVALID_SIGNATURE, signed.copy(hopCount = 1).verifyWith(verifier))
     }
 
+    @Test fun `report signature is carried and bound to gateway v2 integrity`() {
+        val signature = buildJsonObject { put("signerKeyId", "device-key"); put("signatureBase64", "A".repeat(64)) }
+        val message = GatewayMessage("m", "SAFETY", "REPORT", "HIGH", "RECEIVED", 1, 10, 9, 0, 0, 8, "origin", JsonPrimitive("payload"), 1, reportSignature = signature)
+        val keys = KeyPairGenerator.getInstance("EC").apply { initialize(256) }.generateKeyPair()
+        val signed = message.signWith(EcdsaP256GatewayMessageSigner("gateway-key", keys.private))
+        val verifier = EcdsaP256GatewayMessageVerifier { keys.public }
+        assertEquals(GatewayVerificationResult.VERIFIED, signed.verifyWith(verifier))
+        assertEquals(GatewayVerificationResult.INVALID_SIGNATURE, signed.copy(reportSignature = null).verifyWith(verifier))
+    }
+
     @Test fun `NoOp signer never creates trusted integrity`() {
         val message = GatewayMessage("m", "SAFETY", "REPORT", "HIGH", "RECEIVED", 1, 10, 9, 0, 0, 8, "origin", JsonPrimitive("payload"), 1)
         assertEquals(null, message.signWith(NoOpGatewayMessageSigner).integrity)

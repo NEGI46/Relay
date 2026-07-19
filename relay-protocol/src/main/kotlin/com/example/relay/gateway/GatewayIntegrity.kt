@@ -118,6 +118,7 @@ fun GatewayMessage.canonicalBytes(): ByteArray = CanonicalFields("RelayGatewayMe
     add(hopLimit.toString())
     add(originDeviceId)
     add(payload.canonicalJson())
+    add(reportSignature?.canonicalJson().orEmpty())
     add(receivedAt.toString())
 }.bytes()
 

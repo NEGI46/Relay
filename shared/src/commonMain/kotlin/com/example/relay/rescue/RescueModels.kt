@@ -1,6 +1,9 @@
 package com.example.relay.rescue
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import com.example.relay.domain.MessagePayload
 
 const val RESCUE_PROTOCOL_VERSION: Int = 1
 const val RESCUE_MAX_CIPHERTEXT_BYTES: Int = 1_048_576
@@ -249,6 +252,24 @@ internal fun UnsignedShelterReceipt.signingBytes(): ByteArray = canonicalBytes(
     receivedAtEpochMillis.toString(),
     status.name,
 )
+
+/** Immutable REPORT content only; hop/status/receipt timing are transport metadata. */
+fun reportSigningBytes(message: com.example.relay.domain.RelayMessage): ByteArray {
+    val payloadJson = Json { encodeDefaults = true; ignoreUnknownKeys = false }
+        .encodeToString(MessagePayload.serializer(), message.payload)
+    val payloadHash = RescueCryptography.sha256Hex(payloadJson.encodeToByteArray())
+    return canonicalBytes(
+        "RelayReport/v1",
+        message.messageId,
+        message.originDeviceId,
+        message.createdAt.toString(),
+        message.expiresAt.toString(),
+        message.messageType.name,
+        message.priority.name,
+        payloadHash,
+        payloadJson,
+    )
+}
 
 private fun canonicalBytes(vararg fields: String): ByteArray = buildString {
     fields.forEach { field -> append(field.encodeToByteArray().size).append(':').append(field) }

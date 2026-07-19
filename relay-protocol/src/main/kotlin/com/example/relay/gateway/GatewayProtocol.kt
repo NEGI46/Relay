@@ -43,6 +43,8 @@ data class GatewayMessage(
     val receivedAt: Long,
     /** Absent on protocol v1. Protocol v2 verification policy requires this field. */
     val integrity: GatewayIntegrity? = null,
+    /** Serialized immutable REPORT signature, if the payload is a signed REPORT. */
+    val reportSignature: JsonElement? = null,
 )
 
 @Serializable

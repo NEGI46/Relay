@@ -25,6 +25,12 @@ class ReportSignatureTest {
         val signed = RescueCryptography.signReport(message, keys)
 
         assertTrue(RescueCryptography.verifyReport(signed))
+        assertTrue(
+            RescueCryptography.verifyReport(
+                signed.copy(hopCount = 2, status = MessageStatus.RECEIVED, receivedAt = 1_700_000_000_123),
+            ),
+            "transport metadata must remain mutable while immutable report content stays signed",
+        )
         assertFalse(RescueCryptography.verifyReport(signed.copy(payload = SafetyPayload(SafetyState.INJURED, 1, "north", "ok"))))
     }
 }

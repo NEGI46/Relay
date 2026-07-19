@@ -78,6 +78,7 @@ private fun RelayMessage.toGatewayMessage(json: Json): GatewayMessage = GatewayM
     originDeviceId = originDeviceId,
     payload = json.encodeToJsonElement(MessagePayload.serializer(), payload),
     receivedAt = receivedAt,
+    reportSignature = reportSignature?.let { json.encodeToJsonElement(com.example.relay.rescue.ReportSignature.serializer(), it) },
 )
 
 fun createJsonHttpClient(engineClient: HttpClient): HttpClient = engineClient.config {

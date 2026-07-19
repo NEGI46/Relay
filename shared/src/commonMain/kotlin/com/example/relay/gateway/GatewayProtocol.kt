@@ -23,6 +23,7 @@ data class GatewayMessage(
     val originDeviceId: String,
     val payload: JsonElement,
     val receivedAt: Long,
+    val reportSignature: JsonElement? = null,
 )
 
 @Serializable

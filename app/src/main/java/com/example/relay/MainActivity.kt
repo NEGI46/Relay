@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
                         app.gatewayCredentialStore,
                         app.gatewaySyncEngine,
                         locationProvider = app.locationProvider,
+                        reportSigner = app.reportSigningKeyStore,
                     ) as T
             })
             val rescueViewModel: RescueViewModel = viewModel(factory = object : ViewModelProvider.Factory {

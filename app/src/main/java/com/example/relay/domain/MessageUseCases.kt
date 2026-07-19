@@ -10,6 +10,11 @@ object UuidMessageIdGenerator : MessageIdGenerator {
     override fun newId(): String = UUID.randomUUID().toString()
 }
 
+/** Signs locally-created REPORT records before they enter the durable repository. */
+fun interface ReportSigner {
+    fun sign(message: RelayMessage): RelayMessage
+}
+
 /** A classified creation failure that UI code can handle without relying on `check`. */
 sealed class LegacyMessageCreationException(val reason: String) : RuntimeException(reason) {
     class InvalidMessage(reason: String) : LegacyMessageCreationException(reason)
@@ -47,6 +52,7 @@ class CreateSafetyMessageUseCase(
     private val idGenerator: MessageIdGenerator = UuidMessageIdGenerator,
     private val defaultTtlMillis: Long = 24L * 60 * 60 * 1_000,
     private val defaultMaxHopCount: Int = 8,
+    private val reportSigner: ReportSigner? = null,
 ) {
     suspend operator fun invoke(
         state: SafetyState,
@@ -76,7 +82,7 @@ class CreateSafetyMessageUseCase(
             receivedElapsedRealtimeMs = clock.elapsedRealtimeMillis(), persistedAtWallClockMs = now,
             elapsedRealtimeSessionId = clock.sessionId(),
         )
-        return persistCreatedMessage(repository, policy, message)
+        return persistCreatedMessage(repository, policy, reportSigner?.sign(message) ?: message)
     }
 }
 
@@ -88,6 +94,7 @@ class CreateSupplyMessageUseCase(
     private val idGenerator: MessageIdGenerator = UuidMessageIdGenerator,
     private val defaultTtlMillis: Long = 24L * 60 * 60 * 1_000,
     private val defaultMaxHopCount: Int = 8,
+    private val reportSigner: ReportSigner? = null,
 ) {
     suspend operator fun invoke(
         kind: SupplyKind,
@@ -107,7 +114,7 @@ class CreateSupplyMessageUseCase(
             receivedElapsedRealtimeMs = clock.elapsedRealtimeMillis(), persistedAtWallClockMs = now,
             elapsedRealtimeSessionId = clock.sessionId(),
         )
-        return persistCreatedMessage(repository, policy, message)
+        return persistCreatedMessage(repository, policy, reportSigner?.sign(message) ?: message)
     }
 }
 

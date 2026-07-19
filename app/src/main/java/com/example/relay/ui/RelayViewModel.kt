@@ -6,6 +6,7 @@ import com.example.relay.data.repository.RoomMessageRepository
 import com.example.relay.domain.MessagePriority
 import com.example.relay.domain.CreateSafetyMessageUseCase
 import com.example.relay.domain.CreateSupplyMessageUseCase
+import com.example.relay.domain.ReportSigner
 import com.example.relay.domain.MessagePolicy
 import com.example.relay.domain.LegacyMessageCreationException
 import com.example.relay.domain.Clock
@@ -99,10 +100,11 @@ class RelayViewModel(
     private val clock: Clock = SystemClock,
     private val regionalMessageTicks: Flow<Unit> = regionalMessageExpiryTicker(),
     private val locationProvider: LocationProvider? = null,
+    private val reportSigner: ReportSigner? = null,
 ) : ViewModel() {
     private val policy = MessagePolicy(clock)
-    private val createSafetyMessage = CreateSafetyMessageUseCase(repository, policy, clock, deviceId)
-    private val createSupplyMessage = CreateSupplyMessageUseCase(repository, policy, clock, deviceId)
+    private val createSafetyMessage = CreateSafetyMessageUseCase(repository, policy, clock, deviceId, reportSigner = reportSigner)
+    private val createSupplyMessage = CreateSupplyMessageUseCase(repository, policy, clock, deviceId, reportSigner = reportSigner)
     private val _uiState = MutableStateFlow(RelayUiState(role = deviceRoleStore.load()))
     private val _gatewaySettings = MutableStateFlow(gatewaySettingsStore.load())
     val gatewaySettings: StateFlow<GatewaySettings> = _gatewaySettings.asStateFlow()

@@ -86,6 +86,7 @@ class HttpGatewayBridgeClient(
         priority = message.priority.name, status = "ACTIVE", createdAt = message.createdAt, expiresAt = message.expiresAt,
         lifetimeMs = message.lifetimeMs, accumulatedAgeMs = message.accumulatedAgeMs, hopCount = message.hopCount,
         hopLimit = message.maxHopCount, originDeviceId = message.originDeviceId, payload = json.encodeToJsonElement(message.payload), receivedAt = message.receivedAt,
+        reportSignature = message.reportSignature?.let { json.encodeToJsonElement(com.example.relay.rescue.ReportSignature.serializer(), it) },
     )
     private fun toReceipt(receipt: com.example.relay.gateway.protocol.GatewayReceipt): DeliveryReceipt? = runCatching {
         val type = when (receipt.receiptType) {

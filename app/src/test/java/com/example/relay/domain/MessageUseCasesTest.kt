@@ -2,14 +2,47 @@ package com.example.relay.domain
 
 import com.example.relay.NOW
 import com.example.relay.message
+import com.example.relay.rescue.ReportSignature
+import com.example.relay.rescue.RescueKeyAlgorithm
+import com.example.relay.rescue.RescuePublicKey
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
 class MessageUseCasesTest {
+    @Test
+    fun `production injection point signs safety reports before persistence`() = runBlocking {
+        val clock = MutableClock(NOW)
+        val repository = InMemoryMessageRepository()
+        var calls = 0
+        val signer = ReportSigner { report ->
+            calls++
+            report.copy(
+                reportSignature = ReportSignature(
+                    signerKeyId = "device-key",
+                    publicKey = RescuePublicKey("device-key", RescueKeyAlgorithm.ECDSA_P256_SHA256, "public"),
+                    signatureBase64 = "A".repeat(64),
+                ),
+            )
+        }
+        val created = CreateSafetyMessageUseCase(
+            repository,
+            MessagePolicy(clock),
+            clock,
+            "device-A",
+            MessageIdGenerator { "signed-safety" },
+            reportSigner = signer,
+        )(SafetyState.SAFE, 1, "north", "ok")
+
+        assertEquals(1, calls)
+        assertNotNull(created.reportSignature)
+        assertEquals(created, repository.find("signed-safety"))
+    }
+
     @Test
     fun `safety and supply use cases create validated local messages`() = runBlocking {
         val clock = MutableClock(NOW)

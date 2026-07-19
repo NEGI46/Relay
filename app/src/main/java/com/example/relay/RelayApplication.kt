@@ -38,6 +38,7 @@ import com.example.relay.location.LocationProvider
 import com.example.relay.service.CommunicationSupervisor
 import com.example.relay.service.RescueDeliveryService
 import com.example.relay.rescue.RescueShelterKeyStore
+import com.example.relay.rescue.ReportSigningKeyStore
 import com.example.relay.rescue.DebugShelterManifestBootstrap
 import com.example.relay.rescue.HttpShelterManifestClient
 import com.example.relay.rescue.ShelterManifestEnrollment
@@ -75,6 +76,7 @@ class RelayApplication : Application() {
     val messageRepository: RoomMessageRepository by lazy { RoomMessageRepository(database) }
     val rescueRepository: RoomRescueEnvelopeRepository by lazy { RoomRescueEnvelopeRepository(database) }
     val rescueShelterKeyStore: RescueShelterKeyStore by lazy { RescueShelterKeyStore(this) }
+    val reportSigningKeyStore: ReportSigningKeyStore by lazy { ReportSigningKeyStore() }
     val shelterManifestEnrollment: ShelterManifestEnrollment by lazy {
         ShelterManifestEnrollment(HttpShelterManifestClient(), rescueShelterKeyStore)
     }
