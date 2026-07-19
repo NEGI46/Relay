@@ -43,7 +43,29 @@ if ($ManifestOnly) {
   $rsa=[System.Security.Cryptography.RSACryptoServiceProvider]::new(); $rsa.FromXmlString((Get-Content -Raw -LiteralPath $TufPrivateKey));
   $bytes=[Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $signed)); $signature=[Convert]::ToBase64String($rsa.SignData($bytes,(New-Object Security.Cryptography.SHA256CryptoServiceProvider)))
 }
-$metadata=[ordered]@{signatures=@($(if($signature){[ordered]@{keyid=$TufKeyId;sig=$signature}}));signed=$signed}
-$metadata | ConvertTo-Json -Depth 20 | Set-Content (Join-Path $MetadataRoot 'targets.json') -Encoding utf8
-@{schema=1;generatedUtc=$now.ToString('o');packageRoot=$PackageRoot;mode=if($ManifestOnly){'ManifestOnly-integrity-only'}else{'production-signed'};cosign=if($ManifestOnly){'not-run'}else{'sign-blob --offline'};sbom='SPDX JSON';tufTargets='targets.json'} | ConvertTo-Json | Set-Content (Join-Path $MetadataRoot 'release-manifest.json') -Encoding utf8
+function New-MetadataEnvelope([object]$RoleSigned) {
+  $roleSignature=$null
+  if (-not $ManifestOnly) {
+    $roleSignature=[Convert]::ToBase64String($rsa.SignData([Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $RoleSigned)),(New-Object Security.Cryptography.SHA256CryptoServiceProvider)))
+  }
+  return [ordered]@{signatures=@($(if($roleSignature){[ordered]@{keyid=$TufKeyId;sig=$roleSignature}}));signed=$RoleSigned}
+}
+function Write-Metadata([string]$Name,[object]$RoleSigned) {
+  $path=Join-Path $MetadataRoot $Name
+  (New-MetadataEnvelope $RoleSigned) | ConvertTo-Json -Depth 30 | Set-Content $path -Encoding utf8
+  return Get-Item -LiteralPath $path
+}
+$metadata=New-MetadataEnvelope $signed
+$targetFile=Join-Path $MetadataRoot 'targets.json'
+$metadata | ConvertTo-Json -Depth 30 | Set-Content $targetFile -Encoding utf8
+$keyPublic=if($ManifestOnly){'UNSIGNED_MANIFEST_ONLY'}else{[string]$rsa.ToXmlString($false)}
+$rootSigned=[ordered]@{_type='root';spec_version='1.0.31';version=1;expires=$now.AddDays(365).ToString('yyyy-MM-ddTHH:mm:ssZ');keys=[ordered]@{$TufKeyId=[ordered]@{keytype='rsa';scheme='rsassa-pkcs1v15-sha256';keyval=[ordered]@{public=$keyPublic}}};roles=[ordered]@{root=[ordered]@{keyids=@($TufKeyId);threshold=1};targets=[ordered]@{keyids=@($TufKeyId);threshold=1};snapshot=[ordered]@{keyids=@($TufKeyId);threshold=1};timestamp=[ordered]@{keyids=@($TufKeyId);threshold=1}}}
+$rootFile=Write-Metadata 'root.json' $rootSigned
+function Get-MetadataLink([System.IO.FileInfo]$File,[int64]$Version) { return [ordered]@{version=$Version;length=$File.Length;hashes=[ordered]@{sha256=(Get-FileHash -LiteralPath $File.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}} }
+$targetsFile=Get-Item -LiteralPath $targetFile
+$snapshotSigned=[ordered]@{_type='snapshot';spec_version='1.0.31';version=$version;expires=$expires;meta=[ordered]@{'root.json'=Get-MetadataLink $rootFile 1;'targets.json'=Get-MetadataLink $targetsFile $version}}
+$snapshotFile=Write-Metadata 'snapshot.json' $snapshotSigned
+$timestampSigned=[ordered]@{_type='timestamp';spec_version='1.0.31';version=$version;expires=$expires;meta=[ordered]@{'snapshot.json'=Get-MetadataLink $snapshotFile $version}}
+[void](Write-Metadata 'timestamp.json' $timestampSigned)
+@{schema=1;generatedUtc=$now.ToString('o');packageRoot=$PackageRoot;mode=if($ManifestOnly){'ManifestOnly-integrity-only'}else{'production-signed'};cosign=if($ManifestOnly){'not-run'}else{'sign-blob --offline'};sbom='SPDX JSON';tufRoles=@('root.json','targets.json','snapshot.json','timestamp.json')} | ConvertTo-Json | Set-Content (Join-Path $MetadataRoot 'release-manifest.json') -Encoding utf8
 Write-Output "Distribution manifest generated: $MetadataRoot"

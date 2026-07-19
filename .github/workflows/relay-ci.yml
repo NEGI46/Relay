@@ -199,6 +199,8 @@ jobs:
         run: python tools/ble-sim/run_tests.py
       - name: Run deterministic decoder regression tests
         run: python -m unittest discover -s test-lab/fuzz -p 'decoder*_test.py' -v
+      - name: Run TUF metadata chain contract tests
+        run: python test-lab/tuf_metadata_test.py -v
 
   quality-gates:
     name: Quality and security gates
