@@ -19,6 +19,11 @@ enum class RescueScreen {
     SAFETY_PRIVACY,
 }
 
+enum class RescueLanguage { JAPANESE, ENGLISH }
+
+internal fun RescueLanguage.text(japanese: String, english: String): String =
+    if (this == RescueLanguage.JAPANESE) japanese else english
+
 data class RescueBroadcastUiState(
     val isActive: Boolean = false,
     val nearbyDeviceCount: Int = 0,
@@ -56,10 +61,12 @@ data class RescueUiState(
     val ownRequest: OwnRescueRequestUiState? = null,
     val isRequestSubmitting: Boolean = false,
     val formMessage: String? = null,
+    val language: RescueLanguage = RescueLanguage.JAPANESE,
 )
 
 /** Parent-owned actions. RescueFlow performs no networking or persistence. */
 interface RescueCallbacks {
+    fun onToggleLanguage()
     fun onNavigate(screen: RescueScreen)
     fun onDraftChange(draft: RescueRequestDraft)
     fun onSubmitRequest()

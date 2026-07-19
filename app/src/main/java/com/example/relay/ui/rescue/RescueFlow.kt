@@ -56,8 +56,8 @@ fun RescueFlow(
         RescueScreen.HOME -> RescueHomeScreen(state, callbacks, onExit, modifier)
         RescueScreen.REQUEST_FORM -> RescueRequestFormScreen(state, callbacks, modifier)
         RescueScreen.BROADCASTING -> RescueBroadcastingScreen(state, callbacks, modifier)
-        RescueScreen.COURIER_INVENTORY -> CourierInventoryScreen(state.courierItems, state.courierAutomation, callbacks, modifier)
-        RescueScreen.SAFETY_PRIVACY -> SafetyPrivacyScreen(callbacks, modifier)
+        RescueScreen.COURIER_INVENTORY -> CourierInventoryScreen(state, callbacks, modifier)
+        RescueScreen.SAFETY_PRIVACY -> SafetyPrivacyScreen(state.language, callbacks, modifier)
     }
 }
 
@@ -68,41 +68,49 @@ private fun RescueHomeScreen(
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    RescuePage(title = "Relay 救助", modifier = modifier, showBack = true, onBack = onExit) { contentModifier ->
+    val language = state.language
+    RescuePage(
+        title = language.text("Relay 救助", "Relay Rescue"),
+        language = language,
+        onToggleLanguage = callbacks::onToggleLanguage,
+        modifier = modifier,
+        showBack = true,
+        onBack = onExit,
+    ) { contentModifier ->
         RescueScrollableColumn(contentModifier) {
-            Text("今すぐ助けが必要ですか", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
-            Text("SOSは2秒長押しで、人数不明・命の危険としてGPS位置をすぐ送ります。")
-            SosHoldButton(enabled = !state.isRequestSubmitting, onSos = callbacks::onSendSos)
+            Text(language.text("今すぐ助けが必要ですか", "Do you need help now?"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
+            Text(language.text("SOSは2秒長押しで、人数不明・命の危険としてGPS位置をすぐ送ります。", "Hold SOS for 2 seconds to send your GPS immediately as a life-threatening emergency with an unknown group size."))
+            SosHoldButton(language, enabled = !state.isRequestSubmitting, onSos = callbacks::onSendSos)
             state.formMessage?.let { Card(Modifier.fillMaxWidth()) { Text(it, Modifier.padding(16.dp)) } }
-            LargeActionButton("状況を入力して救助を依頼") { callbacks.onNavigate(RescueScreen.REQUEST_FORM) }
+            LargeActionButton(language.text("状況を入力して救助を依頼", "Describe the situation")) { callbacks.onNavigate(RescueScreen.REQUEST_FORM) }
 
             state.ownRequest?.let { request ->
-                OwnRequestCard(request, callbacks)
+                OwnRequestCard(request, language, callbacks)
             }
 
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("通信は自動です", style = MaterialTheme.typography.titleMedium)
+                    Text(language.text("通信は自動です", "Communication is automatic"), style = MaterialTheme.typography.titleMedium)
                     Text(
                         when {
-                            state.broadcast.transferCount > 0 -> "中継済み。避難所への到達を確認中です。"
-                            state.broadcast.isActive -> "周囲のRelay端末を探しています。"
-                            else -> "送信可能。依頼後はアプリを閉じても中継します。"
+                            state.broadcast.transferCount > 0 -> language.text("中継済み。避難所への到達を確認中です。", "Relayed. Waiting for confirmation from the shelter.")
+                            state.broadcast.isActive -> language.text("周囲のRelay端末を探しています。", "Looking for nearby Relay devices.")
+                            else -> language.text("送信可能。依頼後はアプリを閉じても中継します。", "Ready. Relay continues after you close the app.")
                         },
                     )
-                    Text("端末・避難所・再送を選ぶ操作はありません。")
+                    Text(language.text("端末・避難所・再送を選ぶ操作はありません。", "You never need to select a device, shelter, or retry."))
                 }
             }
             OutlinedButton(
                 onClick = { callbacks.onNavigate(RescueScreen.SAFETY_PRIVACY) },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
-            ) { Text("安全とプライバシー") }
+            ) { Text(language.text("安全とプライバシー", "Safety and privacy")) }
         }
     }
 }
 
 @Composable
-private fun SosHoldButton(enabled: Boolean, onSos: () -> Unit) {
+private fun SosHoldButton(language: RescueLanguage, enabled: Boolean, onSos: () -> Unit) {
     var holding by remember { mutableStateOf(false) }
     var sentForCurrentHold by remember { mutableStateOf(false) }
     val progress by animateFloatAsState(
@@ -126,7 +134,7 @@ private fun SosHoldButton(enabled: Boolean, onSos: () -> Unit) {
                 .background(if (enabled) Color(0xFFB42318) else Color(0xFF8C8C8C))
                 .semantics {
                     role = Role.Button
-                    onLongClick("2秒長押ししてSOSを送信") {
+                    onLongClick(language.text("2秒長押ししてSOSを送信", "Hold for 2 seconds to send SOS")) {
                         if (enabled) onSos()
                         enabled
                     }
@@ -144,7 +152,11 @@ private fun SosHoldButton(enabled: Boolean, onSos: () -> Unit) {
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("SOS", color = Color.White, style = MaterialTheme.typography.displaySmall)
-                Text(if (holding) "そのまま長押し" else "2秒長押し", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (holding) language.text("そのまま長押し", "Keep holding") else language.text("2秒長押し", "Hold 2 seconds"),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                )
             }
         }
         LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
@@ -152,21 +164,24 @@ private fun SosHoldButton(enabled: Boolean, onSos: () -> Unit) {
 }
 
 @Composable
-private fun OwnRequestCard(request: OwnRescueRequestUiState, callbacks: RescueCallbacks) {
+private fun OwnRequestCard(request: OwnRescueRequestUiState, language: RescueLanguage, callbacks: RescueCallbacks) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(if (request.isCancelled) "自分の救助依頼（取消送信中）" else "自分の救助依頼", style = MaterialTheme.typography.titleLarge)
-            Text(request.submissionStatus.statusLabel(), style = MaterialTheme.typography.titleMedium)
-            Text("依頼 → 自動中継 → 避難所受信 → 対応中 → 完了")
+            Text(
+                if (request.isCancelled) language.text("自分の救助依頼（取消送信中）", "My rescue request (cancelling)") else language.text("自分の救助依頼", "My rescue request"),
+                style = MaterialTheme.typography.titleLarge,
+            )
+            Text(request.submissionStatus.statusLabel(language), style = MaterialTheme.typography.titleMedium)
+            Text(language.text("依頼 → 自動中継 → 避難所受信 → 対応中 → 完了", "Request → Relay → Shelter → Responding → Complete"))
             MiniLocationMap(request.urgency == RescueUrgency.IMMEDIATE)
             Text("GPS: %.5f, %.5f".format(request.latitude, request.longitude))
-            Text("位置更新: ${formatRescueTime(request.locationCapturedAtEpochMillis)}${request.accuracyMeters?.let { "（精度 約${it.toInt()}m）" }.orEmpty()}")
+            Text(language.text("位置更新", "Location updated") + ": ${formatRescueTime(request.locationCapturedAtEpochMillis)}${request.accuracyMeters?.let { language.text("（精度 約${it.toInt()}m）", " (accuracy about ${it.toInt()} m)") }.orEmpty()}")
             if (!request.isCancelled) {
                 Button(onClick = callbacks::onPrepareUpdate, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
-                    Text("状況・人数を更新")
+                    Text(language.text("状況・人数を更新", "Update situation or group size"))
                 }
                 OutlinedButton(onClick = callbacks::onCancelRequest, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
-                    Text("救助依頼を取り消す")
+                    Text(language.text("救助依頼を取り消す", "Cancel rescue request"))
                 }
             }
         }
@@ -208,6 +223,8 @@ internal fun LargeActionButton(label: String, onClick: () -> Unit) {
 @Composable
 internal fun RescuePage(
     title: String,
+    language: RescueLanguage,
+    onToggleLanguage: () -> Unit,
     modifier: Modifier = Modifier,
     showBack: Boolean = true,
     onBack: () -> Unit,
@@ -222,7 +239,13 @@ internal fun RescuePage(
                     if (showBack) OutlinedButton(
                         onClick = onBack,
                         modifier = Modifier.padding(start = 8.dp).heightIn(min = 56.dp),
-                    ) { Text("戻る") }
+                    ) { Text(language.text("戻る", "Back")) }
+                },
+                actions = {
+                    OutlinedButton(
+                        onClick = onToggleLanguage,
+                        modifier = Modifier.padding(end = 8.dp).heightIn(min = 48.dp),
+                    ) { Text(if (language == RescueLanguage.JAPANESE) "English" else "日本語") }
                 },
             )
         },
@@ -236,15 +259,15 @@ internal fun SectionTitle(text: String) = Text(
     modifier = Modifier.padding(top = 8.dp).semantics { heading() },
 )
 
-private fun RescueSubmissionStatus.statusLabel(): String = when (this) {
-    RescueSubmissionStatus.PENDING -> "周囲の端末を探索中"
-    RescueSubmissionStatus.IN_TRANSIT -> "避難所へ自動中継中"
-    RescueSubmissionStatus.SHELTER_STORED -> "避難所PCが受信済み"
-    RescueSubmissionStatus.SHELTER_ACCEPTED -> "避難所が受領済み"
-    RescueSubmissionStatus.SHELTER_RESPONDING -> "避難所が対応中"
-    RescueSubmissionStatus.SHELTER_COMPLETED -> "対応完了"
-    RescueSubmissionStatus.CANCELLED -> "取消確認済み"
-    RescueSubmissionStatus.SHELTER_REJECTED -> "避難所で確認が必要"
+private fun RescueSubmissionStatus.statusLabel(language: RescueLanguage): String = when (this) {
+    RescueSubmissionStatus.PENDING -> language.text("周囲の端末を探索中", "Looking for nearby devices")
+    RescueSubmissionStatus.IN_TRANSIT -> language.text("避難所へ自動中継中", "Relaying to the shelter")
+    RescueSubmissionStatus.SHELTER_STORED -> language.text("避難所PCが受信済み", "Received by the shelter PC")
+    RescueSubmissionStatus.SHELTER_ACCEPTED -> language.text("避難所が受領済み", "Accepted by the shelter")
+    RescueSubmissionStatus.SHELTER_RESPONDING -> language.text("避難所が対応中", "Shelter is responding")
+    RescueSubmissionStatus.SHELTER_COMPLETED -> language.text("対応完了", "Response complete")
+    RescueSubmissionStatus.CANCELLED -> language.text("取消確認済み", "Cancellation confirmed")
+    RescueSubmissionStatus.SHELTER_REJECTED -> language.text("避難所で確認が必要", "Shelter review required")
 }
 
 private fun formatRescueTime(epochMillis: Long): String =

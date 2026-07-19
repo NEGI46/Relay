@@ -131,6 +131,23 @@ class RescueViewModelTest {
     }
 
     @Test
+    fun `rescue language starts in Japanese and toggles without changing the draft`() {
+        val viewModel = RescueViewModel(
+            repository = InMemoryRescueEnvelopeRepository(),
+            shelterKeyProvider = ShelterPublicKeyProvider { null },
+            nowEpochMillis = { TEST_NOW },
+        )
+        val draftId = requireNotNull(viewModel.state.value.draft).requestId
+
+        assertEquals(RescueLanguage.JAPANESE, viewModel.state.value.language)
+        viewModel.onToggleLanguage()
+        assertEquals(RescueLanguage.ENGLISH, viewModel.state.value.language)
+        assertEquals(draftId, viewModel.state.value.draft?.requestId)
+        viewModel.onToggleLanguage()
+        assertEquals(RescueLanguage.JAPANESE, viewModel.state.value.language)
+    }
+
+    @Test
     fun `courier state exposes only delivery metadata and never rescue plaintext`() = runBlocking {
         val recipient = RescueCryptography.generateRecipientKeyPair()
         val signer = RescueCryptography.generateShelterSigningKeyPair()

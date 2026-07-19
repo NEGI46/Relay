@@ -47,6 +47,19 @@ class RescueViewModel(
 
     init { refreshCourierItems() }
 
+    override fun onToggleLanguage() {
+        _state.update { current ->
+            current.copy(
+                language = if (current.language == RescueLanguage.JAPANESE) {
+                    RescueLanguage.ENGLISH
+                } else {
+                    RescueLanguage.JAPANESE
+                },
+                formMessage = null,
+            )
+        }
+    }
+
     override fun onNavigate(screen: RescueScreen) {
         if (screen == RescueScreen.COURIER_INVENTORY) refreshCourierItems()
         if (screen == RescueScreen.HOME || screen == RescueScreen.BROADCASTING) onRefreshStatus()
@@ -62,11 +75,11 @@ class RescueViewModel(
     override fun onSubmitRequest() {
         val draft = (_state.value.draft ?: return).withInferredConditions()
         if (draft.personCount !in 1..1_000) {
-            _state.update { it.copy(formMessage = "助けが必要な人数を入力してください。") }
+            setFormMessage("助けが必要な人数を入力してください。", "Enter the number of people who need help.")
             return
         }
         if (draft.conditions.isEmpty()) {
-            _state.update { it.copy(formMessage = "現在の状態を1つ以上選んでください。") }
+            setFormMessage("現在の状態を1つ以上選んでください。", "Select at least one current condition.")
             return
         }
         submit(draft.withLegacyConditionFlags(), isSos = false)
@@ -99,7 +112,7 @@ class RescueViewModel(
                     expiresAtEpochMillis = now + REQUEST_LIFETIME_MILLIS,
                     action = RescueRequestAction.ACTIVE,
                 ),
-                formMessage = "変更内容を確認して送信してください。",
+                formMessage = it.language.text("変更内容を確認して送信してください。", "Review the changes, then send the update."),
             )
         }
     }
@@ -139,18 +152,24 @@ class RescueViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val keys = awaitShelterKeys()
             if (keys == null) {
-                failSubmission("府中町の救助受信情報を取得できません。通信状態を確認してください。")
+                failSubmission(
+                    "府中町の救助受信情報を取得できません。通信状態を確認してください。",
+                    "Fuchu Town rescue receiver information is unavailable. Check the connection.",
+                )
                 return@launch
             }
             val located = attachCurrentLocation(source.copy(destinationShelterId = keys.shelterId))
             if (located == null) {
-                failSubmission("GPS位置を取得できません。位置情報をONにして、空が見える場所で再試行してください。")
+                failSubmission(
+                    "GPS位置を取得できません。位置情報をONにして、空が見える場所で再試行してください。",
+                    "GPS location is unavailable. Turn on Location and try again with a clear view of the sky.",
+                )
                 return@launch
             }
             val result = runCatching {
                 creator.create(located, keys.recipientKey, UUID.randomUUID().toString())
             }.getOrElse {
-                failSubmission("救助要請を端末に保存できませんでした。")
+                failSubmission("救助要請を端末に保存できませんでした。", "The rescue request could not be saved on this device.")
                 return@launch
             }
             when (result) {
@@ -166,15 +185,25 @@ class RescueViewModel(
                             broadcast = RescueBroadcastUiState(
                                 isActive = located.action == RescueRequestAction.ACTIVE,
                                 transferCount = record.state.submissionCount,
-                                statusMessage = when {
-                                    located.action == RescueRequestAction.CANCELLED -> "取消情報を自動で届けています。"
-                                    isSos -> "命の危険があるSOSを最優先で自動送信しています。"
-                                    else -> "救助要請を自動送信しています。操作は不要です。"
-                                },
+                                statusMessage = current.language.text(
+                                    when {
+                                        located.action == RescueRequestAction.CANCELLED -> "取消情報を自動で届けています。"
+                                        isSos -> "命の危険があるSOSを最優先で自動送信しています。"
+                                        else -> "救助要請を自動送信しています。操作は不要です。"
+                                    },
+                                    when {
+                                        located.action == RescueRequestAction.CANCELLED -> "Relaying the cancellation automatically."
+                                        isSos -> "Relaying the life-threatening SOS at highest priority."
+                                        else -> "Relaying the rescue request automatically. No action is needed."
+                                    },
+                                ),
                             ),
                             courierAutomation = CourierAutomationUiState(
                                 isEnabled = true,
-                                statusMessage = "受信・中継・避難所への提出は自動です",
+                                statusMessage = current.language.text(
+                                    "受信・中継・避難所への提出は自動です",
+                                    "Receiving, relaying, and shelter delivery are automatic.",
+                                ),
                             ),
                         )
                     }
@@ -186,7 +215,10 @@ class RescueViewModel(
                     }
                     refreshCourierItemsNow()
                 }
-                is RescueCreationResult.NotStored -> failSubmission("保存できませんでした: ${result.reason.name}")
+                is RescueCreationResult.NotStored -> failSubmission(
+                    "保存できませんでした: ${result.reason.name}",
+                    "Could not save: ${result.reason.name}",
+                )
             }
         }
     }
@@ -231,7 +263,12 @@ class RescueViewModel(
                     _state.update {
                         it.copy(
                             ownRequest = next.toOwnRequest(result.record.state.submissionStatus),
-                            broadcast = it.broadcast.copy(statusMessage = "現在地を更新しながら自動送信しています。"),
+                            broadcast = it.broadcast.copy(
+                                statusMessage = it.language.text(
+                                    "現在地を更新しながら自動送信しています。",
+                                    "Relaying automatically while updating your location.",
+                                ),
+                            ),
                         )
                     }
                     onRescueAutomationRequired()
@@ -240,8 +277,14 @@ class RescueViewModel(
         }
     }
 
-    private fun failSubmission(message: String) {
-        _state.update { it.copy(isRequestSubmitting = false, formMessage = message) }
+    private fun failSubmission(japanese: String, english: String) {
+        _state.update {
+            it.copy(isRequestSubmitting = false, formMessage = it.language.text(japanese, english))
+        }
+    }
+
+    private fun setFormMessage(japanese: String, english: String) {
+        _state.update { it.copy(formMessage = it.language.text(japanese, english)) }
     }
 
     private fun refreshCourierItems() {

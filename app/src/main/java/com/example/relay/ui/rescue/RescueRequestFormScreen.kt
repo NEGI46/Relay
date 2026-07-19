@@ -32,59 +32,62 @@ internal fun RescueRequestFormScreen(
     callbacks: RescueCallbacks,
     modifier: Modifier = Modifier,
 ) {
+    val language = state.language
     RescuePage(
-        title = if ((state.draft?.requestVersion ?: 1) > 1) "救助要請を更新" else "助けを求める",
+        title = if ((state.draft?.requestVersion ?: 1) > 1) language.text("救助要請を更新", "Update rescue request") else language.text("助けを求める", "Request help"),
+        language = language,
+        onToggleLanguage = callbacks::onToggleLanguage,
         modifier = modifier,
         onBack = { callbacks.onNavigate(RescueScreen.HOME) },
     ) { contentModifier ->
         val draft = state.draft
         if (draft == null) {
             Column(contentModifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("入力の準備ができませんでした", style = MaterialTheme.typography.titleLarge)
-                LargeActionButton("ホームへ戻る") { callbacks.onNavigate(RescueScreen.HOME) }
+                Text(language.text("入力の準備ができませんでした", "The form could not be prepared."), style = MaterialTheme.typography.titleLarge)
+                LargeActionButton(language.text("ホームへ戻る", "Return home")) { callbacks.onNavigate(RescueScreen.HOME) }
             }
             return@RescuePage
         }
 
         RescueScrollableColumn(contentModifier) {
-            Text("人数と現在の状態だけで送れます。GPS位置は送信時に自動取得します。")
-            PersonCountChooser(draft.personCount.coerceAtLeast(1)) {
+            Text(language.text("人数と現在の状態だけで送れます。GPS位置は送信時に自動取得します。", "Only group size and current condition are required. GPS is captured automatically when you send."))
+            PersonCountChooser(language, draft.personCount.coerceAtLeast(1)) {
                 callbacks.onDraftChange(draft.copy(personCount = it))
             }
 
-            SectionTitle("現在の状態（1つ以上）")
+            SectionTitle(language.text("現在の状態（1つ以上）", "Current condition (select at least one)"))
             RescueCondition.entries.forEach { condition ->
-                DraftOption(condition.label(), condition in draft.conditions) { checked ->
+                DraftOption(condition.label(language), condition in draft.conditions) { checked ->
                     val updated = if (checked) draft.conditions + condition else draft.conditions - condition
                     callbacks.onDraftChange(draft.copy(conditions = updated))
                 }
             }
 
-            SectionTitle("補足タグ（任意）")
+            SectionTitle(language.text("補足タグ（任意）", "Additional tags (optional)"))
             RescueSupportNeed.entries.forEach { need ->
-                DraftOption(need.label(), need in draft.supportNeeds) { checked ->
+                DraftOption(need.label(language), need in draft.supportNeeds) { checked ->
                     val updated = if (checked) draft.supportNeeds + need else draft.supportNeeds - need
                     callbacks.onDraftChange(draft.copy(supportNeeds = updated))
                 }
             }
-            DraftOption("高齢者がいる", draft.elderlyPresent) {
+            DraftOption(language.text("高齢者がいる", "Older adult present"), draft.elderlyPresent) {
                 callbacks.onDraftChange(draft.copy(elderlyPresent = it))
             }
-            DraftOption("子どもがいる", draft.childrenPresent) {
+            DraftOption(language.text("子どもがいる", "Child present"), draft.childrenPresent) {
                 callbacks.onDraftChange(draft.copy(childrenPresent = it))
             }
-            DraftOption("妊娠中の人がいる", draft.pregnantPresent) {
+            DraftOption(language.text("妊娠中の人がいる", "Pregnant person present"), draft.pregnantPresent) {
                 callbacks.onDraftChange(draft.copy(pregnantPresent = it))
             }
-            DraftOption("閉じ込め・倒壊・火災の危険", draft.trapped || draft.fireOrCollapseRisk) {
+            DraftOption(language.text("閉じ込め・倒壊・火災の危険", "Trapped, collapse, or fire risk"), draft.trapped || draft.fireOrCollapseRisk) {
                 callbacks.onDraftChange(draft.copy(trapped = it, fireOrCollapseRisk = it))
             }
 
-            SectionTitle("場所の補足（任意）")
+            SectionTitle(language.text("場所の補足（任意）", "Location details (optional)"))
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("GPS位置を自動添付", style = MaterialTheme.typography.titleMedium)
-                    Text("位置が古い場合は取得時刻も一緒に避難所へ伝わります。")
+                    Text(language.text("GPS位置を自動添付", "GPS is attached automatically"), style = MaterialTheme.typography.titleMedium)
+                    Text(language.text("位置が古い場合は取得時刻も一緒に避難所へ伝わります。", "The capture time is included so the shelter can identify an older location."))
                 }
             }
             OutlinedTextField(
@@ -97,15 +100,15 @@ internal fun RescueRequestFormScreen(
                         ),
                     )
                 },
-                label = { Text("建物名・階・目印") },
+                label = { Text(language.text("建物名・階・目印", "Building, floor, or landmark")) },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 2,
             )
             OutlinedTextField(
                 value = draft.freeText,
                 onValueChange = { callbacks.onDraftChange(draft.copy(freeText = it.take(2_000))) },
-                label = { Text("ほかに伝えたいこと") },
-                supportingText = { Text("任意・2000文字まで") },
+                label = { Text(language.text("ほかに伝えたいこと", "Anything else to tell responders")) },
+                supportingText = { Text(language.text("任意・2000文字まで", "Optional, up to 2,000 characters")) },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3,
             )
@@ -118,9 +121,9 @@ internal fun RescueRequestFormScreen(
                 enabled = !state.isRequestSubmitting,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
             ) {
-                Text(if (state.isRequestSubmitting) "GPSを確認して保存中…" else "この内容で救助を依頼")
+                Text(if (state.isRequestSubmitting) language.text("GPSを確認して保存中…", "Checking GPS and saving…") else language.text("この内容で救助を依頼", "Send rescue request"))
             }
-            Text("内容と正確な位置は暗号化され、中継する人には見えません。")
+            Text(language.text("内容と正確な位置は暗号化され、中継する人には見えません。", "Details and exact location are encrypted and hidden from people relaying the request."))
         }
     }
 }
@@ -135,8 +138,8 @@ internal fun RescueScrollableColumn(modifier: Modifier, content: @Composable Col
 }
 
 @Composable
-private fun PersonCountChooser(value: Int, onChange: (Int) -> Unit) {
-    SectionTitle("助けが必要な人数")
+private fun PersonCountChooser(language: RescueLanguage, value: Int, onChange: (Int) -> Unit) {
+    SectionTitle(language.text("助けが必要な人数", "People who need help"))
     Card(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
@@ -146,7 +149,7 @@ private fun PersonCountChooser(value: Int, onChange: (Int) -> Unit) {
             OutlinedButton(onClick = { onChange((value - 1).coerceAtLeast(1)) }, modifier = Modifier.heightIn(min = 56.dp)) {
                 Text("−")
             }
-            Text("${value}人", style = MaterialTheme.typography.headlineMedium)
+            Text(language.text("${value}人", "$value people"), style = MaterialTheme.typography.headlineMedium)
             Button(onClick = { onChange((value + 1).coerceAtMost(1_000)) }, modifier = Modifier.heightIn(min = 56.dp)) {
                 Text("＋")
             }
@@ -169,17 +172,17 @@ private fun DraftOption(label: String, checked: Boolean, onCheckedChange: (Boole
     }
 }
 
-private fun RescueCondition.label(): String = when (this) {
-    RescueCondition.LIFE_THREATENING -> "命の危険がある"
-    RescueCondition.INJURED_OR_UNWELL -> "けが・体調不良"
-    RescueCondition.MOBILITY_IMPAIRED -> "自力で移動できない"
-    RescueCondition.SUPPORT_NEEDED -> "生活・医療の支援が必要"
+private fun RescueCondition.label(language: RescueLanguage): String = when (this) {
+    RescueCondition.LIFE_THREATENING -> language.text("命の危険がある", "Life-threatening danger")
+    RescueCondition.INJURED_OR_UNWELL -> language.text("けが・体調不良", "Injured or unwell")
+    RescueCondition.MOBILITY_IMPAIRED -> language.text("自力で移動できない", "Unable to move without help")
+    RescueCondition.SUPPORT_NEEDED -> language.text("生活・医療の支援が必要", "Daily living or medical support needed")
 }
 
-private fun RescueSupportNeed.label(): String = when (this) {
-    RescueSupportNeed.WATER -> "水"
-    RescueSupportNeed.FOOD -> "食料"
-    RescueSupportNeed.MEDICINE -> "薬・医療"
-    RescueSupportNeed.RESCUE_TEAM -> "救助隊"
-    RescueSupportNeed.TRANSPORT -> "移動支援"
+private fun RescueSupportNeed.label(language: RescueLanguage): String = when (this) {
+    RescueSupportNeed.WATER -> language.text("水", "Water")
+    RescueSupportNeed.FOOD -> language.text("食料", "Food")
+    RescueSupportNeed.MEDICINE -> language.text("薬・医療", "Medicine or medical care")
+    RescueSupportNeed.RESCUE_TEAM -> language.text("救助隊", "Rescue team")
+    RescueSupportNeed.TRANSPORT -> language.text("移動支援", "Transport assistance")
 }

@@ -37,17 +37,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.relay.domain.DeliveryPresentation
-import com.example.relay.domain.SafetyPayload
 import com.example.relay.domain.SafetyState
-import com.example.relay.domain.StatusChangePayload
 import com.example.relay.domain.SupplyKind
-import com.example.relay.domain.SupplyPayload
-import com.example.relay.domain.deliveryPresentationLabel
 import com.example.relay.permissions.AndroidNearbyPermissionGate
 import com.example.relay.service.RelayCommunicationService
 import com.example.relay.service.shouldAutoStartCommunication
@@ -55,11 +51,10 @@ import com.example.relay.ui.rescue.RescueFlow
 import com.example.relay.ui.rescue.RescueViewModel
 
 @Composable
-fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel, deviceId: String) {
+fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val rescueState by rescueViewModel.state.collectAsStateWithLifecycle()
     val regionalItems by viewModel.regionalItems.collectAsStateWithLifecycle()
-    val deliveries by viewModel.deliveryStates.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     val permissionGate = remember { AndroidNearbyPermissionGate(context) }
     val activationStore = remember { RelayCommunicationService.activationStore(context) }
@@ -172,7 +167,7 @@ fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel, device
             )
             RelayScreen.SAFETY_FORM -> SafetyForm(viewModel)
             RelayScreen.SUPPLY_FORM -> SupplyForm(viewModel)
-            RelayScreen.REGIONAL -> RegionalScreen(regionalItems, deviceId, deliveries, viewModel::navigate)
+            RelayScreen.REGIONAL -> OfficialInformationScreen(viewModel::navigate)
             else -> SettingsScreen(
                 state = state,
                 openAppSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
@@ -222,7 +217,7 @@ private fun HomeScreen(
                             style = MaterialTheme.typography.titleLarge,
                         )
                         Text(if (state.transportRunning) "自動で接続・中継しています" else "開始すると自動で通信します")
-                        Text("保存中の情報: ${count}件")
+                        Text("端末内の中継情報: ${count}件")
                         Text("接続中の端末: ${state.connectedPeers}台")
                         Text(gatewayStatusLabel(state.gatewayLastResult, state.transportRunning))
                         state.internetSyncLabel?.let { Text(it) }
@@ -249,7 +244,7 @@ private fun HomeScreen(
                         .fillMaxWidth()
                         .height(56.dp)
                         .semantics { contentDescription = "地域情報を見る" },
-                ) { Text("地域情報を見る（${count}件）") }
+                ) { Text("府中町の公式防災情報を見る") }
             }
             state.lastError?.let { error ->
                 item {
@@ -338,17 +333,42 @@ private fun NumberChooser(label: String, value: Int, min: Int, max: Int, update:
 }
 
 @Composable
-private fun RegionalScreen(messages: List<RegionalMessageItem>, deviceId: String, deliveries: Map<String, DeliveryPresentation>, navigate: (RelayScreen) -> Unit) {
+private fun OfficialInformationScreen(navigate: (RelayScreen) -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    val sources = listOf(
+        OfficialSource("府中町 防災・危機管理", "避難所・防災・緊急時のお知らせ", "https://www.town.fuchu.hiroshima.jp/life/1/6/"),
+        OfficialSource("府中町 指定避難所", "町が公開する指定避難所一覧", "https://www.town.fuchu.hiroshima.jp/site/kikikannrika/2030.html"),
+        OfficialSource("広島県 防災Web", "警報・避難・河川などの県公式情報", "https://www.bousai.pref.hiroshima.jp/"),
+        OfficialSource("気象庁 府中町の警報・注意報", "気象庁が発表する府中町の最新情報", "https://www.jma.go.jp/bosai/warning/#area_type=class20s&area_code=3430200"),
+    )
     MainScaffold(RelayScreen.REGIONAL, navigate) { modifier ->
-        LazyColumn(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item { Text("地域情報", style = MaterialTheme.typography.headlineMedium) }
-            if (messages.isEmpty()) item { Text("保存されている情報はありません") }
-            items(messages, key = { it.report.messageId }) { item ->
-                MessageCard(item, deviceId, deliveries[item.report.messageId])
+        LazyColumn(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item { Text("府中町の公式防災情報", style = MaterialTheme.typography.headlineMedium) }
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Text(
+                        "誤情報を避けるため、この画面には行政・気象庁の情報だけを表示します。リンクを開くにはインターネット接続が必要です。PC版は取得済み情報をキャッシュ表示します。",
+                        Modifier.padding(16.dp),
+                    )
+                }
+            }
+            items(sources, key = { it.url }) { source ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(source.title, style = MaterialTheme.typography.titleLarge)
+                        Text(source.description)
+                        Button(
+                            onClick = { uriHandler.openUri(source.url) },
+                            modifier = Modifier.fillMaxWidth().height(56.dp),
+                        ) { Text("公式サイトを開く") }
+                    }
+                }
             }
         }
     }
 }
+
+private data class OfficialSource(val title: String, val description: String, val url: String)
 
 internal fun gatewayStatusLabel(lastResult: String?, transportRunning: Boolean): String = when {
     !transportRunning -> "中継拠点: 通信停止中"
@@ -359,31 +379,6 @@ internal fun gatewayStatusLabel(lastResult: String?, transportRunning: Boolean):
     lastResult.startsWith("http_") -> "中継拠点: 通信エラー（$lastResult）"
     lastResult == "network_error" -> "中継拠点: ネットワークエラー"
     else -> "中継拠点: $lastResult"
-}
-
-@Composable
-private fun MessageCard(item: RegionalMessageItem, deviceId: String, delivery: DeliveryPresentation?) {
-    val message = item.report
-    val location = when (val payload = message.payload) {
-        is SafetyPayload -> payload.approximateLocation.ifBlank { "場所未入力" }
-        is SupplyPayload -> payload.approximateLocation.ifBlank { "場所未入力" }
-        is StatusChangePayload -> "対象: ${payload.targetMessageId.take(12)}"
-    }
-    val deliveryLabel = deliveryPresentationLabel(delivery ?: DeliveryPresentation.NOT_CONFIRMED)
-    Card(
-        Modifier
-            .fillMaxWidth()
-            .semantics { contentDescription = "地域メッセージ $deliveryLabel" },
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(if (message.messageType.name == "SAFETY") "安否情報" else "物資不足情報", style = MaterialTheme.typography.titleMedium)
-            Text(regionalReportStatusText(item))
-            Text("保存区分: ${message.status.name} / 中継: ${message.hopCount}/${message.maxHopCount}")
-            Text("場所: $location")
-            Text(if (message.originDeviceId == deviceId) "自分が登録" else "他の端末から受信")
-            Text(deliveryLabel)
-        }
-    }
 }
 
 @Composable

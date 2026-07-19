@@ -43,7 +43,7 @@ class MainActivity : ComponentActivity() {
                         shelterKeyWaitMillis = if (BuildConfig.DEBUG) 8_000 else 0,
                     ) as T
             })
-            RelayApp(relayViewModel, rescueViewModel, app.deviceId)
+            RelayApp(relayViewModel, rescueViewModel)
         }
     }
 }

@@ -22,67 +22,89 @@ import java.util.Date
 @Composable
 internal fun RescueBroadcastingScreen(state: RescueUiState, callbacks: RescueCallbacks, modifier: Modifier = Modifier) {
     val broadcast = state.broadcast
-    RescuePage(title = if (broadcast.isActive) "救助要請を自動送信中" else "救助要請を保存しました", modifier = modifier, onBack = { callbacks.onNavigate(RescueScreen.HOME) }) { contentModifier ->
+    val language = state.language
+    RescuePage(
+        title = if (broadcast.isActive) language.text("救助要請を自動送信中", "Relaying rescue request") else language.text("救助要請を保存しました", "Rescue request saved"),
+        language = language,
+        onToggleLanguage = callbacks::onToggleLanguage,
+        modifier = modifier,
+        onBack = { callbacks.onNavigate(RescueScreen.HOME) },
+    ) { contentModifier ->
         RescueScrollableColumn(contentModifier) {
-            Text(if (broadcast.isActive) "自動送信中" else "取消情報を送信中", style = MaterialTheme.typography.headlineSmall)
+            Text(if (broadcast.isActive) language.text("自動送信中", "Relaying automatically") else language.text("取消情報を送信中", "Relaying cancellation"), style = MaterialTheme.typography.headlineSmall)
             Text(broadcast.statusMessage, style = MaterialTheme.typography.bodyLarge)
-            StatusCard("近くのRelay端末", "${broadcast.nearbyDeviceCount}台")
-            StatusCard("中継した回数", "${broadcast.transferCount}回")
+            StatusCard(language.text("近くのRelay端末", "Nearby Relay devices"), language.text("${broadcast.nearbyDeviceCount}台", "${broadcast.nearbyDeviceCount}"))
+            StatusCard(language.text("中継した回数", "Relay count"), language.text("${broadcast.transferCount}回", "${broadcast.transferCount}"))
             state.ownRequest?.let { own ->
-                StatusCard("GPS位置", "%.5f, %.5f".format(own.latitude, own.longitude))
+                StatusCard(language.text("GPS位置", "GPS location"), "%.5f, %.5f".format(own.latitude, own.longitude))
             }
-            Text("アプリを閉じても自動で中継します。止める場合はホームの「救助依頼を取り消す」を使ってください。")
-            LargeActionButton("ホームへ戻る") { callbacks.onNavigate(RescueScreen.HOME) }
+            Text(language.text("アプリを閉じても自動で中継します。止める場合はホームの「救助依頼を取り消す」を使ってください。", "Relay continues after you close the app. To stop, use Cancel rescue request on Home."))
+            LargeActionButton(language.text("ホームへ戻る", "Return home")) { callbacks.onNavigate(RescueScreen.HOME) }
         }
     }
 }
 
 /** Shows courier metadata only. No PC search, submit, retry, or key entry controls exist here. */
 @Composable
-internal fun CourierInventoryScreen(items: List<CourierRescueItem>, automation: CourierAutomationUiState, callbacks: RescueCallbacks, modifier: Modifier = Modifier) {
-    RescuePage(title = "運んでいる情報", modifier = modifier, onBack = { callbacks.onNavigate(RescueScreen.HOME) }) { contentModifier ->
+internal fun CourierInventoryScreen(state: RescueUiState, callbacks: RescueCallbacks, modifier: Modifier = Modifier) {
+    val language = state.language
+    val items = state.courierItems
+    val automation = state.courierAutomation
+    RescuePage(
+        title = language.text("運んでいる情報", "Relayed requests"),
+        language = language,
+        onToggleLanguage = callbacks::onToggleLanguage,
+        modifier = modifier,
+        onBack = { callbacks.onNavigate(RescueScreen.HOME) },
+    ) { contentModifier ->
         RescueScrollableColumn(contentModifier) {
-            Text("内容は表示されません", style = MaterialTheme.typography.titleMedium)
-            Text("受信した救助要請は、府中町の避難所PCを見つけると自動で安全に提出されます。あなたの操作は不要です。")
-            StatusCard("自動提出", if (automation.isEnabled) automation.statusMessage else "自動提出の準備中です")
-            automation.lastDeliveredAtEpochMillis?.let { StatusCard("最後に提出した時刻", formatTime(it)) }
+            Text(language.text("内容は表示されません", "Request details are hidden"), style = MaterialTheme.typography.titleMedium)
+            Text(language.text("受信した救助要請は、府中町の避難所PCを見つけると自動で安全に提出されます。あなたの操作は不要です。", "Received rescue requests are delivered securely when a Fuchu Town shelter PC is found. No action is needed."))
+            StatusCard(language.text("自動提出", "Automatic delivery"), if (automation.isEnabled) automation.statusMessage else language.text("自動提出の準備中です", "Preparing automatic delivery"))
+            automation.lastDeliveredAtEpochMillis?.let { StatusCard(language.text("最後に提出した時刻", "Last delivered"), formatTime(it)) }
             if (items.isEmpty()) {
                 Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("運んでいる要請はありません", style = MaterialTheme.typography.titleLarge)
-                    Text("近くの端末から受け取ると、自動で保管して避難所へ運びます。")
+                    Text(language.text("運んでいる要請はありません", "No requests are being relayed"), style = MaterialTheme.typography.titleLarge)
+                    Text(language.text("近くの端末から受け取ると、自動で保管して避難所へ運びます。", "Requests received from nearby devices are stored and carried to the shelter automatically."))
                 } }
             } else {
-                Text("保管中: ${items.size}件", style = MaterialTheme.typography.titleLarge)
-                items.forEach { item -> CourierItemCard(item) }
+                Text(language.text("保管中: ${items.size}件", "Stored: ${items.size}"), style = MaterialTheme.typography.titleLarge)
+                items.forEach { item -> CourierItemCard(item, language) }
             }
         }
     }
 }
 
 @Composable
-private fun CourierItemCard(item: CourierRescueItem) {
-    Card(Modifier.fillMaxWidth().semantics { contentDescription = "保管中の救助要請。${item.submissionStatus.label()}" }) {
+private fun CourierItemCard(item: CourierRescueItem, language: RescueLanguage) {
+    Card(Modifier.fillMaxWidth().semantics { contentDescription = language.text("保管中の救助要請。", "Stored rescue request. ") + item.submissionStatus.label(language) }) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("受信した救助要請", style = MaterialTheme.typography.titleMedium)
-            Text("状態: ${item.submissionStatus.label()}")
-            Text("送信先: 府中町の救助拠点")
-            Text("受信: ${formatTime(item.receivedAtEpochMillis)}")
-            Text("期限: ${formatTime(item.expiresAtEpochMillis)}")
+            Text(language.text("受信した救助要請", "Received rescue request"), style = MaterialTheme.typography.titleMedium)
+            Text(language.text("状態", "Status") + ": ${item.submissionStatus.label(language)}")
+            Text(language.text("送信先: 府中町の救助拠点", "Destination: Fuchu Town rescue hub"))
+            Text(language.text("受信", "Received") + ": ${formatTime(item.receivedAtEpochMillis)}")
+            Text(language.text("期限", "Expires") + ": ${formatTime(item.expiresAtEpochMillis)}")
         }
     }
 }
 
 @Composable
-internal fun SafetyPrivacyScreen(callbacks: RescueCallbacks, modifier: Modifier = Modifier) {
-    RescuePage(title = "安全とプライバシー", modifier = modifier, onBack = { callbacks.onNavigate(RescueScreen.HOME) }) { contentModifier ->
+internal fun SafetyPrivacyScreen(language: RescueLanguage, callbacks: RescueCallbacks, modifier: Modifier = Modifier) {
+    RescuePage(
+        title = language.text("安全とプライバシー", "Safety and privacy"),
+        language = language,
+        onToggleLanguage = callbacks::onToggleLanguage,
+        modifier = modifier,
+        onBack = { callbacks.onNavigate(RescueScreen.HOME) },
+    ) { contentModifier ->
         RescueScrollableColumn(contentModifier) {
-            SectionTitle("救助要請を作る方へ")
-            Text("位置や健康情報を含む内容は、避難所だけが読めるように暗号化します。")
-            SectionTitle("情報を運ぶ方へ")
-            Text("受け取った情報の内容、正確な位置、人数は見えません。避難所への提出も自動です。")
-            SectionTitle("通信できないとき")
-            Text("エラーではありません。近くの中継端末や避難所PCを見つけるまで、情報を安全に保管します。")
-            LargeActionButton("ホームへ戻る") { callbacks.onNavigate(RescueScreen.HOME) }
+            SectionTitle(language.text("救助要請を作る方へ", "For people requesting rescue"))
+            Text(language.text("位置や健康情報を含む内容は、避難所だけが読めるように暗号化します。", "Location and health details are encrypted so only the shelter can read them."))
+            SectionTitle(language.text("情報を運ぶ方へ", "For people relaying information"))
+            Text(language.text("受け取った情報の内容、正確な位置、人数は見えません。避難所への提出も自動です。", "You cannot see the request details, exact location, or group size. Shelter delivery is automatic."))
+            SectionTitle(language.text("通信できないとき", "When no connection is available"))
+            Text(language.text("エラーではありません。近くの中継端末や避難所PCを見つけるまで、情報を安全に保管します。", "This is expected. Relay stores the request securely until a nearby relay device or shelter PC is found."))
+            LargeActionButton(language.text("ホームへ戻る", "Return home")) { callbacks.onNavigate(RescueScreen.HOME) }
         }
     }
 }
@@ -95,15 +117,15 @@ private fun StatusCard(label: String, value: String) {
     } }
 }
 
-private fun RescueSubmissionStatus.label(): String = when (this) {
-    RescueSubmissionStatus.PENDING -> "避難所へ自動提出を待っています"
-    RescueSubmissionStatus.IN_TRANSIT -> "避難所へ自動提出中です"
-    RescueSubmissionStatus.SHELTER_STORED -> "避難所PCへ提出済みです"
-    RescueSubmissionStatus.SHELTER_ACCEPTED -> "避難所で受領されました"
-    RescueSubmissionStatus.SHELTER_RESPONDING -> "避難所が対応中です"
-    RescueSubmissionStatus.SHELTER_COMPLETED -> "対応が完了しました"
-    RescueSubmissionStatus.CANCELLED -> "取消を避難所が確認しました"
-    RescueSubmissionStatus.SHELTER_REJECTED -> "避難所で確認が必要です"
+private fun RescueSubmissionStatus.label(language: RescueLanguage): String = when (this) {
+    RescueSubmissionStatus.PENDING -> language.text("避難所へ自動提出を待っています", "Waiting for automatic shelter delivery")
+    RescueSubmissionStatus.IN_TRANSIT -> language.text("避難所へ自動提出中です", "Relaying to the shelter")
+    RescueSubmissionStatus.SHELTER_STORED -> language.text("避難所PCへ提出済みです", "Delivered to the shelter PC")
+    RescueSubmissionStatus.SHELTER_ACCEPTED -> language.text("避難所で受領されました", "Accepted by the shelter")
+    RescueSubmissionStatus.SHELTER_RESPONDING -> language.text("避難所が対応中です", "Shelter is responding")
+    RescueSubmissionStatus.SHELTER_COMPLETED -> language.text("対応が完了しました", "Response complete")
+    RescueSubmissionStatus.CANCELLED -> language.text("取消を避難所が確認しました", "Cancellation confirmed by the shelter")
+    RescueSubmissionStatus.SHELTER_REJECTED -> language.text("避難所で確認が必要です", "Shelter review required")
 }
 
 private fun formatTime(epochMillis: Long): String = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(epochMillis))
