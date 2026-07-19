@@ -2,12 +2,19 @@
 param(
     [string]$SourcePath = '.',
     [string]$OutputPath = 'artifacts/osv.json',
-    [ValidateSet('report-only','block-high-critical')][string]$Mode = 'report-only'
+    [ValidateSet('report-only','block-high-critical')][string]$Mode = 'report-only',
+    [switch]$RequireTool
 )
 $ErrorActionPreference = 'Stop'
 $out = [IO.Path]::GetFullPath($OutputPath)
 New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
-if (-not (Get-Command osv-scanner -ErrorAction SilentlyContinue)) { @{status='skipped';reason='osv-scanner-not-installed';source=(Resolve-Path $SourcePath).Path} | ConvertTo-Json | Set-Content -LiteralPath $out; Write-Warning 'OSV-Scanner is not installed; skipping dependency scan.'; exit 0 }
+if (-not (Get-Command osv-scanner -ErrorAction SilentlyContinue)) {
+    @{status='BLOCKED';reason='osv-scanner-not-installed';source=(Resolve-Path $SourcePath).Path} | ConvertTo-Json | Set-Content -LiteralPath $out
+    $message = 'OSV-Scanner is not installed; dependency scanning is BLOCKED.'
+    if ($RequireTool) { throw $message }
+    Write-Warning $message
+    exit 0
+}
 $args = @('scan', 'source', '-r', (Resolve-Path $SourcePath).Path, '--format', 'json')
 & osv-scanner @args | Tee-Object -FilePath $out
 $code = $LASTEXITCODE

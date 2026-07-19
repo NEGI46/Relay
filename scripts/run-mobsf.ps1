@@ -4,14 +4,27 @@ param(
     [string]$OutputPath = 'artifacts/mobsf.json',
     [ValidateSet('report-only','block-high-critical')][string]$Mode = 'report-only',
     [string]$MobSFUrl = $env:MOBSF_URL,
-    [string]$MobSFApiKey = $env:MOBSF_API_KEY
+    [string]$MobSFApiKey = $env:MOBSF_API_KEY,
+    [switch]$RequireTool
 )
 $ErrorActionPreference = 'Stop'
 $out = [IO.Path]::GetFullPath($OutputPath)
 New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
-if ([string]::IsNullOrWhiteSpace($MobSFUrl) -or [string]::IsNullOrWhiteSpace($MobSFApiKey)) { @{status='skipped';reason='MOBSF_URL or MOBSF_API_KEY is not configured'} | ConvertTo-Json | Set-Content -LiteralPath $out; Write-Warning 'MOBSF_URL and MOBSF_API_KEY are not configured; skipping MobSF.'; exit 0 }
+if ([string]::IsNullOrWhiteSpace($MobSFUrl) -or [string]::IsNullOrWhiteSpace($MobSFApiKey)) {
+    @{status='BLOCKED';reason='MOBSF_URL or MOBSF_API_KEY is not configured'} | ConvertTo-Json | Set-Content -LiteralPath $out
+    $message = 'MOBSF_URL and MOBSF_API_KEY are not configured; MobSF scanning is BLOCKED.'
+    if ($RequireTool) { throw $message }
+    Write-Warning $message
+    exit 0
+}
 $artifact = Get-ChildItem -LiteralPath $ArtifactPath -Recurse -File -ErrorAction SilentlyContinue | Where-Object Extension -in '.apk','.aab','.ipa','.msix' | Select-Object -First 1
-if (-not $artifact) { @{status='skipped';reason='no mobile package found';artifactRoot=$ArtifactPath} | ConvertTo-Json | Set-Content -LiteralPath $out; Write-Warning "No mobile package found under $ArtifactPath; skipping MobSF."; exit 0 }
+if (-not $artifact) {
+    @{status='BLOCKED';reason='no mobile package found';artifactRoot=$ArtifactPath} | ConvertTo-Json | Set-Content -LiteralPath $out
+    $message = "No mobile package found under $ArtifactPath; MobSF scanning is BLOCKED."
+    if ($RequireTool) { throw $message }
+    Write-Warning $message
+    exit 0
+}
 $base = $MobSFUrl.TrimEnd('/')
 $headers = @{ Authorization = $MobSFApiKey }
 try {

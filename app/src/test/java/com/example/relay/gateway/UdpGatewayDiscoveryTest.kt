@@ -26,7 +26,12 @@ class UdpGatewayDiscoveryTest {
         DatagramSocket().use { sender ->
             sender.broadcast = true
             val packet = DatagramPacket(payload, payload.size, InetAddress.getByName("127.0.0.1"), port)
-            sender.send(packet)
+            // The receiver binds on a background dispatcher. Repeat the beacon as a real gateway
+            // does instead of assuming a fixed delay is enough for the bind to complete on every OS.
+            repeat(10) {
+                sender.send(packet)
+                delay(100)
+            }
         }
         val found = waiter.await()
         assertNotNull(found)

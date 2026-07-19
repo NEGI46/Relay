@@ -20,7 +20,5 @@ if ($python) {
   if ($Mode -eq 'block-high-critical') { throw 'Fuzz regression requires Python.' }
 }
 if ($env:JAZZER_FUZZ -eq '1') {
-  if (-not (Get-Command java -ErrorAction SilentlyContinue)) { throw 'JAZZER_FUZZ=1 requires Java.' }
-  if (-not (Test-Path 'gradlew') -and -not (Test-Path 'gradlew.bat')) { throw 'JAZZER_FUZZ=1 requires Gradle wrapper.' }
-  Write-Warning 'JAZZER_FUZZ=1 requested, but no JVM Jazzer target is configured; host regression completed.'
+  throw 'JAZZER_FUZZ=1 requested, but no JVM Jazzer target is configured. Deterministic regression is not Jazzer fuzzing.'
 }
