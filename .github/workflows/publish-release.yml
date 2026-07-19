@@ -93,8 +93,8 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           TARGET_REF: ${{ inputs.target_ref }}
         run: |
-          if gh release view "$RELEASE_TAG"; then
-            gh release upload "$RELEASE_TAG" release/* --clobber
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"; then
+            gh release upload "$RELEASE_TAG" release/* --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$RELEASE_TAG" release/* --target "$TARGET_REF" --title "Relay $RELEASE_TAG" --generate-notes
+            gh release create "$RELEASE_TAG" release/* --repo "$GITHUB_REPOSITORY" --target "$TARGET_REF" --title "Relay $RELEASE_TAG" --generate-notes
           fi
