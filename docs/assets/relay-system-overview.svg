@@ -1,135 +1,83 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
-  <title id="title">Relay system overview</title>
-  <desc id="desc">Bilingual architecture diagram showing the ordinary report lane, encrypted rescue lane, PC Gateway, recovery feed, and isolated edge adapters.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Relay at a glance</title>
+  <desc id="desc">A three-column overview explaining why Relay exists, how store-carry-forward works, and which validation stages are complete or still pending.</desc>
   <defs>
-    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#061426"/>
-      <stop offset="0.55" stop-color="#0D2438"/>
-      <stop offset="1" stop-color="#0A3940"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#06111F"/>
+      <stop offset="0.58" stop-color="#10283D"/>
+      <stop offset="1" stop-color="#083B43"/>
     </linearGradient>
-    <linearGradient id="report" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#38BDF8"/>
-      <stop offset="1" stop-color="#22D3EE"/>
-    </linearGradient>
-    <linearGradient id="rescue" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#F59E0B"/>
-      <stop offset="1" stop-color="#FB7185"/>
-    </linearGradient>
-    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="5" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-      <path d="M0,0 L10,5 L0,10 Z" fill="#67E8F9"/>
-    </marker>
-    <marker id="arrowOrange" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-      <path d="M0,0 L10,5 L0,10 Z" fill="#FDBA74"/>
-    </marker>
     <style>
-      .title { font: 800 42px Inter, Segoe UI, Arial, sans-serif; fill: #F8FAFC; letter-spacing: 4px; }
-      .subtitle { font: 600 18px Inter, Segoe UI, Arial, sans-serif; fill: #A5F3FC; letter-spacing: 1.5px; }
-      .lane { font: 800 21px Inter, Segoe UI, Arial, sans-serif; fill: #F8FAFC; }
-      .boxTitle { font: 700 18px Inter, Segoe UI, Arial, sans-serif; fill: #F8FAFC; }
-      .boxText { font: 500 14px Inter, Segoe UI, Arial, sans-serif; fill: #CBD5E1; }
-      .jp { font-family: Noto Sans JP, Yu Gothic, Meiryo, sans-serif; }
-      .small { font: 600 12px Inter, Segoe UI, Arial, sans-serif; fill: #94A3B8; letter-spacing: 0.5px; }
+      .hero { font: 800 44px Inter, Segoe UI, Arial, sans-serif; fill: #F8FAFC; letter-spacing: 4px; }
+      .sub { font: 600 18px Inter, Segoe UI, Arial, sans-serif; fill: #BAE6FD; letter-spacing: 1px; }
+      .eyebrow { font: 800 17px Inter, Segoe UI, Arial, sans-serif; fill: #67E8F9; letter-spacing: 1.5px; }
+      .headline { font: 800 27px Inter, Segoe UI, Arial, sans-serif; fill: #F8FAFC; }
+      .body { font: 500 16px Inter, Segoe UI, Arial, sans-serif; fill: #CBD5E1; }
+      .label { font: 700 12px Inter, Segoe UI, Arial, sans-serif; fill: #DBEAFE; letter-spacing: 1px; }
+      .status { font: 800 18px Inter, Segoe UI, Arial, sans-serif; fill: #F8FAFC; }
+      .mark { font: 900 28px Inter, Segoe UI, Arial, sans-serif; }
+      .footer { font: 700 13px Inter, Segoe UI, Arial, sans-serif; fill: #94A3B8; letter-spacing: .8px; }
     </style>
   </defs>
 
-  <rect width="1200" height="760" rx="34" fill="url(#background)"/>
-  <circle cx="1080" cy="80" r="190" fill="#22D3EE" opacity="0.05"/>
-  <circle cx="100" cy="720" r="220" fill="#FB7185" opacity="0.04"/>
+  <rect width="1200" height="620" rx="34" fill="url(#bg)"/>
+  <circle cx="1100" cy="70" r="180" fill="#22D3EE" opacity=".045"/>
+  <circle cx="80" cy="610" r="210" fill="#FB7185" opacity=".035"/>
 
-  <text x="60" y="72" class="title">RELAY SYSTEM MAP</text>
-  <text x="62" y="106" class="subtitle">LOCAL-FIRST • STORE • CARRY • FORWARD</text>
-  <text x="62" y="135" class="subtitle jp">ローカル優先で、情報を保存・運搬・再転送する</text>
+  <text x="55" y="68" class="hero">RELAY — AT A GLANCE</text>
+  <text x="57" y="104" class="sub">LOCAL-FIRST DISASTER INFORMATION RELAY • STORE • CARRY • FORWARD</text>
 
-  <rect x="45" y="166" width="1110" height="240" rx="24" fill="#071D31" stroke="#38BDF8" stroke-opacity="0.45"/>
-  <rect x="45" y="430" width="1110" height="255" rx="24" fill="#211A26" stroke="#FB7185" stroke-opacity="0.48"/>
-
-  <text x="70" y="203" class="lane">① ORDINARY REPORT LANE / 通常レポート経路</text>
-  <text x="70" y="467" class="lane">② ENCRYPTED RESCUE LANE / 暗号化救助要請経路</text>
-
-  <!-- Report lane boxes -->
-  <g>
-    <rect x="72" y="228" width="205" height="128" rx="18" fill="#0B2942" stroke="#38BDF8"/>
-    <text x="92" y="260" class="boxTitle">📱 Android user</text>
-    <text x="92" y="285" class="boxText jp">安否・避難・物資を作成</text>
-    <text x="92" y="307" class="boxText">ECDSA report signature</text>
-    <text x="92" y="329" class="boxText">Room + SQLCipher</text>
-
-    <rect x="342" y="228" width="205" height="128" rx="18" fill="#0B2942" stroke="#38BDF8"/>
-    <text x="362" y="260" class="boxTitle">📲 Nearby peer</text>
-    <text x="362" y="285" class="boxText jp">差分同期・重複排除</text>
-    <text x="362" y="307" class="boxText">TTL • hop • ACK</text>
-    <text x="362" y="329" class="boxText jp">保存後に再び運ぶ</text>
-
-    <rect x="612" y="228" width="215" height="128" rx="18" fill="#0B2942" stroke="#38BDF8"/>
-    <text x="632" y="260" class="boxTitle">🚶 Bridge / courier</text>
-    <text x="632" y="285" class="boxText jp">端末の移動で次の接点へ</text>
-    <text x="632" y="307" class="boxText">UDP discovery on LAN</text>
-    <text x="632" y="329" class="boxText">Public or paired upload</text>
-
-    <rect x="892" y="215" width="225" height="154" rx="18" fill="#0B2942" stroke="#34D399"/>
-    <text x="912" y="248" class="boxTitle">🖥 PC Gateway</text>
-    <text x="912" y="273" class="boxText">Ktor • SQLite • Console</text>
-    <text x="912" y="295" class="boxText jp">経路認証と内容検証を分離</text>
-    <text x="912" y="317" class="boxText">Gateway receipt ≠ final delivery</text>
-    <text x="912" y="339" class="boxText jp">保存証跡を端末へ返す</text>
-
-    <path d="M277 292 H332" stroke="url(#report)" stroke-width="5" marker-end="url(#arrowBlue)"/>
-    <path d="M547 292 H602" stroke="url(#report)" stroke-width="5" marker-end="url(#arrowBlue)"/>
-    <path d="M827 292 H882" stroke="url(#report)" stroke-width="5" marker-end="url(#arrowBlue)"/>
+  <g transform="translate(55 140)">
+    <rect width="335" height="370" rx="24" fill="#0A2135" stroke="#38BDF8" stroke-width="2"/>
+    <text x="24" y="43" class="eyebrow">WHY</text>
+    <text x="24" y="91" class="headline">Networks can fail.</text>
+    <text x="24" y="124" class="body">Internet access may disappear,</text>
+    <text x="24" y="149" class="body">become congested, or return only</text>
+    <text x="24" y="174" class="body">for short and unreliable moments.</text>
+    <path d="M24 202H305" stroke="#334155"/>
+    <text x="24" y="247" class="headline">Data can still move.</text>
+    <text x="24" y="280" class="body">A device stores information.</text>
+    <text x="24" y="305" class="body">A person carries the device.</text>
+    <text x="24" y="330" class="body">The next contact forwards it.</text>
   </g>
 
-  <!-- Rescue lane boxes -->
-  <g>
-    <rect x="72" y="492" width="205" height="145" rx="18" fill="#38202A" stroke="#F59E0B"/>
-    <text x="92" y="525" class="boxTitle">🆘 Create request</text>
-    <text x="92" y="550" class="boxText jp">平文は作成境界だけ</text>
-    <text x="92" y="572" class="boxText">AES-256-GCM payload</text>
-    <text x="92" y="594" class="boxText">RSA-OAEP-256 key wrap</text>
-    <text x="92" y="616" class="boxText jp">暗号化してから保存</text>
-
-    <rect x="342" y="492" width="205" height="145" rx="18" fill="#38202A" stroke="#F59E0B"/>
-    <text x="362" y="525" class="boxTitle">📲 Encrypted relay</text>
-    <text x="362" y="550" class="boxText jp">Nearbyで暗号文だけを中継</text>
-    <text x="362" y="572" class="boxText">Inventory • request • ACK</text>
-    <text x="362" y="594" class="boxText">No courier private key</text>
-    <text x="362" y="616" class="boxText jp">Courierは復号できない</text>
-
-    <rect x="612" y="492" width="215" height="145" rx="18" fill="#38202A" stroke="#F59E0B"/>
-    <text x="632" y="525" class="boxTitle">📡 Verified shelter BLE</text>
-    <text x="632" y="550" class="boxText jp">署名済み地域台帳で照合</text>
-    <text x="632" y="572" class="boxText">Opaque 16 KiB handoff</text>
-    <text x="632" y="594" class="boxText">Idempotent retry</text>
-    <text x="632" y="616" class="boxText jp">未信頼広告はfail-closed</text>
-
-    <rect x="892" y="492" width="225" height="145" rx="18" fill="#38202A" stroke="#FB7185"/>
-    <text x="912" y="525" class="boxTitle">🏥 Shelter / Gateway</text>
-    <text x="912" y="550" class="boxText jp">避難所側だけが復号可能</text>
-    <text x="912" y="572" class="boxText">Signed ECDSA receipt</text>
-    <text x="912" y="594" class="boxText jp">受領証を端末側で検証</text>
-    <text x="912" y="616" class="boxText">Stored • accepted • rejected</text>
-
-    <path d="M277 566 H332" stroke="url(#rescue)" stroke-width="5" marker-end="url(#arrowOrange)"/>
-    <path d="M547 566 H602" stroke="url(#rescue)" stroke-width="5" marker-end="url(#arrowOrange)"/>
-    <path d="M827 566 H882" stroke="url(#rescue)" stroke-width="5" marker-end="url(#arrowOrange)"/>
+  <g transform="translate(432 140)">
+    <rect width="335" height="370" rx="24" fill="#092537" stroke="#34D399" stroke-width="2"/>
+    <text x="24" y="43" class="eyebrow">HOW</text>
+    <text x="24" y="91" class="headline">CREATE → STORE</text>
+    <text x="24" y="132" class="headline">CARRY → FORWARD</text>
+    <path d="M24 160H305" stroke="#334155"/>
+    <text x="24" y="202" class="status">ORDINARY REPORTS</text>
+    <text x="24" y="231" class="body">Nearby differential sync</text>
+    <text x="24" y="256" class="body">+ PC Gateway storage receipts</text>
+    <text x="24" y="301" class="status">RESCUE REQUESTS</text>
+    <text x="24" y="330" class="body">Encrypted envelope</text>
+    <text x="24" y="355" class="body">+ signed shelter receipt</text>
   </g>
 
-  <!-- Optional boundaries -->
-  <g>
-    <rect x="710" y="88" width="205" height="62" rx="15" fill="#102D38" stroke="#22D3EE" stroke-dasharray="6 5"/>
-    <text x="730" y="115" class="boxTitle">🌐 HTTPS priority feed</text>
-    <text x="730" y="136" class="small">OPTIONAL • BOUNDED • HIGH/CRITICAL</text>
-    <path d="M780 150 L745 218" stroke="#67E8F9" stroke-width="3" stroke-dasharray="7 6" marker-end="url(#arrowBlue)"/>
-
-    <rect x="935" y="88" width="182" height="62" rx="15" fill="#2A2535" stroke="#C4B5FD" stroke-dasharray="6 5"/>
-    <text x="955" y="115" class="boxTitle">↗ Edge boundaries</text>
-    <text x="955" y="136" class="small">MESHTASTIC • BPv7 • APPLE</text>
-    <path d="M1025 150 L1020 205" stroke="#C4B5FD" stroke-width="3" stroke-dasharray="7 6" marker-end="url(#arrowBlue)"/>
+  <g transform="translate(809 140)">
+    <rect width="335" height="370" rx="24" fill="#241C28" stroke="#FB7185" stroke-width="2"/>
+    <text x="24" y="43" class="eyebrow">CURRENT</text>
+    <text x="24" y="88" class="status">IMPLEMENTATION</text>
+    <text x="278" y="91" class="mark" fill="#4ADE80">✓</text>
+    <text x="24" y="115" class="body">Android, Gateway, crypto lanes</text>
+    <text x="24" y="160" class="status">HOST CONTRACTS</text>
+    <text x="278" y="163" class="mark" fill="#4ADE80">✓</text>
+    <text x="24" y="187" class="body">Deterministic checks available</text>
+    <text x="24" y="232" class="status">ANDROID / RF E2E</text>
+    <text x="278" y="235" class="mark" fill="#FBBF24">△</text>
+    <text x="24" y="259" class="body">Physical multi-device work remains</text>
+    <text x="24" y="304" class="status">SECURITY EVIDENCE</text>
+    <text x="278" y="307" class="mark" fill="#FBBF24">△</text>
+    <text x="24" y="331" class="body">Missing tools are BLOCKED, not PASS</text>
   </g>
 
-  <text x="60" y="724" class="small">STORAGE EVENT ≠ IDENTITY VERIFIED ≠ CONTENT VERIFIED ≠ FINAL DELIVERY</text>
-  <text x="760" y="724" class="small jp">保存されたことと、内容の正しさ・最終到達は別です</text>
+  <g transform="translate(55 535)">
+    <rect width="155" height="34" rx="17" fill="#0E7490"/><text x="25" y="22" class="label">LOCAL-FIRST</text>
+    <rect x="170" width="165" height="34" rx="17" fill="#1E3A5F"/><text x="198" y="22" class="label">NO AI REQUIRED</text>
+    <rect x="350" width="196" height="34" rx="17" fill="#7C2D12"/><text x="376" y="22" class="label">ACTIVE DEVELOPMENT</text>
+  </g>
+
+  <text x="650" y="558" class="footer">STORED ≠ IDENTITY VERIFIED ≠ CONTENT VERIFIED ≠ FINAL DELIVERY</text>
+  <text x="55" y="596" class="footer">NOT A REPLACEMENT FOR EMERGENCY SERVICES OR CERTIFIED LIFE-SAFETY SYSTEMS</text>
 </svg>
