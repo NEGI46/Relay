@@ -6,6 +6,20 @@
 
 ## 変更場所の選び方
 
+### v1救助パイロットを最短で追う
+
+まず [`V1_FUCHU_PILOT.md`](V1_FUCHU_PILOT.md) を読み、次の順で追うと全体像を掴めます。
+
+```text
+shared rescue contract
+  → Android rescue ViewModel / Compose UI / GPS
+  → encrypted Room repository / Nearby / BLE delivery
+  → PC rescue intake / SQLite / operator API
+  → PC web dashboard / Fuchu map / official information
+```
+
+通常の安否・物資REPORTと、暗号化救助Envelopeは別経路です。救助UIの変更で通常REPORT側を再利用・統合しないでください。
+
 ### アプリと共有ロジック
 
 - Android画面・ViewModel・Service: `app/src/main/`

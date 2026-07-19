@@ -43,3 +43,12 @@
    `scripts/configure-pc-gateway-firewall.ps1`
 3. Public / ゲスト Wi‑Fi に Gateway を出さない
 4. 管理画面と admin key を一般利用者に渡さない
+
+## v1救助オペレーター画面
+
+- 救助APIは`X-Admin-Key`が一致するスタッフだけに、復号済み本文と正確なGPSを返す
+- ブラウザは共通PINを`sessionStorage`だけに保持し、タブを閉じると破棄する
+- HTTPはTLSなしのため、救助画面は信頼済みPrivate LANとFirewall内に限定する
+- 担当確定は単一GatewayのSQLiteトランザクションで先着スタッフ端末に固定する
+- 完了・取消・対応不可・重複になったrequestIdの全バージョンを30日後に削除する
+- 独立した複数Gateway間の担当同期はv1では行わない

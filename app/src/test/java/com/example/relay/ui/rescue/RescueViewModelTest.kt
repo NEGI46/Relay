@@ -7,6 +7,10 @@ import com.example.relay.rescue.RescueSubmissionStatus
 import com.example.relay.rescue.RescueSupportNeed
 import com.example.relay.rescue.ShelterPublicKeyProvider
 import com.example.relay.rescue.ShelterPublicKeys
+import com.example.relay.location.FixedLocationProvider
+import com.example.relay.location.GeoFix
+import com.example.relay.rescue.RescueCondition
+import com.example.relay.rescue.RescueUrgency
 import java.lang.reflect.Modifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -98,6 +102,32 @@ class RescueViewModelTest {
         assertEquals(PRIVATE_NOTE, decrypted.freeText)
         assertNotEquals(PRIVATE_NOTE, stored.envelope.ciphertextBase64)
         assertFalse(stored.envelope.toString().contains(PRIVATE_NOTE))
+    }
+
+    @Test
+    fun `two second SOS action stores life threat with unknown count and GPS`() = runBlocking {
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val signer = RescueCryptography.generateShelterSigningKeyPair()
+        val repository = InMemoryRescueEnvelopeRepository()
+        val keys = ShelterPublicKeys("fuchu-area", recipient.publicKey, signer.publicKey)
+        val viewModel = RescueViewModel(
+            repository = repository,
+            shelterKeyProvider = ShelterPublicKeyProvider { keys },
+            locationProvider = FixedLocationProvider(GeoFix(34.392, 132.504, 7f, TEST_NOW)),
+            nowEpochMillis = { TEST_NOW },
+        )
+
+        viewModel.onSendSos()
+
+        withTimeout(ASYNC_TIMEOUT_MILLIS) {
+            viewModel.state.first { it.screen == RescueScreen.BROADCASTING && !it.isRequestSubmitting }
+        }
+        val payload = RescueCryptography.decrypt(repository.all().single().envelope, recipient.privateKey)
+        assertEquals(0, payload.personCount)
+        assertEquals(RescueUrgency.IMMEDIATE, payload.urgency)
+        assertEquals(setOf(RescueCondition.LIFE_THREATENING), payload.conditions)
+        assertEquals(34.392, payload.location!!.latitude!!, 0.0)
+        assertEquals(TEST_NOW, payload.location!!.capturedAtEpochMillis)
     }
 
     @Test

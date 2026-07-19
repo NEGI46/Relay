@@ -25,6 +25,17 @@ Windows installer integrity: [SHA-256 checksum](https://github.com/NEGI46/Relay/
 
 初回の公開リリース以降、最新版の APK と Windows PC Gateway インストーラーは上のボタンから取得できます。`artifacts/` は開発検証の記録であり、利用者向け配布場所ではありません。
 
+## v1 Fuchu Pilot / 府中町パイロット
+
+現在のv1は **広島県安芸郡府中町** を初期地域にした救助優先版です。Androidの2秒長押しSOS・必須GPS・避難所選択なしの暗号化中継と、PCの救助地図・担当確定・対応状態・公式情報を一つの運用にまとめています。
+
+- [v1の操作、実装範囲、既知の境界](docs/V1_FUCHU_PILOT.md)
+- Android: `versionName 1.0.0`
+- PC共通PIN: `%USERPROFILE%\.relay\admin.key`
+- PC画面: `http://127.0.0.1:8080/`
+
+The v1 pilot initially targets Fuchu Town, Aki District, Hiroshima. It combines a two-second Android SOS, mandatory GPS, encrypted destination-free relay, and a staff-only PC rescue map and response workflow. See [the v1 scope and known boundaries](docs/V1_FUCHU_PILOT.md).
+
 <img src="docs/assets/relay-system-overview.svg" alt="Relay at a glance: why it exists, how it works, and current validation status" width="100%">
 
 ## Relay in 20 seconds / 20秒でわかるRelay
@@ -48,6 +59,7 @@ Windows installer integrity: [SHA-256 checksum](https://github.com/NEGI46/Relay/
 
 | 領域 / Area | 状態 / Status | 現在わかっていること / What it means |
 |---|---:|---|
+| 府中町v1救助フロー | ✅ Implemented | 2秒SOS、GPS、更新・取消、PC担当・状態・地図・公式情報 |
 | Android・Gateway・暗号化経路 | ✅ Implemented | UI、Nearby、SQLCipher、PC Gateway、救助Envelope、署名Receiptのコードあり |
 | Host・決定的contract試験 | ✅ Available | implementation/accessibility/host/BPv7/Meshtastic/TUF等の検証経路あり |
 | Android DB暗号化ビルド | ✅ Build PASS | Debug APK、Android test APK、Android test compilationは現監査状態でPASS |

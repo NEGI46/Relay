@@ -167,20 +167,23 @@
     return { x: (longitude + 180) / 360 * scale, y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale };
   }
   function renderTileMap(element, requests) {
-    const widthTiles = element.classList.contains("large") ? 5 : 4; const heightTiles = 3;
+    const viewportWidth = element.clientWidth || (element.classList.contains("large") ? 935 : 560);
+    const viewportHeight = element.clientHeight || (element.classList.contains("large") ? 560 : 310);
+    const widthTiles = Math.ceil(viewportWidth / 256) + 1; const heightTiles = Math.ceil(viewportHeight / 256) + 1;
     const centerPixel = globalPixel(center.latitude, center.longitude, zoom);
-    const centerTileX = Math.floor(centerPixel.x / 256); const centerTileY = Math.floor(centerPixel.y / 256);
-    const startX = centerTileX - Math.floor(widthTiles / 2); const startY = centerTileY - 1;
+    const viewportLeft = centerPixel.x - viewportWidth / 2; const viewportTop = centerPixel.y - viewportHeight / 2;
+    const startX = Math.floor(viewportLeft / 256); const startY = Math.floor(viewportTop / 256);
     element.innerHTML = "";
     for (let row = 0; row < heightTiles; row += 1) for (let column = 0; column < widthTiles; column += 1) {
       const image = document.createElement("img"); image.className = "map-tile"; image.alt = "";
       image.src = `/api/map/tiles/${zoom}/${startX + column}/${startY + row}.png`;
-      image.style.left = `${column * 256}px`; image.style.top = `${row * 256}px`; element.appendChild(image);
+      image.style.left = `${(startX + column) * 256 - viewportLeft}px`;
+      image.style.top = `${(startY + row) * 256 - viewportTop}px`; element.appendChild(image);
     }
     requests.filter((request) => request.latitude != null && request.longitude != null).forEach((request) => {
       const point = globalPixel(request.latitude, request.longitude, zoom); const marker = document.createElement("button");
       marker.className = `map-marker ${isImmediate(request) ? "critical" : ""}`; marker.type = "button";
-      marker.style.left = `${point.x - startX * 256}px`; marker.style.top = `${point.y - startY * 256}px`;
+      marker.style.left = `${point.x - viewportLeft}px`; marker.style.top = `${point.y - viewportTop}px`;
       marker.title = `${request.personCount ?? "人数不明"} / ${statusLabel(request.responseStatus)}`;
       marker.addEventListener("click", () => { state.selectedId = request.requestId; activatePanel("rescue"); renderRequests(); renderMaps(); });
       element.appendChild(marker);
