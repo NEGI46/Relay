@@ -67,11 +67,15 @@ internal object PlaintextDatabaseMigration {
                 val targetColumns = tableColumns(encrypted, table)
                 if (targetColumns.isEmpty()) continue
                 plaintext.rawQuery("SELECT * FROM `$table`", null).use { cursor ->
-                    val columnsToCopy = cursor.columnNames.filter { it in targetColumns }
+                    val sourceColumns = cursor.columnNames.toSet()
                     while (cursor.moveToNext()) {
-                        val values = ContentValues(columnsToCopy.size)
-                        for (column in columnsToCopy) {
-                            putCursorValue(values, column, cursor, cursor.getColumnIndexOrThrow(column))
+                        val values = ContentValues(targetColumns.size)
+                        for (column in targetColumns) {
+                            if (column in sourceColumns) {
+                                putCursorValue(values, column, cursor, cursor.getColumnIndexOrThrow(column))
+                            } else {
+                                putLegacyDefault(values, table, column)
+                            }
                         }
                         encrypted.insert(table, SQLiteDatabase.CONFLICT_NONE, values)
                     }
@@ -103,6 +107,18 @@ internal object PlaintextDatabaseMigration {
             Cursor.FIELD_TYPE_FLOAT -> values.put(column, cursor.getDouble(index))
             Cursor.FIELD_TYPE_BLOB -> values.put(column, cursor.getBlob(index))
             else -> values.put(column, cursor.getString(index))
+        }
+    }
+
+    private fun putLegacyDefault(values: ContentValues, table: String, column: String) {
+        if (table != "messages") return
+        when (column) {
+            "recordType" -> values.put(column, "REPORT")
+            "lifetimeMs", "accumulatedAgeMs", "receivedElapsedRealtimeMs", "persistedAtWallClockMs" ->
+                values.put(column, 0L)
+            "elapsedRealtimeSessionId" -> values.put(column, "")
+            "reportSignatureJson" -> values.putNull(column)
+            else -> throw IOException("legacy messages table lacks required column: $column")
         }
     }
 

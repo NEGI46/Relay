@@ -38,14 +38,7 @@ class PlaintextDatabaseMigrationTest {
                     hopCount INTEGER NOT NULL,
                     maxHopCount INTEGER NOT NULL,
                     status TEXT NOT NULL,
-                    receivedAt INTEGER NOT NULL,
-                    recordType TEXT NOT NULL,
-                    lifetimeMs INTEGER NOT NULL,
-                    accumulatedAgeMs INTEGER NOT NULL,
-                    receivedElapsedRealtimeMs INTEGER NOT NULL,
-                    persistedAtWallClockMs INTEGER NOT NULL,
-                    elapsedRealtimeSessionId TEXT NOT NULL,
-                    reportSignatureJson TEXT
+                    receivedAt INTEGER NOT NULL
                 )""",
             )
             plaintext.insertOrThrow(
@@ -63,12 +56,6 @@ class PlaintextDatabaseMigrationTest {
                     put("maxHopCount", 8)
                     put("status", "ACTIVE")
                     put("receivedAt", 1L)
-                    put("recordType", "REPORT")
-                    put("lifetimeMs", 86_400_000L)
-                    put("accumulatedAgeMs", 0L)
-                    put("receivedElapsedRealtimeMs", 1L)
-                    put("persistedAtWallClockMs", 1L)
-                    put("elapsedRealtimeSessionId", "legacy-session")
                 },
             )
             plaintext.close()
