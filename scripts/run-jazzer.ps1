@@ -14,7 +14,9 @@ if ($python) {
   function Invoke-PythonRegression([string[]]$Arguments, [string]$ReportPath) {
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'
-    & $python @Arguments 2>&1 | Tee-Object -FilePath $ReportPath
+    # Do not leak the captured test output through this function: otherwise the
+    # caller receives an array of output lines instead of only the exit code.
+    $null = & $python @Arguments 2>&1 | Tee-Object -FilePath $ReportPath
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $previousErrorActionPreference
     return $exitCode

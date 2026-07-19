@@ -24,6 +24,8 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: gradle
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
       - name: Build debug APK and JVM artifacts
         run: ./gradlew :app:assembleDebug :pc-gateway:build --no-daemon
       - name: Upload build artifacts
@@ -47,6 +49,8 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: gradle
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
       - run: ./gradlew :shared:jvmTest :app:testDebugUnitTest --no-daemon
 
   ui:
@@ -60,6 +64,8 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: gradle
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
       - run: ./gradlew :composeApp:desktopTest --no-daemon
 
   accessibility-contract:
