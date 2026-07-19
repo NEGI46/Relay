@@ -106,7 +106,7 @@ Relayが目指すのは「必ず即時に届く通信」ではありません。
 | HTTPS優先フィード | ✅ | ✅ URL・容量・version・scheduler試験 | 🚧 実際の配信元との運用設計 |
 | Apple / BLE基盤 | 🧪 | ✅ framework・仮想GATT契約 | 🚧 IPA・CoreBluetooth実機 |
 | Meshtastic / BPv7境界 | 🧪 Adapter / export | ✅ Python contract tests | 🚧 実機無線・外部網接続 |
-| 配布保護 | 🧪 scripts / metadata | ✅ SBOM・scan・TUF chain checks | 🚧 本番鍵・署名運用・リリース手順 |
+| 配布保護 | 🧪 scripts / metadata | 🧪 TUF chain checks。SBOM・脆弱性・MobSF・署名検証はツール／鍵をCIへ設定するまで BLOCKED | 🚧 本番鍵・署名運用・リリース手順 |
 
 > [!IMPORTANT]
 > 2026年7月16日の記録では、Android実機接続数が0台だったため、Phone↔PCとNearby複数端末試験は未実施でした。その後コードやCIは更新されているため、古い検証記録を最新コードの実機PASSとして扱わないでください。詳細は [`docs/DEVICE_VALIDATION_REPORT.md`](docs/DEVICE_VALIDATION_REPORT.md) を参照してください。
@@ -189,7 +189,7 @@ chmod +x scripts/run-pc-gateway.sh
 - 受信データは信頼せず、JSON解析前にサイズを制限
 - HTTPS優先フィードはHTTPS・port 443・件数・容量・timeout・versionを制限
 - 外部アダプターはRelay coreへ直接混ぜず、プロセス／export境界へ隔離
-- CIにはSBOM、OSV、Grype、MobSF、Jazzer、accessibility、decoder regressionなどのジョブが定義されている
+- CIにはSBOM、OSV、Grype、MobSF、署名検証、accessibility、decoder regressionなどのジョブが定義されている。SBOM／スキャン／署名は必要なツールや鍵が未設定なら PASS ではなく BLOCKED として失敗する
 - 配布スクリプトはcosign bundle、SPDX SBOM、TUF metadata chainを扱うが、本番署名には信頼されたオフライン鍵運用が必要
 - PC GatewayのLAN HTTPはTLSなし。信頼できないWi-Fiへ公開しない
 - Keystore、PFX、API key、実機ログ、SQLite DB、生成APKはコミットしない
