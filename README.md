@@ -14,6 +14,17 @@
 
 </div>
 
+## Download / ダウンロード
+
+Published builds are available from the latest GitHub Release. Use these buttons rather than the repository's `artifacts/` directory, which is retained only as development evidence.
+
+[![Download Android APK](https://img.shields.io/badge/Download-Android%20APK-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/NEGI46/Relay/releases/latest/download/Relay-Android-debug.apk)
+[![Download Windows installer](https://img.shields.io/badge/Download-Windows%20PC%20Gateway-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/NEGI46/Relay/releases/latest/download/Relay-PC-Gateway-setup.exe)
+
+Windows installer integrity: [SHA-256 checksum](https://github.com/NEGI46/Relay/releases/latest/download/Relay-PC-Gateway-setup.exe.sha256) · [All releases](https://github.com/NEGI46/Relay/releases)
+
+初回の公開リリース以降、最新版の APK と Windows PC Gateway インストーラーは上のボタンから取得できます。`artifacts/` は開発検証の記録であり、利用者向け配布場所ではありません。
+
 <img src="docs/assets/relay-system-overview.svg" alt="Relay at a glance: why it exists, how it works, and current validation status" width="100%">
 
 ## Relay in 20 seconds / 20秒でわかるRelay
@@ -28,7 +39,6 @@
 ```text
 📱 CREATE ──► 💾 STORE ──► 🚶 CARRY ──► 📡 FORWARD ──► 🖥 GATEWAY / 🏥 SHELTER
 ```
-
 > [!CAUTION]
 > **Relayは消防・警察・自治体の緊急連絡、公式警報、認証済み人命安全システムを置き換えるものではありません。**
 >
