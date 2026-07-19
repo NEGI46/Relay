@@ -13,11 +13,12 @@ import com.example.relay.rescue.RescueStoreRejection
 import com.example.relay.rescue.RescueStoreResult
 import com.example.relay.rescue.RescueSubmissionStatus
 import com.example.relay.rescue.RescueValidationResult
-import com.example.relay.rescue.ShelterReceiptStatus
 import com.example.relay.rescue.SignedShelterReceipt
 import com.example.relay.rescue.StoredRescueRecord
 import com.example.relay.rescue.forwardRescueEnvelope
 import com.example.relay.rescue.storageSizeBytes
+import com.example.relay.rescue.rank
+import com.example.relay.rescue.toSubmissionStatus
 import com.example.relay.rescue.validate
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -128,9 +129,6 @@ class RoomRescueEnvelopeRepository(
             ?: return@runInTransaction ReceiptApplicationResult.RECORD_NOT_FOUND
         val current = entity.toRecordOrNull()
             ?: return@runInTransaction ReceiptApplicationResult.RECORD_NOT_FOUND
-        if (current.state.signedReceipt != null) {
-            return@runInTransaction ReceiptApplicationResult.ALREADY_APPLIED
-        }
         if (!RescueCryptography.verifyReceipt(signedReceipt, shelterSigningPublicKey)) {
             return@runInTransaction ReceiptApplicationResult.INVALID_SIGNATURE
         }
@@ -144,10 +142,9 @@ class RoomRescueEnvelopeRepository(
         ) {
             return@runInTransaction ReceiptApplicationResult.RECEIPT_MISMATCH
         }
-        val status = when (receipt.status) {
-            ShelterReceiptStatus.STORED -> RescueSubmissionStatus.SHELTER_STORED
-            ShelterReceiptStatus.ACCEPTED -> RescueSubmissionStatus.SHELTER_ACCEPTED
-            ShelterReceiptStatus.REJECTED -> RescueSubmissionStatus.SHELTER_REJECTED
+        val status = receipt.status.toSubmissionStatus()
+        if (status.rank() <= current.state.submissionStatus.rank()) {
+            return@runInTransaction ReceiptApplicationResult.ALREADY_APPLIED
         }
         val updated = current.copy(
             state = current.state.copy(submissionStatus = status, signedReceipt = signedReceipt),
@@ -206,13 +203,7 @@ class RoomRescueEnvelopeRepository(
                 receipt.receipt.shelterId == envelope.destinationShelterId,
         )
         val status = RescueSubmissionStatus.valueOf(submissionStatus)
-        val receiptStatus = receipt?.receipt?.status?.let {
-            when (it) {
-                ShelterReceiptStatus.STORED -> RescueSubmissionStatus.SHELTER_STORED
-                ShelterReceiptStatus.ACCEPTED -> RescueSubmissionStatus.SHELTER_ACCEPTED
-                ShelterReceiptStatus.REJECTED -> RescueSubmissionStatus.SHELTER_REJECTED
-            }
-        }
+        val receiptStatus = receipt?.receipt?.status?.toSubmissionStatus()
         check(receiptStatus == null || receiptStatus == status)
         check(receipt != null || status !in receiptOnlyStatuses)
         StoredRescueRecord(
@@ -232,6 +223,9 @@ class RoomRescueEnvelopeRepository(
         val receiptOnlyStatuses = setOf(
             RescueSubmissionStatus.SHELTER_STORED,
             RescueSubmissionStatus.SHELTER_ACCEPTED,
+            RescueSubmissionStatus.SHELTER_RESPONDING,
+            RescueSubmissionStatus.SHELTER_COMPLETED,
+            RescueSubmissionStatus.CANCELLED,
             RescueSubmissionStatus.SHELTER_REJECTED,
         )
     }

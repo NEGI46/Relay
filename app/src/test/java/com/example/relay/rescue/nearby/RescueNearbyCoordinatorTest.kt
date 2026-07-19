@@ -9,6 +9,10 @@ import com.example.relay.rescue.RescueRequestDraft
 import com.example.relay.rescue.RescueRequestKey
 import com.example.relay.rescue.RescueStoreResult
 import com.example.relay.rescue.RescueSubmissionStatus
+import com.example.relay.rescue.ShelterPublicKeyProvider
+import com.example.relay.rescue.ShelterPublicKeys
+import com.example.relay.rescue.ShelterReceiptStatus
+import com.example.relay.rescue.UnsignedShelterReceipt
 import com.example.relay.rescue.RescueSupportNeed
 import com.example.relay.rescue.RescueUrgency
 import com.example.relay.rescue.StoredRescueRecord
@@ -104,6 +108,65 @@ class RescueNearbyCoordinatorTest {
 
         assertEquals(1, store.get(key)!!.envelope.hopCount)
         assertEquals(RescueSubmissionStatus.IN_TRANSIT, store.get(key)!!.state.submissionStatus)
+    }
+
+    @Test
+    fun `signed shelter status returns through another nearby device`() = runTest {
+        val signer = RescueCryptography.generateShelterSigningKeyPair()
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val source = InMemoryRescueEnvelopeRepository()
+        val target = InMemoryRescueEnvelopeRepository()
+        val envelope = (RescueRequestCreator(source).create(
+            RescueRequestDraft(
+                requestId = "request-status",
+                senderDeviceId = "member-a",
+                destinationShelterId = "shelter-1",
+                createdAtEpochMillis = NOW - 100,
+                expiresAtEpochMillis = NOW + 3_600_000,
+                urgency = RescueUrgency.URGENT,
+                personCount = 1,
+                supportNeeds = setOf(RescueSupportNeed.WATER),
+            ),
+            recipient.publicKey,
+            envelopeId = "envelope-status",
+        ) as com.example.relay.rescue.RescueCreationResult.Stored).record.envelope
+        assertTrue(target.store(envelope, NOW) is RescueStoreResult.Stored)
+        val key = RescueRequestKey(envelope.requestId, envelope.requestVersion)
+        val signed = RescueCryptography.signReceipt(
+            UnsignedShelterReceipt(
+                receiptId = "receipt-responding",
+                envelopeId = envelope.envelopeId,
+                requestId = envelope.requestId,
+                requestVersion = envelope.requestVersion,
+                ciphertextSha256Hex = envelope.ciphertextSha256Hex,
+                shelterId = envelope.destinationShelterId,
+                receivedAtEpochMillis = NOW,
+                status = ShelterReceiptStatus.RESPONDING,
+            ),
+            signer.privateKey,
+        )
+        assertEquals(
+            com.example.relay.rescue.ReceiptApplicationResult.APPLIED,
+            source.applyReceipt(key, signed, signer.publicKey),
+        )
+        val sourceTransport = RecordingTransport()
+        val targetTransport = RecordingTransport()
+        val sourceCoordinator = RescueNearbyCoordinator(source, sourceTransport, nowEpochMillis = { NOW })
+        val targetCoordinator = RescueNearbyCoordinator(
+            target,
+            targetTransport,
+            nowEpochMillis = { NOW },
+            shelterKeyProvider = ShelterPublicKeyProvider {
+                ShelterPublicKeys("shelter-1", recipient.publicKey, signer.publicKey)
+            },
+        )
+
+        sourceCoordinator.onPeerConnected("target")
+        targetCoordinator.handlePayload("source", sourceTransport.sent.single().second)
+        sourceCoordinator.handlePayload("target", targetTransport.sent.single().second)
+        targetCoordinator.handlePayload("source", sourceTransport.sent.last().second)
+
+        assertEquals(RescueSubmissionStatus.SHELTER_RESPONDING, target.get(key)!!.state.submissionStatus)
     }
 
     private fun createAndStore(store: InMemoryRescueEnvelopeRepository, freeText: String): EncryptedRescueEnvelope {

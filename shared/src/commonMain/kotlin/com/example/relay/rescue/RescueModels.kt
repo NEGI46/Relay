@@ -94,7 +94,7 @@ data class EncryptedRescueEnvelope(
 )
 
 @Serializable
-enum class ShelterReceiptStatus { STORED, ACCEPTED, REJECTED }
+enum class ShelterReceiptStatus { STORED, ACCEPTED, RESPONDING, COMPLETED, CANCELLED, REJECTED }
 
 @Serializable
 data class UnsignedShelterReceipt(

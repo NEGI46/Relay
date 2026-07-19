@@ -125,6 +125,7 @@ class RelayApplication : Application() {
                 repository = rescueRepository,
                 transport = nearbyTransport,
                 nowEpochMillis = SystemClock::nowMillis,
+                shelterKeyProvider = rescueShelterKeyStore,
             )
         }.getOrNull()
     }

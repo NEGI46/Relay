@@ -64,6 +64,50 @@ class RescueWorkflowTest {
     }
 
     @Test
+    fun `newer signed shelter status replaces an older receipt but cannot move backwards`() {
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val signer = RescueCryptography.generateShelterSigningKeyPair()
+        val store = InMemoryRescueEnvelopeRepository()
+        RescueRequestCreator(store).create(draft(1), recipient.publicKey, "envelope-1")
+        val envelope = store.get(RescueRequestKey("request-1", 1))!!.envelope
+        val key = RescueRequestKey(envelope.requestId, envelope.requestVersion)
+
+        fun receipt(id: String, status: ShelterReceiptStatus, receivedAt: Long) = RescueCryptography.signReceipt(
+            UnsignedShelterReceipt(
+                receiptId = id,
+                envelopeId = envelope.envelopeId,
+                requestId = envelope.requestId,
+                requestVersion = envelope.requestVersion,
+                ciphertextSha256Hex = envelope.ciphertextSha256Hex,
+                shelterId = envelope.destinationShelterId,
+                receivedAtEpochMillis = receivedAt,
+                status = status,
+            ),
+            signer.privateKey,
+        )
+
+        assertEquals(
+            ReceiptApplicationResult.APPLIED,
+            store.applyReceipt(key, receipt("accepted", ShelterReceiptStatus.ACCEPTED, 3_000), signer.publicKey),
+        )
+        assertEquals(
+            ReceiptApplicationResult.APPLIED,
+            store.applyReceipt(key, receipt("responding", ShelterReceiptStatus.RESPONDING, 4_000), signer.publicKey),
+        )
+        assertEquals(RescueSubmissionStatus.SHELTER_RESPONDING, store.get(key)!!.state.submissionStatus)
+        assertEquals(
+            ReceiptApplicationResult.ALREADY_APPLIED,
+            store.applyReceipt(key, receipt("late-stored", ShelterReceiptStatus.STORED, 5_000), signer.publicKey),
+        )
+        assertEquals(RescueSubmissionStatus.SHELTER_RESPONDING, store.get(key)!!.state.submissionStatus)
+        assertEquals(
+            ReceiptApplicationResult.APPLIED,
+            store.applyReceipt(key, receipt("completed", ShelterReceiptStatus.COMPLETED, 6_000), signer.publicKey),
+        )
+        assertEquals(RescueSubmissionStatus.SHELTER_COMPLETED, store.get(key)!!.state.submissionStatus)
+    }
+
+    @Test
     fun newerVersionSupersedesOldAndExpiredDataIsNotExported() {
         val recipient = RescueCryptography.generateRecipientKeyPair()
         val store = InMemoryRescueEnvelopeRepository()

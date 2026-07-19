@@ -83,7 +83,7 @@ class ShelterDeliveryCoordinator(
                         return@withTimeout
                     }
                     val candidate = repository.all().firstOrNull { record ->
-                        record.state.signedReceipt == null && record.state.submissionStatus in DELIVERABLE_STATUSES &&
+                        record.state.submissionStatus in DELIVERABLE_STATUSES &&
                             record.envelope.destinationShelterId == manifest.manifest.shelterId &&
                             record.envelope.expiresAtEpochMillis > clock()
                     } ?: return@withTimeout
@@ -128,7 +128,13 @@ class ShelterDeliveryCoordinator(
 
     private companion object {
         const val MAX_ENVELOPE_BYTES = 16 * 1024
-        val DELIVERABLE_STATUSES = setOf(RescueSubmissionStatus.PENDING, RescueSubmissionStatus.IN_TRANSIT)
+        val DELIVERABLE_STATUSES = setOf(
+            RescueSubmissionStatus.PENDING,
+            RescueSubmissionStatus.IN_TRANSIT,
+            RescueSubmissionStatus.SHELTER_STORED,
+            RescueSubmissionStatus.SHELTER_ACCEPTED,
+            RescueSubmissionStatus.SHELTER_RESPONDING,
+        )
     }
 }
 

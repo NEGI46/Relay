@@ -123,7 +123,15 @@ class RescueIntakeService(
                 },
                 carrierIds = setOf(carrierId),
                 deliveryIds = setOf(courierDeliveryId),
-                receipt = signReceipt(envelope, now),
+                receipt = signReceipt(
+                    envelope,
+                    now,
+                    if (payload.action == RescueRequestAction.CANCELLED) {
+                        ShelterReceiptStatus.CANCELLED
+                    } else {
+                        ShelterReceiptStatus.STORED
+                    },
+                ),
                 statusUpdatedAtEpochMillis = now,
                 terminalAtEpochMillis = now.takeIf { payload.action == RescueRequestAction.CANCELLED },
             )
@@ -200,6 +208,7 @@ class RescueIntakeService(
                     },
                     statusUpdatedAtEpochMillis = now,
                     terminalAtEpochMillis = now.takeIf { status in terminalStatuses },
+                    receipt = signReceipt(current.envelope, now, status.toReceiptStatus()),
                 ).also(::replace)
             }
             RescueStatusUpdateResult.Updated(updated)
@@ -218,7 +227,11 @@ class RescueIntakeService(
     @Synchronized
     fun listQuarantined(): List<QuarantinedRescueEnvelope> = persistence.transaction { listQuarantined() }
 
-    private fun signReceipt(envelope: EncryptedRescueEnvelope, receivedAt: Long): SignedShelterReceipt =
+    private fun signReceipt(
+        envelope: EncryptedRescueEnvelope,
+        receivedAt: Long,
+        status: ShelterReceiptStatus,
+    ): SignedShelterReceipt =
         RescueCryptography.signReceipt(
             UnsignedShelterReceipt(
                 receiptId = idGenerator.nextId(),
@@ -228,7 +241,7 @@ class RescueIntakeService(
                 ciphertextSha256Hex = envelope.ciphertextSha256Hex,
                 shelterId = shelterId,
                 receivedAtEpochMillis = receivedAt,
-                status = ShelterReceiptStatus.STORED,
+                status = status,
             ),
             shelterSigningPrivateKey,
         )
@@ -275,4 +288,17 @@ class RescueIntakeService(
             RescueResponseStatus.DUPLICATE to emptySet(),
         )
     }
+}
+
+private fun RescueResponseStatus.toReceiptStatus(): ShelterReceiptStatus = when (this) {
+    RescueResponseStatus.UNCONFIRMED -> ShelterReceiptStatus.STORED
+    RescueResponseStatus.CONFIRMED,
+    RescueResponseStatus.PREPARING,
+    RescueResponseStatus.RESCUE_REQUESTED,
+    -> ShelterReceiptStatus.ACCEPTED
+    RescueResponseStatus.RESPONDING -> ShelterReceiptStatus.RESPONDING
+    RescueResponseStatus.COMPLETED -> ShelterReceiptStatus.COMPLETED
+    RescueResponseStatus.UNABLE,
+    RescueResponseStatus.DUPLICATE,
+    -> ShelterReceiptStatus.REJECTED
 }

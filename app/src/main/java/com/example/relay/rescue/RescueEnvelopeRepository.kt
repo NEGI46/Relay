@@ -16,6 +16,9 @@ enum class RescueSubmissionStatus {
     IN_TRANSIT,
     SHELTER_STORED,
     SHELTER_ACCEPTED,
+    SHELTER_RESPONDING,
+    SHELTER_COMPLETED,
+    CANCELLED,
     SHELTER_REJECTED,
 }
 
@@ -175,7 +178,6 @@ class InMemoryRescueEnvelopeRepository(
         shelterSigningPublicKey: RescuePublicKey,
     ): ReceiptApplicationResult = synchronized(lock) {
         val current = records[key] ?: return@synchronized ReceiptApplicationResult.RECORD_NOT_FOUND
-        if (current.state.signedReceipt != null) return@synchronized ReceiptApplicationResult.ALREADY_APPLIED
         if (!RescueCryptography.verifyReceipt(signedReceipt, shelterSigningPublicKey)) {
             return@synchronized ReceiptApplicationResult.INVALID_SIGNATURE
         }
@@ -188,10 +190,9 @@ class InMemoryRescueEnvelopeRepository(
             receipt.shelterId == envelope.destinationShelterId
         if (!matches) return@synchronized ReceiptApplicationResult.RECEIPT_MISMATCH
 
-        val status = when (receipt.status) {
-            ShelterReceiptStatus.STORED -> RescueSubmissionStatus.SHELTER_STORED
-            ShelterReceiptStatus.ACCEPTED -> RescueSubmissionStatus.SHELTER_ACCEPTED
-            ShelterReceiptStatus.REJECTED -> RescueSubmissionStatus.SHELTER_REJECTED
+        val status = receipt.status.toSubmissionStatus()
+        if (status.rank() <= current.state.submissionStatus.rank()) {
+            return@synchronized ReceiptApplicationResult.ALREADY_APPLIED
         }
         records[key] = current.copy(
             state = current.state.copy(submissionStatus = status, signedReceipt = signedReceipt),
@@ -241,3 +242,24 @@ fun EncryptedRescueEnvelope.storageSizeBytes(): Long = ciphertextSizeBytes.toLon
     ciphertextSha256Hex.utf8Size() + 96L
 
 private fun String.utf8Size(): Long = encodeToByteArray().size.toLong()
+
+internal fun ShelterReceiptStatus.toSubmissionStatus(): RescueSubmissionStatus = when (this) {
+    ShelterReceiptStatus.STORED -> RescueSubmissionStatus.SHELTER_STORED
+    ShelterReceiptStatus.ACCEPTED -> RescueSubmissionStatus.SHELTER_ACCEPTED
+    ShelterReceiptStatus.RESPONDING -> RescueSubmissionStatus.SHELTER_RESPONDING
+    ShelterReceiptStatus.COMPLETED -> RescueSubmissionStatus.SHELTER_COMPLETED
+    ShelterReceiptStatus.CANCELLED -> RescueSubmissionStatus.CANCELLED
+    ShelterReceiptStatus.REJECTED -> RescueSubmissionStatus.SHELTER_REJECTED
+}
+
+internal fun RescueSubmissionStatus.rank(): Int = when (this) {
+    RescueSubmissionStatus.PENDING -> 0
+    RescueSubmissionStatus.IN_TRANSIT -> 1
+    RescueSubmissionStatus.SHELTER_STORED -> 2
+    RescueSubmissionStatus.SHELTER_ACCEPTED -> 3
+    RescueSubmissionStatus.SHELTER_RESPONDING -> 4
+    RescueSubmissionStatus.SHELTER_COMPLETED,
+    RescueSubmissionStatus.CANCELLED,
+    RescueSubmissionStatus.SHELTER_REJECTED,
+    -> 5
+}

@@ -100,6 +100,9 @@ private fun RescueSubmissionStatus.label(): String = when (this) {
     RescueSubmissionStatus.IN_TRANSIT -> "避難所へ自動提出中です"
     RescueSubmissionStatus.SHELTER_STORED -> "避難所PCへ提出済みです"
     RescueSubmissionStatus.SHELTER_ACCEPTED -> "避難所で受領されました"
+    RescueSubmissionStatus.SHELTER_RESPONDING -> "避難所が対応中です"
+    RescueSubmissionStatus.SHELTER_COMPLETED -> "対応が完了しました"
+    RescueSubmissionStatus.CANCELLED -> "取消を避難所が確認しました"
     RescueSubmissionStatus.SHELTER_REJECTED -> "避難所で確認が必要です"
 }
 

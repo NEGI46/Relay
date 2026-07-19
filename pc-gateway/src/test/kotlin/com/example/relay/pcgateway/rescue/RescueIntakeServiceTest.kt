@@ -72,13 +72,16 @@ class RescueIntakeServiceTest {
         val claimed = service.updateStatus("request-1", RescueResponseStatus.CONFIRMED, "operator-a")
             as RescueStatusUpdateResult.Updated
         assertEquals("operator-a", claimed.request.assignedNodeId)
+        assertEquals(ShelterReceiptStatus.ACCEPTED, service.receipt("request-1")!!.receipt.status)
         val conflict = service.updateStatus("request-1", RescueResponseStatus.PREPARING, "operator-b")
             as RescueStatusUpdateResult.AssignedElsewhere
         assertEquals("operator-a", conflict.assignedNodeId)
 
         service.updateStatus("request-1", RescueResponseStatus.PREPARING, "operator-a")
         service.updateStatus("request-1", RescueResponseStatus.RESPONDING, "operator-a")
+        assertEquals(ShelterReceiptStatus.RESPONDING, service.receipt("request-1")!!.receipt.status)
         service.updateStatus("request-1", RescueResponseStatus.COMPLETED, "operator-a")
+        assertEquals(ShelterReceiptStatus.COMPLETED, service.receipt("request-1")!!.receipt.status)
         now += 31L * 24 * 60 * 60 * 1_000
 
         assertEquals(1, service.purgeExpiredDetails())
