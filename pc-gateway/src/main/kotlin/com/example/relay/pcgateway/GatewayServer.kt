@@ -5,8 +5,11 @@ import com.example.relay.gateway.protocol.GatewayRejection
 import com.example.relay.gateway.protocol.ReceiptResponse
 import com.example.relay.gateway.protocol.SyncMessagesRequest
 import com.example.relay.gateway.protocol.SyncMessagesResponse
+import com.example.relay.rescue.EncryptedRescueEnvelope
 import com.example.relay.rescue.ShelterPublicKeyManifest
 import com.example.relay.pcgateway.rescue.RescueIntakeService
+import com.example.relay.pcgateway.rescue.RescueDeliveryIngress
+import com.example.relay.pcgateway.rescue.RescueIngestResult
 import com.example.relay.pcgateway.rescue.RescueOperatorListResponse
 import com.example.relay.pcgateway.rescue.RescueStatusChangeRequest
 import com.example.relay.pcgateway.rescue.RescueStatusChangeResponse
@@ -29,8 +32,8 @@ import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
-import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
+import io.ktor.server.routing.routing
 
 @Serializable data class PairRequest(val code: String, val bridgeId: String, val bridgeName: String)
 @Serializable data class PairApproveRequest(val code: String, val bridgeId: String)
@@ -297,6 +300,34 @@ fun Application.gatewayModule(
             call.response.headers.append("X-Relay-Receipt-Semantics", "gateway_saved")
             call.respond(syncResponse(stored, rejected))
         }
+        post("/api/public/rescue/deliver") {
+            if (!config.anonymousIngressEnabled) return@post call.respond(HttpStatusCode.NotFound)
+            val service = rescueIntakeService ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            val raw = call.receiveText()
+            if (raw.encodeToByteArray().size > config.maxAnonymousRequestBytes) {
+                return@post call.respond(HttpStatusCode.PayloadTooLarge)
+            }
+            val request = runCatching {
+                GatewayJson.decodeFromString(PublicRescueDeliveryRequest.serializer(), raw)
+            }.getOrElse {
+                return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "malformed_json"))
+            }
+            val source = call.request.local.remoteHost
+            if (!anonymousLimiter.allow(source, 1, raw.encodeToByteArray().size)) {
+                return@post call.respond(HttpStatusCode.TooManyRequests, mapOf("error" to "anonymous_rate_limit"))
+            }
+            val ingress = RescueDeliveryIngress(service)
+            when (val result = ingress.ingest(
+                GatewayJson.encodeToString(EncryptedRescueEnvelope.serializer(), request.envelope).encodeToByteArray(),
+                request.carrierId,
+                request.courierDeliveryId,
+            )) {
+                is RescueIngestResult.Accepted -> call.respond(HttpStatusCode.OK, PublicRescueDeliveryResponse("accepted", receipt = result.request.receipt))
+                is RescueIngestResult.Duplicate -> call.respond(HttpStatusCode.OK, PublicRescueDeliveryResponse("duplicate", receipt = result.request.receipt))
+                is RescueIngestResult.Rejected -> call.respond(HttpStatusCode.UnprocessableEntity, PublicRescueDeliveryResponse("rejected", result.code.name))
+                is RescueIngestResult.Quarantined -> call.respond(HttpStatusCode.Conflict, PublicRescueDeliveryResponse("quarantined"))
+            }
+        }
         get("/api/sync/receipts") {
             val bridgeId = call.request.headers["X-Bridge-Id"]
                 ?: return@get call.respond(HttpStatusCode.Unauthorized)
@@ -376,6 +407,20 @@ fun Application.gatewayModule(
         }
     }
 }
+
+@Serializable
+private data class PublicRescueDeliveryRequest(
+    val envelope: EncryptedRescueEnvelope,
+    val carrierId: String,
+    val courierDeliveryId: String,
+)
+
+@Serializable
+private data class PublicRescueDeliveryResponse(
+    val outcome: String,
+    val reason: String? = null,
+    val receipt: com.example.relay.rescue.SignedShelterReceipt? = null,
+)
 
 private fun syncResponse(
     stored: List<StoreOutcome>,

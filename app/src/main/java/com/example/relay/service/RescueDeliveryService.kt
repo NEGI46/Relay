@@ -15,6 +15,9 @@ import com.example.relay.MainActivity
 import com.example.relay.RelayApplication
 import com.example.relay.rescue.RescueSubmissionStatus
 import com.example.relay.rescue.SharedPreferencesRescueAutomationStore
+import com.example.relay.rescue.HttpShelterGatewayDelivery
+import com.example.relay.rescue.ble.SharedPreferencesCourierDeliveryIdStore
+import com.example.relay.rescue.RescueRequestKey
 import com.example.relay.rescue.rank
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +38,7 @@ import kotlinx.coroutines.launch
 class RescueDeliveryService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var statusMonitorJob: Job? = null
+    private var localGatewayDeliveryJob: Job? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!SharedPreferencesRescueAutomationStore(this).isEnabled()) {
@@ -56,6 +60,7 @@ class RescueDeliveryService : Service() {
         }
         (application as? RelayApplication)?.let { app ->
             app.rescueDeliveryCoordinator.start(serviceScope)
+            startLocalGatewayDelivery(app)
             monitorOwnRequestStatus(app)
         }
         return START_STICKY
@@ -63,6 +68,7 @@ class RescueDeliveryService : Service() {
 
     override fun onDestroy() {
         (application as? RelayApplication)?.rescueDeliveryCoordinator?.stop()
+        localGatewayDeliveryJob?.cancel()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -99,6 +105,46 @@ class RescueDeliveryService : Service() {
                     if (previous != current) {
                         preferences.edit().putString(storageKey, current).apply()
                         notifyStatus(own.state.submissionStatus)
+                    }
+                }
+                delay(5_000)
+            }
+        }
+    }
+
+    private fun startLocalGatewayDelivery(app: RelayApplication) {
+        if (localGatewayDeliveryJob?.isActive == true) return
+        localGatewayDeliveryJob = serviceScope.launch {
+            val delivery = HttpShelterGatewayDelivery()
+            val deliveryIds = SharedPreferencesCourierDeliveryIdStore(app)
+            while (isActive) {
+                val candidate = app.rescueRepository.all()
+                    .asSequence()
+                    .filter { it.envelope.expiresAtEpochMillis > System.currentTimeMillis() }
+                    .filter {
+                        it.state.submissionStatus in setOf(
+                            RescueSubmissionStatus.PENDING,
+                            RescueSubmissionStatus.IN_TRANSIT,
+                            RescueSubmissionStatus.SHELTER_STORED,
+                        )
+                    }
+                    .sortedWith(compareByDescending { it.envelope.routingUrgency.name })
+                    .firstOrNull()
+                if (candidate != null) {
+                    val receipt = delivery.deliver(
+                        candidate.envelope,
+                        app.deviceId,
+                        deliveryIds.idFor(RescueRequestKey(candidate.envelope.requestId, candidate.envelope.requestVersion)),
+                    )
+                    if (receipt != null) {
+                        val keys = app.rescueShelterKeyStore.load()
+                        if (keys != null) {
+                            app.rescueRepository.applyReceipt(
+                                RescueRequestKey(candidate.envelope.requestId, candidate.envelope.requestVersion),
+                                receipt,
+                                keys.receiptSigningKey,
+                            )
+                        }
                     }
                 }
                 delay(5_000)
