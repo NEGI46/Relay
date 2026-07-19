@@ -45,3 +45,13 @@ Real Android installation, automatic discovery from a phone, Nearby pairing-free
 - Send-fail observability and trust labels improved in app code; unit tests cover shipped SyncCoordinator/Runtime paths.
 - Stage remains **device residual**: adb device count 0 → Phone↔PC and Nearby multi-device still NOT_RUN.
 - Do not claim `PC_GATEWAY_PUBLIC_DEVICE_VERIFIED` until real device runbook passes.
+
+## 2026-07-19 headless emulator verification
+
+- **PASS**: Gradle debug APK and Android test APK build after the SQLCipher migration changes.
+- **PASS**: headless Android 16 emulator launched the current APK and kept the Relay process alive.
+- **PASS**: the Room database header was encrypted (not `SQLite format 3`) and remained identical after force-stop/relaunch.
+- **NOT_RUN / environment-limited**: instrumentation execution was not accepted as a test pass because the low-memory Play Store AVD killed the instrumentation process while Android/GMS services were also being reclaimed.
+- **Policy**: future routine device checks use the screenless, low-load emulator first. A physical device is reserved for RF/Bluetooth, multi-device, or hardware-specific behavior that an emulator cannot reproduce.
+
+The emulator result verifies application startup and encrypted-database reopen behavior; it does not claim Nearby or physical-radio E2E verification.
