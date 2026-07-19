@@ -68,6 +68,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Verify security and runtime implementation contracts
+        shell: pwsh
+        run: ./scripts/verify-implementation-contracts.ps1
       - shell: pwsh
         run: ./scripts/check-accessibility.ps1
       - shell: pwsh
