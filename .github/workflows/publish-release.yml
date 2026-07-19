@@ -10,7 +10,7 @@ on:
       target_ref:
         description: Commit, branch, or tag to package
         required: true
-        default: main
+        default: agent/zero-operation-relay
         type: string
 
 permissions:
