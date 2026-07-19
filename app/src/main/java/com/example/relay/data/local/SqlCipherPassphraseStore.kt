@@ -24,10 +24,13 @@ class SqlCipherPassphraseStore(private val context: Context) {
     }
 
     private fun seal(value: ByteArray): String {
-        val nonce = ByteArray(12).also(SecureRandom()::nextBytes)
         val cipher = Cipher.getInstance(TRANSFORMATION).apply {
-            init(Cipher.ENCRYPT_MODE, key(), GCMParameterSpec(128, nonce))
+            // Android Keystore generates the randomized GCM IV. Passing a caller IV
+            // is rejected on recent Android releases when randomized encryption is
+            // required, so persist the provider-generated IV beside the ciphertext.
+            init(Cipher.ENCRYPT_MODE, key())
         }
+        val nonce = cipher.iv ?: error("Android Keystore did not return a GCM IV")
         return encode(nonce + cipher.doFinal(value))
     }
 
