@@ -26,6 +26,7 @@ internal object PlaintextDatabaseMigration {
         context: android.content.Context,
         databaseName: String,
         passphrase: ByteArray,
+        afterPlaintextBackupMoved: () -> Unit = {},
     ) {
         val plaintextFile = context.getDatabasePath(databaseName)
         if (!hasPlaintextHeader(plaintextFile)) return
@@ -40,6 +41,7 @@ internal object PlaintextDatabaseMigration {
             .build()
         try {
             copyUserTables(plaintext, encrypted.openHelper.writableDatabase)
+            verifyEncryptedCopy(encrypted.openHelper.writableDatabase)
         } finally {
             encrypted.close()
             plaintext.close()
@@ -47,7 +49,7 @@ internal object PlaintextDatabaseMigration {
 
         cleanup(File("${encryptedFile.path}-wal"))
         cleanup(File("${encryptedFile.path}-shm"))
-        installEncryptedFile(plaintextFile, encryptedFile)
+        installEncryptedFile(plaintextFile, encryptedFile, afterPlaintextBackupMoved)
     }
 
     private fun hasPlaintextHeader(file: File): Boolean {
@@ -78,12 +80,27 @@ internal object PlaintextDatabaseMigration {
                             }
                         }
                         encrypted.insert(table, SQLiteDatabase.CONFLICT_NONE, values)
+                            .takeIf { it != -1L }
+                            ?: throw IOException("failed to copy legacy row from $table")
                     }
                 }
             }
             encrypted.setTransactionSuccessful()
         } finally {
             encrypted.endTransaction()
+        }
+    }
+
+    private fun verifyEncryptedCopy(encrypted: SupportSQLiteDatabase) {
+        encrypted.query("PRAGMA integrity_check").use { cursor ->
+            check(cursor.moveToFirst() && cursor.getString(0).equals("ok", ignoreCase = true)) {
+                "encrypted database integrity check failed"
+            }
+        }
+        encrypted.query("PRAGMA wal_checkpoint(FULL)").use { cursor ->
+            check(cursor.moveToFirst() && cursor.getInt(0) == 0) {
+                "encrypted database checkpoint is busy"
+            }
         }
     }
 
@@ -122,7 +139,11 @@ internal object PlaintextDatabaseMigration {
         }
     }
 
-    private fun installEncryptedFile(plaintext: File, encrypted: File) {
+    private fun installEncryptedFile(
+        plaintext: File,
+        encrypted: File,
+        afterPlaintextBackupMoved: () -> Unit,
+    ) {
         val backup = File("${plaintext.path}.plaintext-migration")
         val plaintextWal = File("${plaintext.path}-wal")
         val plaintextShm = File("${plaintext.path}-shm")
@@ -133,6 +154,7 @@ internal object PlaintextDatabaseMigration {
             rename(plaintext, backup)
             if (plaintextWal.isFile) rename(plaintextWal, backupWal)
             if (plaintextShm.isFile) rename(plaintextShm, backupShm)
+            afterPlaintextBackupMoved()
             rename(encrypted, plaintext)
             cleanup(backup); cleanup(backupWal); cleanup(backupShm)
         } catch (error: Exception) {
