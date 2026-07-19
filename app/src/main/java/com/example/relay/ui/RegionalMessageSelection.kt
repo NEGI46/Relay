@@ -5,6 +5,7 @@ import com.example.relay.domain.RelayMessage
 import com.example.relay.domain.RelayRecordType
 import com.example.relay.domain.ReportStatus
 import com.example.relay.domain.StatusChangePayload
+import com.example.relay.rescue.RescueCryptography
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -26,10 +27,15 @@ internal fun regionalReportStatusText(item: RegionalMessageItem): String {
         ReportStatus.RESOLVED -> "解決済み"
         ReportStatus.RETRACTED -> "取り下げ"
     }
+    val signatureLabel = when {
+        item.report.reportSignature == null -> ""
+        RescueCryptography.verifyReport(item.report) -> "（端末署名済み）"
+        else -> "（署名不正）"
+    }
     return if (item.isStatusUpdateUnverified) {
-        "報告状態: $status（未検証の更新）"
+        "報告状態: $status（未検証の更新）$signatureLabel"
     } else {
-        "報告状態: $status"
+        "報告状態: $status$signatureLabel"
     }
 }
 
