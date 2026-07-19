@@ -30,6 +30,7 @@ import com.example.relay.gateway.UdpGatewayDiscovery
 import com.example.relay.cloud.AndroidNetworkOnlineDetector
 import com.example.relay.cloud.InternetPrioritySync
 import com.example.relay.cloud.HttpsPriorityMessageSource
+import com.example.relay.cloud.InternetPrioritySyncScheduler
 import com.example.relay.cloud.SharedPreferencesPriorityFeedConfigStore
 import com.example.relay.cloud.ServerSyncGateway
 import com.example.relay.location.AndroidLocationProvider
@@ -157,7 +158,7 @@ class RelayApplication : Application() {
         )
     }
     val communicationSupervisor: CommunicationSupervisor by lazy {
-        CommunicationSupervisor(communicationRuntime, gatewaySyncEngine)
+        CommunicationSupervisor(communicationRuntime, gatewaySyncEngine, internetPrioritySyncScheduler)
     }
 
     val locationProvider: LocationProvider by lazy { AndroidLocationProvider(this) }
@@ -169,6 +170,12 @@ class RelayApplication : Application() {
             source = HttpsPriorityMessageSource(SharedPreferencesPriorityFeedConfigStore(this)),
             repository = messageRepository,
             policy = MessagePolicy(SystemClock),
+        )
+    }
+    val internetPrioritySyncScheduler: InternetPrioritySyncScheduler by lazy {
+        InternetPrioritySyncScheduler(
+            gateway = internetPrioritySync,
+            scope = applicationScope,
         )
     }
 

@@ -5,6 +5,7 @@ import com.example.relay.domain.MessagePolicy
 import com.example.relay.domain.MessagePriority
 import com.example.relay.domain.MessageRepository
 import com.example.relay.domain.RelayMessage
+import kotlinx.coroutines.CancellationException
 
 fun interface NetworkOnlineDetector {
     fun isOnline(): Boolean
@@ -28,8 +29,13 @@ class InternetPrioritySync(
 ) : ServerSyncGateway {
     override suspend fun sync(): ServerSyncResult {
         if (!detector.isOnline()) return ServerSyncResult.OfflineSkipped
-        val candidates = runCatching { source.fetchCandidates() }
-            .getOrElse { return ServerSyncResult.Failed(it.message ?: it.javaClass.simpleName) }
+        val candidates = try {
+            source.fetchCandidates()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            return ServerSyncResult.Failed(failure.message ?: failure.javaClass.simpleName)
+        }
         var inserted = 0
         var skipped = 0
         for (raw in candidates) {

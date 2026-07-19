@@ -4,7 +4,7 @@ package com.example.relay.cloud
  * Optional path used when wider internet is available.
  * Disaster primary path remains local Nearby + PC Gateway LAN.
  */
-interface ServerSyncGateway {
+fun interface ServerSyncGateway {
     suspend fun sync(): ServerSyncResult
 }
 

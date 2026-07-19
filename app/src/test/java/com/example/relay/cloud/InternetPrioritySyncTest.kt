@@ -7,10 +7,16 @@ import com.example.relay.domain.MessagePriority
 import com.example.relay.domain.MutableClock
 import com.example.relay.message
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class InternetPrioritySyncTest {
     @Test
     fun `offline does not insert from source`() = runBlocking {
@@ -70,5 +76,21 @@ class InternetPrioritySyncTest {
         assertEquals(0, result.inserted)
         assertEquals(1, result.skipped)
         assertEquals(1, repo.all().size)
+    }
+
+    @Test
+    fun `cancellation from remote source is propagated`() = runTest {
+        val sync = InternetPrioritySync(
+            detector = AlwaysOnlineDetector(),
+            source = PriorityMessageSource { awaitCancellation() },
+            repository = InMemoryMessageRepository(),
+            policy = MessagePolicy(MutableClock(NOW)),
+        )
+        val job = launch { sync.sync() }
+        runCurrent()
+
+        job.cancelAndJoin()
+
+        assertTrue(job.isCancelled)
     }
 }
