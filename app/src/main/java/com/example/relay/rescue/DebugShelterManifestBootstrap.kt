@@ -12,8 +12,11 @@ class DebugShelterManifestBootstrap(
     suspend fun enrollFromLocalTestGateway(): Boolean {
         val gateway = discovery.discover() ?: return false
         val manifest = runCatching { client.fetch(gateway.host, gateway.port) }.getOrNull() ?: return false
-        val fingerprint = manifest.fingerprint()
         val existing = loadExisting()
+        val gateway = discovery.discover() ?: return existing != null
+        val manifest = runCatching { client.fetch(gateway.host, gateway.port) }.getOrNull()
+            ?: return existing != null
+        val fingerprint = manifest.fingerprint()
         if (existing?.manifestFingerprint == fingerprint) return true
         return runCatching {
             // DEBUG-only trust-on-first-use. Always refresh when the local test Gateway rotates keys.
