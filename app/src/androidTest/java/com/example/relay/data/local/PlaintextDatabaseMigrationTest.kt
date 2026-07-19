@@ -54,7 +54,7 @@ class PlaintextDatabaseMigrationTest {
                     put("payloadJson", "{}")
                     put("hopCount", 0)
                     put("maxHopCount", 8)
-                    put("status", "ACTIVE")
+                    put("status", "CREATED")
                     put("receivedAt", 1L)
                 },
             )

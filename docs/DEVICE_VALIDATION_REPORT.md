@@ -57,3 +57,9 @@ Real Android installation, automatic discovery from a phone, Nearby pairing-free
 - **Policy**: future routine device checks use the screenless, low-load emulator first. A physical device is reserved for RF/Bluetooth, multi-device, or hardware-specific behavior that an emulator cannot reproduce.
 
 The emulator result verifies application startup and encrypted-database reopen behavior; it does not claim Nearby or physical-radio E2E verification.
+
+## 2026-07-19 recovered AVD verification
+
+- **PASS**: `PlaintextDatabaseMigrationTest` — 1 test passed after rebuilding both APKs and resetting the AVD.
+- **PASS**: `SqlCipherPassphraseStoreTest` — 2 tests passed.
+- The earlier failures were caused by stale APK artifacts and a corrupted Play Store AVD state. After `-wipe-data`, the headless AVD booted and the tests ran without the prior Bluetooth/radio crash.
