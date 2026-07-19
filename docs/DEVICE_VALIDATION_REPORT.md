@@ -53,6 +53,7 @@ Real Android installation, automatic discovery from a phone, Nearby pairing-free
 - **PASS**: the Room database header was encrypted (not `SQLite format 3`) and remained identical after force-stop/relaunch.
 - **NOT_RUN / environment-limited**: instrumentation execution was not accepted as a test pass because the low-memory Play Store AVD killed the instrumentation process while Android/GMS services were also being reclaimed.
 - The migration test was retried alone on the 2 GB AVD, including once with nonessential Google apps disabled; both runs returned `INSTRUMENTATION_RESULT: shortMsg=Process crashed` without a Relay Java exception. This remains an environment-limited result, not a test pass.
+- The crash buffer identified unrelated AVD failures (`com.google.android.bluetooth` SIGABRT and `android.hardware.radio-service.ranchu` SIGABRT); the target app also hit an Android ActivityManager startup ANR. A clean `-wipe-data` boot exceeded 150 seconds and was stopped to protect workstation responsiveness.
 - **Policy**: future routine device checks use the screenless, low-load emulator first. A physical device is reserved for RF/Bluetooth, multi-device, or hardware-specific behavior that an emulator cannot reproduce.
 
 The emulator result verifies application startup and encrypted-database reopen behavior; it does not claim Nearby or physical-radio E2E verification.
