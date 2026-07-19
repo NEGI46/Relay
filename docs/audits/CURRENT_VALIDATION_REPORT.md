@@ -1,6 +1,6 @@
 # Current validation report
 
-Audit date: 2026-07-19  
+Audit date: 2026-07-19
 Validation rule: only a command that completed successfully at the current code state is `PASS`. A skipped optional dependency, unavailable scanner, unhealthy emulator, or pre-test host failure is `BLOCKED`; it is never folded into PASS.
 
 ## Results

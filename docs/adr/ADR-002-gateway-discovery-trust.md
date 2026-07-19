@@ -1,6 +1,6 @@
 # ADR-002: Treat UDP gateway discovery as a hint, not an authority
 
-Status: Proposed  
+Status: Proposed
 Date: 2026-07-19
 
 ## Context

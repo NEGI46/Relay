@@ -1,6 +1,6 @@
 # Current code review
 
-Audit date: 2026-07-19  
+Audit date: 2026-07-19
 Scope: current branch `agent/zero-operation-relay`, source, tests, scripts, CI, and committed documentation. This is a code and configuration audit; it is not a claim that radio, gateway, or production operations were exercised.
 
 ## Fixed in this audit

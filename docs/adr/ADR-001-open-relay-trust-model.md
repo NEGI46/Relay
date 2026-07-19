@@ -1,6 +1,6 @@
 # ADR-001: Make the Relay peer trust mode explicit
 
-Status: Proposed  
+Status: Proposed
 Date: 2026-07-19
 
 ## Context
