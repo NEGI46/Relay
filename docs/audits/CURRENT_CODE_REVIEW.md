@@ -7,7 +7,7 @@ Scope: current branch `agent/zero-operation-relay`, source, tests, scripts, CI, 
 
 | Severity | Finding | Evidence and disposition |
 |---|---|---|
-| P0 | CI watched `main`, while the active/default development branch is `agent/zero-operation-relay`. | `.github/workflows/relay-ci.yml`; fixed in `ddee261` to watch the active branch. PRs remain covered. |
+| P0 | CI watched only `main`, while active development occurred on `agent/zero-operation-relay`. | `.github/workflows/relay-ci.yml`; fixed in `ddee261` and subsequently expanded to watch both `main` and `agent/zero-operation-relay`. PRs remain covered. |
 | P0 | Missing Syft, OSV-Scanner, Grype, or MobSF produced `skipped` data and exited 0. A green job could therefore mean no scan ran. | `scripts/run-{syft,osv,grype,mobsf}.ps1`; fixed in `ddee261`. Local report mode writes `BLOCKED`; CI passes `-RequireTool`, so the job fails while preserving the artifact. |
 | P0 | Missing packages, cosign, signatures, or bundles could skip distribution verification successfully. | `scripts/verify-distribution-signatures.ps1`; fixed in `e0f9529`. It now writes `PASS`/`FAIL`/`BLOCKED` JSON and CI uses `-RequireVerification`. |
 | P1 | The job named "Parser fuzz regression" ran deterministic Python decoder/BLE regressions, not a Jazzer target. | `scripts/run-jazzer.ps1`; CI label changed to "Deterministic decoder regression" in `ddee261`. Requesting `JAZZER_FUZZ=1` now fails until a real target exists. |

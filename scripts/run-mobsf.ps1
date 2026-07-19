@@ -38,11 +38,11 @@ try {
     $jsonText = ($scan | ConvertTo-Json -Depth 30)
     $critical += ([regex]::Matches($jsonText, '"severity"\s*:\s*"CRITICAL"', 'IgnoreCase')).Count
     $high += ([regex]::Matches($jsonText, '"severity"\s*:\s*"HIGH"', 'IgnoreCase')).Count
-    $result = [ordered]@{ status='completed'; artifact=$artifact.FullName; hash=$upload.hash; high=$high; critical=$critical; scan=$scan; scorecard=$score }
+    $result = [ordered]@{ status='PASS'; artifact=$artifact.FullName; hash=$upload.hash; high=$high; critical=$critical; scan=$scan; scorecard=$score }
     $result | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $out
     if ($Mode -eq 'block-high-critical' -and ($high -gt 0 -or $critical -gt 0)) { throw "MobSF found $critical critical and $high high severity findings." }
 } catch {
     @{status='failed';reason=$_.Exception.Message;artifact=$artifact.FullName} | ConvertTo-Json | Set-Content -LiteralPath $out
-    if ($Mode -eq 'block-high-critical') { throw }
+    if ($Mode -eq 'block-high-critical' -or $RequireTool) { throw }
     Write-Warning "MobSF scan failed in report-only mode: $($_.Exception.Message)"
 }
