@@ -23,6 +23,7 @@ function Require-Text([string]$Text, [string]$Needle, [string]$Description) {
 $versions = Read-Text 'gradle/libs.versions.toml'
 $application = Read-Text 'app/src/main/java/com/example/relay/RelayApplication.kt'
 $passphrase = Read-Text 'app/src/main/java/com/example/relay/data/local/SqlCipherPassphraseStore.kt'
+$androidDatabaseTest = Read-Text 'app/src/androidTest/java/com/example/relay/data/local/SqlCipherPassphraseStoreTest.kt'
 $manifest = Read-Text 'app/src/main/AndroidManifest.xml'
 $workflow = Read-Text '.github/workflows/relay-ci.yml'
 $backup = Read-Text 'scripts/backup-gateway.ps1'
@@ -36,6 +37,8 @@ Require-Text $application 'SupportOpenHelperFactory' 'Room uses the SQLCipher op
 Require-Text $application 'SqlCipherPassphraseStore' 'Room passphrase is obtained from the protected store'
 Require-Text $passphrase 'AndroidKeyStore' 'SQLCipher key material is protected by Android Keystore'
 Require-Text $passphrase 'AES/GCM/NoPadding' 'passphrase record uses authenticated encryption'
+Require-Text $androidDatabaseTest 'DoesNotExposePlaintextSqliteHeader' 'instrumentation test checks the encrypted database header'
+Require-Text $androidDatabaseTest 'SupportOpenHelperFactory' 'instrumentation test opens Room through SQLCipher'
 Require-Text $manifest 'android:allowBackup="false"' 'Android backup is disabled for encrypted application data'
 
 # Runtime communication must have an explicit foreground-service and permission boundary.
