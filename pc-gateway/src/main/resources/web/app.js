@@ -48,6 +48,7 @@
   function contentBadge(verification) {
     const t = (verification || "UNVERIFIED").toUpperCase();
     if (t === "VERIFIED") return `<span class="badge verified">CONTENT VERIFIED</span>`;
+    if (t === "SIGNED_UNVERIFIED") return `<span class="badge unverified">CONTENT SIGNED / UNVERIFIED</span>`;
     return `<span class="badge unverified">CONTENT UNVERIFIED</span>`;
   }
 

@@ -143,10 +143,13 @@ fun Application.gatewayModule(
                 .getOrElse { return@post call.respond(HttpStatusCode.ServiceUnavailable) }
             val all = request.messages.zip(outcomes)
             val rejected = all.filter { it.second != null }.map { GatewayRejection(it.first.messageId, it.second!!.reason!!) }
-            // Authentication covers the Bridge transport only. REPORT content and claimed origin
-            // remain unverified until a future signature/issuer verifier is configured.
+            // Authentication covers the Bridge transport only. A REPORT signature, when carried,
+            // is informational until an issuer registry verifies its origin binding.
             call.response.headers.append("X-Relay-Route-Authentication", "authenticated_bridge")
-            call.response.headers.append("X-Relay-Content-Verification", "unverified")
+            call.response.headers.append(
+                "X-Relay-Content-Verification",
+                if (accepted.any { it.reportSignature != null }) "signed_unverified" else "unverified",
+            )
             call.response.headers.append("X-Relay-Receipt-Semantics", "gateway_saved")
             call.respond(syncResponse(stored, rejected))
         }
@@ -190,7 +193,10 @@ fun Application.gatewayModule(
             // Keep the legacy header for old clients, but expose the independent axes explicitly.
             call.response.headers.append("X-Relay-Receipt-Trust", "unverified")
             call.response.headers.append("X-Relay-Route-Authentication", "anonymous_lan")
-            call.response.headers.append("X-Relay-Content-Verification", "unverified")
+            call.response.headers.append(
+                "X-Relay-Content-Verification",
+                if (accepted.any { it.reportSignature != null }) "signed_unverified" else "unverified",
+            )
             call.response.headers.append("X-Relay-Receipt-Semantics", "gateway_saved")
             call.respond(syncResponse(stored, rejected))
         }
