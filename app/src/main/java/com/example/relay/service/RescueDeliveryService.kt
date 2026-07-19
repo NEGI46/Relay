@@ -18,6 +18,8 @@ import com.example.relay.rescue.SharedPreferencesRescueAutomationStore
 import com.example.relay.rescue.HttpShelterGatewayDelivery
 import com.example.relay.rescue.ble.SharedPreferencesCourierDeliveryIdStore
 import com.example.relay.rescue.RescueRequestKey
+import com.example.relay.rescue.RescueUrgency
+import com.example.relay.rescue.StoredRescueRecord
 import com.example.relay.rescue.rank
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,13 +30,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/**
- * Lifecycle owner for automatic rescue delivery.
- *
- * The BLE GATT coordinator is intentionally injected in the next integration
- * step. Keeping its Android lifecycle separate from the legacy Nearby service
- * prevents normal message relay settings from stopping a stored rescue request.
- */
+/** Lifecycle owner for automatic rescue delivery. */
 class RescueDeliveryService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var statusMonitorJob: Job? = null
@@ -53,8 +49,6 @@ class RescueDeliveryService : Service() {
                 startForeground(NOTIFICATION_ID, notification())
             }
         } catch (_: SecurityException) {
-            // Android can deny background foreground-service launch. A receiver/
-            // worker will retry when the OS next permits it; envelopes remain in Room.
             stopSelf(startId)
             return START_NOT_STICKY
         }
@@ -118,18 +112,10 @@ class RescueDeliveryService : Service() {
             val delivery = HttpShelterGatewayDelivery()
             val deliveryIds = SharedPreferencesCourierDeliveryIdStore(app)
             while (isActive) {
-                val candidate = app.rescueRepository.all()
-                    .asSequence()
-                    .filter { it.envelope.expiresAtEpochMillis > System.currentTimeMillis() }
-                    .filter {
-                        it.state.submissionStatus in setOf(
-                            RescueSubmissionStatus.PENDING,
-                            RescueSubmissionStatus.IN_TRANSIT,
-                            RescueSubmissionStatus.SHELTER_STORED,
-                        )
-                    }
-                    .sortedWith(compareByDescending { it.envelope.routingUrgency.name })
-                    .firstOrNull()
+                val candidate = selectLocalGatewayCandidate(
+                    app.rescueRepository.all(),
+                    System.currentTimeMillis(),
+                )
                 if (candidate != null) {
                     val receipt = delivery.deliver(
                         candidate.envelope,
@@ -193,4 +179,36 @@ class RescueDeliveryService : Service() {
             startIfEnabled(context)
         }
     }
+}
+
+internal fun selectLocalGatewayCandidate(
+    records: List<StoredRescueRecord>,
+    nowEpochMillis: Long,
+): StoredRescueRecord? = records.asSequence()
+    .filter { it.envelope.expiresAtEpochMillis > nowEpochMillis }
+    .filter {
+        it.state.submissionStatus in setOf(
+            RescueSubmissionStatus.PENDING,
+            RescueSubmissionStatus.IN_TRANSIT,
+            RescueSubmissionStatus.SHELTER_STORED,
+        )
+    }
+    .sortedWith(
+        compareByDescending<StoredRescueRecord> { it.state.submissionStatus.deliveryPriority() }
+            .thenByDescending { it.envelope.routingUrgency.deliveryPriority() }
+            .thenByDescending { it.envelope.createdAtEpochMillis },
+    )
+    .firstOrNull()
+
+private fun RescueSubmissionStatus.deliveryPriority(): Int = when (this) {
+    RescueSubmissionStatus.PENDING -> 3
+    RescueSubmissionStatus.IN_TRANSIT -> 2
+    RescueSubmissionStatus.SHELTER_STORED -> 1
+    else -> 0
+}
+
+private fun RescueUrgency.deliveryPriority(): Int = when (this) {
+    RescueUrgency.IMMEDIATE -> 3
+    RescueUrgency.URGENT -> 2
+    RescueUrgency.ROUTINE -> 1
 }
