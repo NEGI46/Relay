@@ -1,0 +1,17 @@
+{
+  "protocolVersion": 1,
+  "shelterId": "pc-gateway-local",
+  "recipientPublicKey": {
+    "keyId": "ce1a7e2a89cc2f390666d4970949d74117eaef95239c375ba703c208d729d4b8",
+    "algorithm": "RSA_OAEP_SHA256",
+    "encodedBase64": "MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAw/Qxihe9STOf722CRJY/PQr5Lr/DwolsYk2WVk64sfSayLp6ze4SUhdrusKUmDKooGWOu64tjkINn109Ma2IReOjqr1JJuANnYrcbT+Qi53HVP18HRUBAaILmJ5w4ReO4N/F+fmnyLA34avcYFFuyKIKVCB7HIIgcy4vtkTP/wFPuRzFiIdKmBwpEeuTKy2JB7WmVaqtm00d4K4qqsTanVz7ZP5VbX0xXbq+p4zM8eaP/LMtOjNzUEvtxlL5qwkdUhLD2UCQLMNH8Ynu++9sDIoLM31nobN2W8k5H4mmHKh7Lr3q/HatyqALYjX2let0dJ5mm/LaBgXXEwPA0PWI7Bkl9MwzbvdROZ81HWx9vup2aug4xIeiZKREnVAk6CsSGqjCkidIPOQEu/JIPS4uVi1q9Z25yku3ZLp1j4aYTloHISHDtCmMOgKQq3dTL/JsVfCoco7UzsyNWpe3QivOOnKAcycNQgiWcWFU23gqwC43ns1yrvTRuJkIbsTad9+DAgMBAAE="
+  },
+  "receiptSigningPublicKey": {
+    "keyId": "67afa49be3911c7d97010c465b66f002bd5e5ac1e08390406d3362334ba7312e",
+    "algorithm": "ECDSA_P256_SHA256",
+    "encodedBase64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEhzq4tTfBCVzE2IPpv7ZrHZaTxCDGxsT4zvjHkAjOTcmZ6ASkUxVhvlmeLmgn5jdtpBOFP2V0MB5f73j1XTBEsw=="
+  },
+  "validFromEpochMillis": 1784374904449,
+  "validUntilEpochMillis": 1942573304449,
+  "generation": 1
+}

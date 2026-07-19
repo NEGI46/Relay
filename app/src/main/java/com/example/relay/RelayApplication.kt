@@ -41,6 +41,7 @@ import com.example.relay.service.RescueDeliveryService
 import com.example.relay.rescue.RescueShelterKeyStore
 import com.example.relay.rescue.ReportSigningKeyStore
 import com.example.relay.rescue.DebugShelterManifestBootstrap
+import com.example.relay.rescue.BundledShelterManifestBootstrap
 import com.example.relay.rescue.HttpShelterManifestClient
 import com.example.relay.rescue.ShelterManifestEnrollment
 import com.example.relay.rescue.RegionalShelterDirectoryResolver
@@ -186,6 +187,12 @@ class RelayApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // SOS must be creatable before Wi-Fi or LAN discovery is available. Seed only the
+        // public pilot manifest; the PC Gateway keeps the corresponding private keys locally.
+        BundledShelterManifestBootstrap(
+            context = this,
+            saveManifest = rescueShelterKeyStore::saveVerifiedManifest,
+        ).seedIfMissing(rescueShelterKeyStore::load)
         if (BuildConfig.DEBUG) {
             applicationScope.launch {
                 DebugShelterManifestBootstrap(
