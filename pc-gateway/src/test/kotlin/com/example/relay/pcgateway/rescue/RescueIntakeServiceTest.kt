@@ -2,6 +2,7 @@ package com.example.relay.pcgateway.rescue
 
 import com.example.relay.rescue.RescueCryptography
 import com.example.relay.rescue.RescuePayload
+import com.example.relay.rescue.RescueRequestAction
 import com.example.relay.rescue.RescueSupportNeed
 import com.example.relay.rescue.RescueUrgency
 import com.example.relay.rescue.ShelterReceiptStatus
@@ -53,6 +54,52 @@ class RescueIntakeServiceTest {
             RescueRejectionCode.CORRUPT_OR_UNDECRYPTABLE,
             (service.ingest(tampered, "courier-3") as RescueIngestResult.Rejected).code,
         )
+    }
+
+    @Test
+    fun firstConfirmingNodeOwnsResponseAndTerminalDetailsExpireAfterThirtyDays() {
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val signer = RescueCryptography.generateShelterSigningKeyPair()
+        var now = 2_000L
+        val service = RescueIntakeService(
+            "shelter-1",
+            recipient.privateKey,
+            signer.privateKey,
+            clock = RescueClock { now },
+        )
+        service.ingest(RescueCryptography.encrypt(payload(1), recipient.publicKey, "envelope-1"), "courier-1")
+
+        val claimed = service.updateStatus("request-1", RescueResponseStatus.CONFIRMED, "operator-a")
+            as RescueStatusUpdateResult.Updated
+        assertEquals("operator-a", claimed.request.assignedNodeId)
+        val conflict = service.updateStatus("request-1", RescueResponseStatus.PREPARING, "operator-b")
+            as RescueStatusUpdateResult.AssignedElsewhere
+        assertEquals("operator-a", conflict.assignedNodeId)
+
+        service.updateStatus("request-1", RescueResponseStatus.PREPARING, "operator-a")
+        service.updateStatus("request-1", RescueResponseStatus.RESPONDING, "operator-a")
+        service.updateStatus("request-1", RescueResponseStatus.COMPLETED, "operator-a")
+        now += 31L * 24 * 60 * 60 * 1_000
+
+        assertEquals(1, service.purgeExpiredDetails())
+        assertEquals(null, service.detail("request-1"))
+    }
+
+    @Test
+    fun cancellationVersionIsTerminalOnArrival() {
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val signer = RescueCryptography.generateShelterSigningKeyPair()
+        val service = RescueIntakeService(
+            "shelter-1",
+            recipient.privateKey,
+            signer.privateKey,
+            clock = RescueClock { 2_000 },
+        )
+        val cancelled = payload(2).copy(action = RescueRequestAction.CANCELLED)
+
+        service.ingest(RescueCryptography.encrypt(cancelled, recipient.publicKey, "envelope-2"), "courier-1")
+
+        assertEquals(RescueResponseStatus.COMPLETED, service.detail("request-1")!!.responseStatus)
     }
 
     private fun payload(version: Int) = RescuePayload(

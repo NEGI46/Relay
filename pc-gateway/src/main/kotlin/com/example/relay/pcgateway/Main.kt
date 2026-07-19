@@ -28,16 +28,16 @@ fun main() {
     // Do not bind the sidecar ingress unless the advertised shelter identity is root-signed,
     // current, and matches the two locally held private keys. This prevents an unprovisioned PC
     // from accepting delivery traffic merely because its generated public manifest is reachable.
-    val rescueIngress = verifiedBleManifest?.let {
-        RescueDeliveryIngress(
-            RescueIntakeService(
-                shelterId = config.shelterId,
-                recipientPrivateKey = rescueKeys.recipientPrivateKey,
-                shelterSigningPrivateKey = rescueKeys.receiptSigningPrivateKey,
-                persistence = store.rescuePersistence(),
-            ),
-        )
-    }
+    val rescueIntakeService = RescueIntakeService(
+        shelterId = config.shelterId,
+        recipientPrivateKey = rescueKeys.recipientPrivateKey,
+        shelterSigningPrivateKey = rescueKeys.receiptSigningPrivateKey,
+        persistence = store.rescuePersistence(),
+    )
+    rescueIntakeService.purgeExpiredDetails()
+    val offlineMap = GsiTileCache(Path.of(config.offlineMapPath))
+    val officialInformation = OfficialInformationService(Path.of(config.officialInfoCachePath))
+    val rescueIngress = verifiedBleManifest?.let { RescueDeliveryIngress(rescueIntakeService) }
     val beacon = GatewayLanBeacon(config)
     val consoleHost = if (config.host in setOf("0.0.0.0", "::")) "127.0.0.1" else config.host
     println("Relay PC Gateway listening on http://${config.host}:${config.port}")
@@ -84,6 +84,9 @@ fun main() {
                     store,
                     rescueManifest = rescueKeys.manifest,
                     rescueBleReady = verifiedBleManifest != null,
+                    rescueIntakeService = rescueIntakeService,
+                    offlineMap = offlineMap,
+                    officialInformation = officialInformation,
                 )
             }.start(wait = true)
         } finally {
@@ -91,6 +94,7 @@ fun main() {
         }
     } finally {
         beacon.close()
+        offlineMap.close()
         store.close()
     }
 }

@@ -1,400 +1,231 @@
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { timer: null };
+  const state = { requests: [], selectedId: null, filter: "active", timer: null, soundTimer: null, notifiedWarning: false };
+  const center = { latitude: 34.392, longitude: 132.504 };
+  const zoom = 15;
 
-  function adminKey() {
-    return ($("adminKey").value || localStorage.getItem("relay_admin_key") || "").trim();
-  }
-
-  function saveKey() {
-    const key = $("adminKey").value.trim();
-    if (key) localStorage.setItem("relay_admin_key", key);
-    else localStorage.removeItem("relay_admin_key");
-    $("footerStatus").textContent = key ? "管理者キーをこのブラウザに保存しました" : "管理者キーを削除しました";
-  }
-
+  function pin() { return sessionStorage.getItem("relay_staff_pin") || ""; }
+  function nodeId() { return sessionStorage.getItem("relay_node_id") || "fuchu-shelter-pc-1"; }
   function authHeaders(json = false) {
-    const headers = { "X-Admin-Key": adminKey() };
+    const headers = { "X-Admin-Key": pin() };
     if (json) headers["Content-Type"] = "application/json";
     return headers;
   }
-
+  function escapeHtml(value) {
+    return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+  }
   async function api(path, options = {}) {
-    const res = await fetch(path, options);
-    const text = await res.text();
+    const response = await fetch(path, options);
+    const text = await response.text();
     let body = text;
-    try {
-      body = text ? JSON.parse(text) : null;
-    } catch (_) {
-      /* keep text */
-    }
-    if (!res.ok) {
-      const err = new Error(typeof body === "object" ? JSON.stringify(body) : body || res.statusText);
-      err.status = res.status;
-      throw err;
+    try { body = text ? JSON.parse(text) : null; } catch (_) { /* plain text */ }
+    if (!response.ok) {
+      const error = new Error(typeof body === "object" ? JSON.stringify(body) : body || response.statusText);
+      error.status = response.status;
+      throw error;
     }
     return body;
   }
+  function fmtTime(value) { return value ? new Date(value).toLocaleString("ja-JP", { hour12: false }) : "不明"; }
+  function statusLabel(value) {
+    return ({ UNCONFIRMED: "未確認", CONFIRMED: "確認済み", PREPARING: "対応準備中", RESCUE_REQUESTED: "救助機関へ要請済み", RESPONDING: "対応中", COMPLETED: "完了", UNABLE: "対応不可", DUPLICATE: "重複" })[value] || value;
+  }
+  function conditionLabel(value) {
+    return ({ LIFE_THREATENING: "命の危険", INJURED_OR_UNWELL: "けが・体調不良", MOBILITY_IMPAIRED: "自力移動困難", SUPPORT_NEEDED: "生活・医療支援" })[value] || value;
+  }
+  function needLabel(value) {
+    return ({ WATER: "水", FOOD: "食料", MEDICINE: "薬・医療", RESCUE_TEAM: "救助隊", TRANSPORT: "移動支援" })[value] || value;
+  }
+  function isTerminal(request) { return ["COMPLETED", "UNABLE", "DUPLICATE"].includes(request.responseStatus); }
+  function isImmediate(request) { return request.urgency === "IMMEDIATE" && request.action !== "CANCELLED"; }
 
-  function fmtTime(ms) {
-    if (ms == null || ms === 0) return "—";
+  async function unlock(event) {
+    event.preventDefault();
+    const candidate = $("staffPin").value.trim();
+    if (!candidate) return;
+    sessionStorage.setItem("relay_staff_pin", candidate);
+    sessionStorage.setItem("relay_node_id", $("nodeId").value.trim() || "fuchu-shelter-pc-1");
     try {
-      return new Date(ms).toLocaleString("ja-JP", { hour12: false });
-    } catch {
-      return String(ms);
+      await loadRequests();
+      $("setup").classList.add("hidden");
+      $("staffNodeLabel").textContent = nodeId();
+      $("settingsNode").textContent = nodeId();
+      if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+      await refreshAll();
+      armRefresh();
+    } catch (error) {
+      sessionStorage.removeItem("relay_staff_pin");
+      $("staffPin").setCustomValidity(error.status === 401 ? "PINが違います" : "接続できません");
+      $("staffPin").reportValidity();
+      $("staffPin").setCustomValidity("");
     }
   }
 
-  function contentBadge(verification) {
-    const t = (verification || "UNVERIFIED").toUpperCase();
-    if (t === "VERIFIED") return `<span class="badge verified">CONTENT VERIFIED</span>`;
-    if (t === "SIGNED_UNVERIFIED") return `<span class="badge unverified">CONTENT SIGNED / UNVERIFIED</span>`;
-    return `<span class="badge unverified">CONTENT UNVERIFIED</span>`;
+  function lock() {
+    sessionStorage.removeItem("relay_staff_pin");
+    stopAlarm();
+    if (state.timer) clearInterval(state.timer);
+    $("staffPin").value = "";
+    $("setup").classList.remove("hidden");
   }
 
-  function routeBadge(authentication) {
-    const t = (authentication || "ANONYMOUS_LAN").toUpperCase();
-    if (t === "AUTHENTICATED_BRIDGE") return `<span class="badge ok">PAIRED BRIDGE</span>`;
-    return `<span class="badge off">ANONYMOUS LAN</span>`;
+  async function loadRequests() {
+    const response = await api("/api/rescue/requests", { headers: authHeaders() });
+    state.requests = response.items || [];
+    $("requestCount").textContent = state.requests.filter((item) => !isTerminal(item)).length;
+    if (!state.selectedId && state.requests.length) state.selectedId = state.requests[0].requestId;
+    renderRequests();
+    renderMaps();
+    showCriticalIfNeeded();
+    $("lastUpdated").textContent = `更新 ${fmtTime(response.generatedAtEpochMillis)}`;
   }
 
-  function priorityBadge(p) {
-    const key = (p || "NORMAL").toLowerCase();
-    return `<span class="badge ${key}">${p || "NORMAL"}</span>`;
-  }
-
-  function typeLabel(t) {
-    if (t === "SAFETY") return "安否";
-    if (t === "SUPPLY") return "物資";
-    return t || "—";
-  }
-
-  function escapeHtml(s) {
-    return String(s)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;");
-  }
-
-  function row(k, v) {
-    return `<dt>${k}</dt><dd>${escapeHtml(String(v))}</dd>`;
-  }
-
-  function prettyJson(raw) {
-    try {
-      return JSON.stringify(JSON.parse(raw), null, 2);
-    } catch {
-      return raw || "";
-    }
-  }
-
-  function renderStats(d) {
-    $("statCards").innerHTML = [
-      stat("保存件数", d.totalMessages, ""),
-      stat("ACTIVE", d.activeMessages, "active"),
-      stat("Content未検証", d.contentUnverifiedMessages, "unverified"),
-      stat("Content検証済み（MVP未構成）", d.contentVerifiedMessages, "verified"),
-      stat("認証Bridge経路", d.authenticatedRouteMessages, ""),
-      stat("匿名LAN経路", d.anonymousRouteMessages, ""),
-      stat("Bridge", `${d.pairedBridgeCount}/${d.bridgeCount}`, ""),
-      stat("Receipt", d.receiptCount, ""),
-    ].join("");
-  }
-
-  function stat(label, value, cls) {
-    return `<div class="stat ${cls}"><div class="label">${label}</div><div class="value">${value}</div></div>`;
-  }
-
-  function renderService(d) {
-    $("subtitle").textContent = `${d.gatewayId} · 中継拠点コンソール`;
-    $("opsDiscoveryPort").textContent = d.lanDiscoveryPort;
-    $("serviceStatus").innerHTML = [
-      row("Gateway ID", d.gatewayId),
-      row("Bind", `${d.bindHost}:${d.httpPort}`),
-      row("公開同期", d.anonymousIngressEnabled ? "有効" : "無効"),
-      row("LAN 発見", d.lanDiscoveryEnabled ? `UDP ${d.lanDiscoveryPort}` : "無効"),
-      row("DB 上限", d.maxStoredMessages.toLocaleString()),
-      row("スナップショット", fmtTime(d.generatedAt)),
-    ].join("");
-  }
-
-  function renderTypes(d) {
-    if (!d.byType.length) {
-      $("typeBreakdown").innerHTML = `<div class="empty">まだメッセージがありません</div>`;
+  function renderRequests() {
+    const visible = state.requests.filter((request) => state.filter === "all" || !isTerminal(request));
+    if (!visible.length) {
+      $("requestList").innerHTML = '<p class="empty">該当する救助依頼はありません。</p>';
+      renderDetail(null);
       return;
     }
-    const max = Math.max(1, ...d.byType.map((x) => x.count));
-    $("typeBreakdown").innerHTML = d.byType
-      .map((t) => {
-        const pct = Math.round((t.count / max) * 100);
-        return `<div class="bar-row"><span>${escapeHtml(typeLabel(t.messageType))}</span>
-        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
-        <span>${t.count}</span></div>`;
-      })
-      .join("");
+    $("requestList").innerHTML = visible.map((request) => {
+      const selected = request.requestId === state.selectedId;
+      const critical = isImmediate(request) && request.responseStatus === "UNCONFIRMED";
+      return `<button type="button" class="request-card ${selected ? "selected" : ""} ${critical ? "critical" : ""}" data-request="${escapeHtml(request.requestId)}">
+        <span class="request-top"><span class="priority">${critical ? "命の危険・未確認" : statusLabel(request.responseStatus)}</span><time>${fmtTime(request.receivedAtEpochMillis)}</time></span>
+        <strong>${request.personCount == null ? "人数不明" : `${request.personCount}人`} · ${request.conditions.map(conditionLabel).join(" / ") || "状態未記載"}</strong>
+        <span>${request.locationDescription || "GPS位置あり"}</span>
+        <span class="fine">${request.assignedNodeId ? `担当: ${escapeHtml(request.assignedNodeId)}` : "担当未確定"}</span>
+      </button>`;
+    }).join("");
+    $("requestList").querySelectorAll("[data-request]").forEach((button) => button.addEventListener("click", () => {
+      state.selectedId = button.dataset.request;
+      renderRequests(); renderMaps();
+    }));
+    renderDetail(state.requests.find((request) => request.requestId === state.selectedId));
   }
 
-  function renderRecent(d) {
-    $("recentHint").textContent = `${d.recentMessages.length} 件`;
-    if (!d.recentMessages.length) {
-      $("recentBody").innerHTML = `<tr><td colspan="6" class="empty">受信待ち</td></tr>`;
-      return;
-    }
-    $("recentBody").innerHTML = d.recentMessages
-      .map((m) => {
-        const cls = (m.contentVerification || "UNVERIFIED").toUpperCase() === "VERIFIED" ? "verified" : "unverified";
-        return `<tr class="${cls}">
-        <td>${priorityBadge(m.priority)}</td>
-        <td>${escapeHtml(typeLabel(m.messageType))}</td>
-        <td>${contentBadge(m.contentVerification)}</td>
-        <td>${escapeHtml(m.status)}</td>
-        <td title="${escapeHtml(m.origin)}">${escapeHtml((m.origin || "").slice(0, 12))}</td>
-        <td>${fmtTime(m.receivedAt)}</td>
-      </tr>`;
-      })
-      .join("");
+  function renderDetail(request) {
+    if (!request) { $("selectedDetail").innerHTML = '<p class="empty">依頼を選択してください。</p>'; return; }
+    const tags = [
+      ...request.conditions.map(conditionLabel), ...request.supportNeeds.map(needLabel),
+      request.elderlyPresent ? "高齢者" : null, request.childrenPresent ? "子ども" : null,
+      request.pregnantPresent ? "妊娠中" : null, request.trapped ? "閉じ込め" : null,
+      request.fireOrCollapseRisk ? "火災・倒壊危険" : null,
+    ].filter(Boolean);
+    const ownedElsewhere = request.assignedNodeId && request.assignedNodeId !== nodeId();
+    const actions = nextActions(request).map(([status, label, danger]) =>
+      `<button class="button ${danger ? "danger-outline" : "primary"}" data-status="${status}" ${ownedElsewhere ? "disabled" : ""}>${label}</button>`).join("");
+    $("selectedDetail").innerHTML = `
+      <div class="detail-head"><div><p class="eyebrow">${isImmediate(request) ? "IMMEDIATE" : "RESCUE REQUEST"}</p><h3>${request.personCount == null ? "人数不明" : `${request.personCount}人`} / ${statusLabel(request.responseStatus)}</h3></div><span class="status-chip">v${request.requestVersion}</span></div>
+      ${ownedElsewhere ? `<p class="assignment-note">${escapeHtml(request.assignedNodeId)} が担当中です。</p>` : ""}
+      <dl class="detail-grid"><dt>GPS</dt><dd>${request.latitude?.toFixed(6) ?? "不明"}, ${request.longitude?.toFixed(6) ?? "不明"}</dd><dt>位置精度</dt><dd>${request.accuracyMeters == null ? "不明" : `約${Math.round(request.accuracyMeters)}m`}</dd><dt>位置取得</dt><dd>${fmtTime(request.locationCapturedAtEpochMillis)}</dd><dt>場所の補足</dt><dd>${escapeHtml(request.locationDescription || "なし")}</dd><dt>状態・タグ</dt><dd>${tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join(" ") || "なし"}</dd><dt>補足文</dt><dd class="free-text">${escapeHtml(request.freeText || "なし")}</dd><dt>中継端末</dt><dd>${request.uniqueCarrierCount}台</dd></dl>
+      <div class="action-row">${actions}</div>`;
+    $("selectedDetail").querySelectorAll("[data-status]").forEach((button) => button.addEventListener("click", () => updateStatus(request.requestId, button.dataset.status)));
   }
 
-  function renderBridges(d) {
-    if (!d.bridges.length) {
-      $("bridgesBody").innerHTML =
-        `<tr><td colspan="7" class="empty">Bridge 未登録（公開経路のみで運用可能）</td></tr>`;
-      return;
-    }
-    $("bridgesBody").innerHTML = d.bridges
-      .map(
-        (b) => `<tr>
-      <td>${escapeHtml(b.bridgeId)}</td>
-      <td>${escapeHtml(b.name)}</td>
-      <td>${b.paired ? '<span class="badge ok">paired</span>' : '<span class="badge off">no</span>'}</td>
-      <td>${b.connected ? '<span class="badge ok">yes</span>' : '<span class="badge off">no</span>'}</td>
-      <td>${fmtTime(b.lastSyncAt)}</td>
-      <td>${b.receivedCount}</td>
-      <td><button type="button" class="btn small danger" data-revoke="${escapeHtml(b.bridgeId)}">失効</button></td>
-    </tr>`,
-      )
-      .join("");
-
-    $("bridgesBody").querySelectorAll("[data-revoke]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        if (!confirm(`Bridge ${btn.dataset.revoke} の token を失効しますか？`)) return;
-        try {
-          await api("/api/pair/reject", {
-            method: "POST",
-            headers: authHeaders(true),
-            body: JSON.stringify({ bridgeId: btn.dataset.revoke }),
-          });
-          $("opsResult").textContent = `revoked ${btn.dataset.revoke}`;
-          await refresh();
-        } catch (e) {
-          $("opsResult").textContent = `error ${e.status || ""}: ${e.message}`;
-        }
-      });
-    });
+  function nextActions(request) {
+    if (request.action === "CANCELLED" || isTerminal(request)) return [];
+    const primary = ({ UNCONFIRMED: ["CONFIRMED", "確認して担当開始"], CONFIRMED: ["PREPARING", "対応準備を開始"], PREPARING: ["RESPONDING", "現地対応を開始"], RESCUE_REQUESTED: ["RESPONDING", "現地対応を開始"], RESPONDING: ["COMPLETED", "対応完了"] })[request.responseStatus];
+    return [primary ? [...primary, false] : null, ["UNABLE", "対応不可", true]].filter(Boolean);
   }
 
-  function renderMessages(list) {
-    $("messagesMeta").textContent = `${list.length} 件表示`;
-    if (!list.length) {
-      $("messagesBody").innerHTML = `<tr><td colspan="10" class="empty">該当なし</td></tr>`;
-      return;
-    }
-    $("messagesBody").innerHTML = list
-      .map((m) => {
-        const cls = (m.contentVerification || "UNVERIFIED").toUpperCase() === "VERIFIED" ? "verified" : "unverified";
-        const rx =
-          [m.gatewayReceived ? "認証経路で保存" : null, m.gatewayReceivedUnverified ? "匿名経路で保存" : null]
-            .filter(Boolean)
-            .join("/") || "—";
-        return `<tr class="${cls}">
-        <td title="${escapeHtml(m.messageId)}">${escapeHtml(m.messageId.slice(0, 12))}</td>
-        <td>${escapeHtml(typeLabel(m.messageType))}</td>
-        <td>${priorityBadge(m.priority)}</td>
-        <td>${escapeHtml(m.status)}</td>
-        <td>${contentBadge(m.contentVerification)}<br>${routeBadge(m.routeAuthentication)}</td>
-        <td>${rx}</td>
-        <td>${escapeHtml((m.sourceBridgeId || "public").slice(0, 10))}</td>
-        <td title="${escapeHtml(m.origin)}">${escapeHtml((m.origin || "").slice(0, 10))}</td>
-        <td>${fmtTime(m.receivedAt)}</td>
-        <td><button type="button" class="btn small secondary" data-detail="${escapeHtml(m.messageId)}">詳細</button></td>
-      </tr>`;
-      })
-      .join("");
-
-    $("messagesBody").querySelectorAll("[data-detail]").forEach((btn) => {
-      btn.addEventListener("click", () => openDetail(btn.dataset.detail));
-    });
-  }
-
-  async function openDetail(id) {
+  async function updateStatus(id, status) {
     try {
-      const d = await api(`/api/messages/${encodeURIComponent(id)}`, { headers: authHeaders() });
-      $("detailBody").innerHTML = `
-        <dl class="kv">
-          ${row("messageId", d.messageId)}
-          ${row("type", d.messageType)}
-          ${row("record", d.recordType)}
-          ${row("priority", d.priority)}
-          ${row("status", d.status)}
-          ${row("content verification", d.contentVerification)}
-          ${row("route authentication", d.routeAuthentication)}
-          ${row("gateway receipt", d.gatewayReceived ? "saved via authenticated Bridge" : (d.gatewayReceivedUnverified ? "saved via anonymous LAN" : "none"))}
-          ${row("origin", d.originDeviceId)}
-          ${row("bridge", d.sourceBridgeId || "public")}
-          ${row("hops", `${d.hopCount} / ${d.hopLimit}`)}
-          ${row("created", fmtTime(d.createdAt))}
-          ${row("received", fmtTime(d.receivedAt))}
-          ${row("age/lifetime", `${d.accumulatedAgeMs} / ${d.lifetimeMs} ms`)}
-          ${row("receipts", (d.receipts || []).map((r) => r.receiptType).join(", ") || "—")}
-        </dl>
-        <h3>payload</h3>
-        <pre>${escapeHtml(prettyJson(d.payloadJson))}</pre>
-        <p class="muted">運用者向け表示です。ログや外部共有には載せないでください。</p>
-      `;
-      $("detailDialog").showModal();
-    } catch (e) {
-      alert(`詳細取得に失敗: ${e.status || ""} ${e.message}`);
+      await api(`/api/rescue/requests/${encodeURIComponent(id)}/status`, { method: "POST", headers: authHeaders(true), body: JSON.stringify({ status, operatorNodeId: nodeId() }) });
+      await loadRequests();
+    } catch (error) {
+      alert(error.status === 409 ? "別のPCが先に担当したか、状態の順序が正しくありません。更新してください。" : `状態更新に失敗しました: ${error.message}`);
     }
   }
 
-  async function refreshDashboard() {
-    const d = await api("/api/dashboard");
-    renderStats(d);
-    renderService(d);
-    renderTypes(d);
-    renderRecent(d);
-    renderBridges(d);
-    $("footerStatus").textContent = `online · ${d.gatewayId} · messages ${d.totalMessages}`;
-    $("footerClock").textContent = fmtTime(d.generatedAt);
+  function showCriticalIfNeeded() {
+    const urgent = state.requests.find((request) => isImmediate(request) && request.responseStatus === "UNCONFIRMED");
+    if (!urgent) { $("criticalAlert").classList.add("hidden"); stopAlarm(); return; }
+    state.selectedId = urgent.requestId;
+    $("criticalSummary").textContent = `${urgent.personCount == null ? "人数不明" : `${urgent.personCount}人`} / ${urgent.locationDescription || "GPS位置を確認してください"}`;
+    $("criticalAlert").classList.remove("hidden");
+    $("ackCritical").onclick = () => updateStatus(urgent.requestId, "CONFIRMED");
+    startAlarm();
   }
 
-  async function refreshMessages() {
-    const q = new URLSearchParams();
-    const query = $("msgQuery").value.trim();
-    const type = $("msgType").value;
-    const status = $("msgStatus").value;
-    const trust = $("msgTrust").value;
-    const route = $("msgRoute").value;
-    if (query) q.set("q", query);
-    if (type) q.set("type", type);
-    if (status) q.set("status", status);
-    if (trust) q.set("trust", trust);
-    if (route) q.set("routeAuthentication", route);
-    q.set("limit", "300");
-    const data = await api(`/api/messages?${q}`, { headers: authHeaders() });
-    renderMessages(data.items || []);
-  }
-
-  async function refresh() {
-    try {
-      await refreshDashboard();
-      if (adminKey()) {
-        try {
-          await refreshMessages();
-        } catch (e) {
-          $("messagesMeta").textContent = `メッセージ取得失敗 (${e.status || "?"}): 管理者キーを確認`;
-        }
-      } else {
-        $("messagesMeta").textContent = "メッセージ一覧・詳細・CSV には管理者キーが必要です";
-      }
-    } catch (e) {
-      $("footerStatus").textContent = `error: ${e.message}`;
-    }
-  }
-
-  function setupTabs() {
-    document.querySelectorAll(".tab").forEach((tab) => {
-      tab.addEventListener("click", () => {
-        document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
-        tab.classList.add("active");
-        $(`panel-${tab.dataset.tab}`).classList.add("active");
-      });
-    });
-  }
-
-  function setupOps() {
-    $("btnPairCode").addEventListener("click", async () => {
+  function startAlarm() {
+    if (state.soundTimer) return;
+    const beep = () => {
       try {
-        const body = await api("/api/pair/code", { headers: authHeaders() });
-        $("pairCodeResult").textContent = typeof body === "object" ? JSON.stringify(body, null, 2) : body;
-      } catch (e) {
-        $("pairCodeResult").textContent = `error ${e.status || ""}: ${e.message}`;
-      }
-    });
-
-    $("formApprove").addEventListener("submit", async (ev) => {
-      ev.preventDefault();
-      const fd = new FormData(ev.target);
-      try {
-        const body = await api("/api/pair/approve", {
-          method: "POST",
-          headers: authHeaders(true),
-          body: JSON.stringify({ bridgeId: fd.get("bridgeId"), code: fd.get("code") }),
-        });
-        $("opsResult").textContent = JSON.stringify(body, null, 2);
-        await refresh();
-      } catch (e) {
-        $("opsResult").textContent = `error ${e.status || ""}: ${e.message}`;
-      }
-    });
-
-    $("formReject").addEventListener("submit", async (ev) => {
-      ev.preventDefault();
-      const fd = new FormData(ev.target);
-      const payload = { bridgeId: fd.get("bridgeId") };
-      const code = (fd.get("code") || "").trim();
-      if (code) payload.code = code;
-      try {
-        await api("/api/pair/reject", {
-          method: "POST",
-          headers: authHeaders(true),
-          body: JSON.stringify(payload),
-        });
-        $("opsResult").textContent = "rejected / revoked";
-        await refresh();
-      } catch (e) {
-        $("opsResult").textContent = `error ${e.status || ""}: ${e.message}`;
-      }
-    });
-  }
-
-  function setupAutoRefresh() {
-    const arm = () => {
-      if (state.timer) clearInterval(state.timer);
-      if ($("autoRefresh").checked) state.timer = setInterval(refresh, 5000);
+        const context = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = context.createOscillator(); const gain = context.createGain();
+        oscillator.frequency.value = 880; gain.gain.value = 0.08; oscillator.connect(gain); gain.connect(context.destination);
+        oscillator.start(); oscillator.stop(context.currentTime + 0.22); oscillator.onended = () => context.close();
+      } catch (_) { /* visual alert remains */ }
     };
-    $("autoRefresh").addEventListener("change", arm);
-    arm();
+    beep(); state.soundTimer = setInterval(beep, 1800);
   }
+  function stopAlarm() { if (state.soundTimer) clearInterval(state.soundTimer); state.soundTimer = null; }
 
-  function init() {
-    const saved = localStorage.getItem("relay_admin_key");
-    if (saved) $("adminKey").value = saved;
-    setupTabs();
-    setupOps();
-    setupAutoRefresh();
-    $("btnSaveKey").addEventListener("click", saveKey);
-    $("btnRefresh").addEventListener("click", refresh);
-    $("btnFilter").addEventListener("click", () => refreshMessages().catch((e) => alert(e.message)));
-    $("btnExport").addEventListener("click", async () => {
-      try {
-        const res = await fetch("/api/messages/export.csv", { headers: authHeaders() });
-        if (!res.ok) throw new Error(await res.text());
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `relay-messages-${Date.now()}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
-      } catch (e) {
-        alert(`CSV 失敗: ${e.message}`);
-      }
+  function globalPixel(latitude, longitude, z) {
+    const scale = 256 * 2 ** z; const sin = Math.sin(latitude * Math.PI / 180);
+    return { x: (longitude + 180) / 360 * scale, y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale };
+  }
+  function renderTileMap(element, requests) {
+    const widthTiles = element.classList.contains("large") ? 5 : 4; const heightTiles = 3;
+    const centerPixel = globalPixel(center.latitude, center.longitude, zoom);
+    const centerTileX = Math.floor(centerPixel.x / 256); const centerTileY = Math.floor(centerPixel.y / 256);
+    const startX = centerTileX - Math.floor(widthTiles / 2); const startY = centerTileY - 1;
+    element.innerHTML = "";
+    for (let row = 0; row < heightTiles; row += 1) for (let column = 0; column < widthTiles; column += 1) {
+      const image = document.createElement("img"); image.className = "map-tile"; image.alt = "";
+      image.src = `/api/map/tiles/${zoom}/${startX + column}/${startY + row}.png`;
+      image.style.left = `${column * 256}px`; image.style.top = `${row * 256}px`; element.appendChild(image);
+    }
+    requests.filter((request) => request.latitude != null && request.longitude != null).forEach((request) => {
+      const point = globalPixel(request.latitude, request.longitude, zoom); const marker = document.createElement("button");
+      marker.className = `map-marker ${isImmediate(request) ? "critical" : ""}`; marker.type = "button";
+      marker.style.left = `${point.x - startX * 256}px`; marker.style.top = `${point.y - startY * 256}px`;
+      marker.title = `${request.personCount ?? "人数不明"} / ${statusLabel(request.responseStatus)}`;
+      marker.addEventListener("click", () => { state.selectedId = request.requestId; activatePanel("rescue"); renderRequests(); renderMaps(); });
+      element.appendChild(marker);
     });
-    refresh();
+  }
+  function renderMaps() { renderTileMap($("rescueMap"), state.requests.filter((item) => !isTerminal(item))); renderTileMap($("fullMap"), state.requests); }
+
+  async function loadMapStatus() {
+    const map = await api("/api/map/status", { headers: authHeaders() });
+    const ratio = map.expectedTiles ? map.cachedTiles / map.expectedTiles : 0;
+    $("mapProgress").value = ratio; $("mapProgressLabel").textContent = `${map.cachedTiles} / ${map.expectedTiles} タイル保存済み${map.lastError ? ` / ${map.lastError}` : ""}`;
+    $("mapStatus").textContent = map.state === "ready" ? "オフライン準備済み" : map.state === "preparing" ? "地図保存中" : "地図未完了";
+    $("prepareMap").disabled = map.state === "preparing" || map.state === "ready";
+  }
+  async function prepareMap() { await api("/api/map/prepare", { method: "POST", headers: authHeaders() }); await loadMapStatus(); }
+
+  async function loadOfficial() {
+    const info = await api("/api/official-info");
+    $("officialAlert").textContent = info.urgent ? `気象庁: ${info.warningHeadline}` : `公式情報: ${info.warningHeadline}`;
+    $("officialAlert").classList.toggle("urgent", info.urgent);
+    $("warningDetail").innerHTML = `<h3>気象庁 警報・注意報</h3><p>${escapeHtml(info.warningHeadline)}</p><ul>${info.warningStatuses.map((value) => `<li>${escapeHtml(value)}</li>`).join("") || "<li>府中町の発表状況なし</li>"}</ul><p class="fine">確認 ${fmtTime(info.checkedAtEpochMillis)}${info.usedCachedWarning ? "（保存済み情報）" : ""}</p>`;
+    $("officialSources").innerHTML = info.sources.map((source) => `<a class="source-card" href="${escapeHtml(source.url)}" target="_blank" rel="noopener"><strong>${escapeHtml(source.title)}</strong><span>${escapeHtml(source.organization)} 公式サイト</span></a>`).join("");
+    if (info.urgent && !state.notifiedWarning && "Notification" in window && Notification.permission === "granted") {
+      new Notification("Relay 府中町 公式警報", { body: info.warningHeadline }); state.notifiedWarning = true;
+    }
   }
 
-  init();
+  async function refreshAll() {
+    try {
+      await Promise.all([loadRequests(), loadMapStatus(), loadOfficial(), api("/api/health").then((health) => { $("healthStatus").textContent = `Gateway ${health.status} / BLE ${health.bleBridgeStatus}`; })]);
+      $("connectionDot").classList.add("online"); $("connectionLabel").textContent = "接続中";
+    } catch (error) {
+      if (error.status === 401) return lock();
+      $("connectionDot").classList.remove("online"); $("connectionLabel").textContent = "再接続中";
+    }
+  }
+  function armRefresh() { if (state.timer) clearInterval(state.timer); state.timer = setInterval(refreshAll, 5000); }
+  function activatePanel(name) {
+    document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.panel === name));
+    document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === `panel-${name}`));
+  }
+
+  $("setupForm").addEventListener("submit", unlock); $("lockButton").addEventListener("click", lock);
+  $("refreshButton").addEventListener("click", refreshAll); $("prepareMap").addEventListener("click", prepareMap);
+  document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => activatePanel(tab.dataset.panel)));
+  document.querySelectorAll(".filter").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; document.querySelectorAll(".filter").forEach((item) => item.classList.toggle("active", item === button)); renderRequests(); }));
+  if (pin()) { $("staffPin").value = pin(); $("nodeId").value = nodeId(); $("setupForm").requestSubmit(); }
 })();

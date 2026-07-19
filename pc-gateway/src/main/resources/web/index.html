@@ -1,189 +1,95 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Relay PC Gateway</title>
-  <link rel="stylesheet" href="/app.css" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relay 府中町 救助拠点</title>
+  <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-  <div class="app">
-    <header class="topbar">
-      <div class="brand">
-        <div class="logo" aria-hidden="true">R</div>
-        <div>
-          <h1>Relay PC Gateway</h1>
-          <p class="subtitle" id="subtitle">中継拠点コンソール</p>
-        </div>
-      </div>
-      <div class="top-actions">
-        <label class="admin-field">
-          <span>管理者キー</span>
-          <input id="adminKey" type="password" autocomplete="off" placeholder="ダッシュボード操作用" />
-        </label>
-        <button type="button" class="btn secondary" id="btnSaveKey">保存</button>
-        <button type="button" class="btn" id="btnRefresh">更新</button>
-        <label class="toggle">
-          <input type="checkbox" id="autoRefresh" checked />
-          <span>自動更新</span>
-        </label>
-      </div>
-    </header>
-
-    <section class="banner note">
-      <strong>zero-operation 運用</strong>
-      一般端末の登録は不要です。Android は UDP ビーコンで本機を発見し、公開同期で REPORT を送ります。
-      公開経路・ペアリング済み経路のどちらでも、REPORT本文と発信元は
-      <em>CONTENT UNVERIFIED（内容未検証）</em> です。ペアリングはBridge経路だけを認証し、
-      公式情報・本人確認・最終宛先への配信を意味しません。
-    </section>
-
-    <section class="cards" id="statCards" aria-live="polite"></section>
-
-    <nav class="tabs" role="tablist">
-      <button type="button" class="tab active" data-tab="overview">概要</button>
-      <button type="button" class="tab" data-tab="messages">メッセージ</button>
-      <button type="button" class="tab" data-tab="bridges">Bridge</button>
-      <button type="button" class="tab" data-tab="ops">運用操作</button>
-    </nav>
-
-    <main>
-      <section id="panel-overview" class="panel active">
-        <div class="grid-2">
-          <div class="card">
-            <h2>サービス状態</h2>
-            <dl class="kv" id="serviceStatus"></dl>
-          </div>
-          <div class="card">
-            <h2>種別内訳</h2>
-            <div id="typeBreakdown" class="bars"></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-head">
-            <h2>直近の受信</h2>
-            <span class="muted" id="recentHint"></span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>優先度</th><th>種別</th><th>内容検証</th><th>状態</th><th>Origin（自己申告）</th><th>受信</th>
-                </tr>
-              </thead>
-              <tbody id="recentBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section id="panel-messages" class="panel">
-        <div class="toolbar">
-          <input id="msgQuery" type="search" placeholder="messageId / origin / bridge" />
-          <select id="msgType">
-            <option value="">種別すべて</option>
-            <option value="SAFETY">安否 SAFETY</option>
-            <option value="SUPPLY">物資 SUPPLY</option>
-          </select>
-          <select id="msgStatus">
-            <option value="">状態すべて</option>
-            <option value="ACTIVE">ACTIVE</option>
-            <option value="RESOLVED">RESOLVED</option>
-            <option value="RETRACTED">RETRACTED</option>
-          </select>
-          <select id="msgTrust">
-            <option value="">内容検証すべて</option>
-            <option value="UNVERIFIED">CONTENT UNVERIFIED</option>
-            <option value="VERIFIED">CONTENT VERIFIED（将来用）</option>
-          </select>
-          <select id="msgRoute">
-            <option value="">受信経路すべて</option>
-            <option value="AUTHENTICATED_BRIDGE">認証済みBridge経路</option>
-            <option value="ANONYMOUS_LAN">匿名LAN経路</option>
-          </select>
-          <button type="button" class="btn secondary" id="btnFilter">絞り込み</button>
-          <button type="button" class="btn secondary" id="btnExport">CSV出力</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th><th>種別</th><th>優先度</th><th>状態</th><th>内容検証 / 経路</th>
-                <th>Gateway保存</th><th>Bridge</th><th>Origin（自己申告）</th><th>受信</th><th></th>
-              </tr>
-            </thead>
-            <tbody id="messagesBody"></tbody>
-          </table>
-        </div>
-        <p class="muted" id="messagesMeta"></p>
-      </section>
-
-      <section id="panel-bridges" class="panel">
-        <div class="card">
-          <h2>登録 Bridge（任意の認証済み経路）</h2>
-          <p class="muted">tokenは接続Bridgeを認証しますが、REPORT本文・発信元の真正性は証明しません。</p>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th><th>名前</th><th>Paired</th><th>Connected</th><th>最終同期</th><th>受信数</th><th></th>
-                </tr>
-              </thead>
-              <tbody id="bridgesBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section id="panel-ops" class="panel">
-        <div class="grid-2">
-          <div class="card">
-            <h2>ペアリングコード発行</h2>
-            <p class="muted">5分間有効。管理者キーが必要です。</p>
-            <button type="button" class="btn" id="btnPairCode">コード生成</button>
-            <pre class="result" id="pairCodeResult"></pre>
-          </div>
-          <div class="card">
-            <h2>Bridge 承認 / 拒否</h2>
-            <form id="formApprove" class="stack">
-              <label>Bridge ID <input name="bridgeId" required /></label>
-              <label>ペアリングコード <input name="code" required /></label>
-              <button type="submit" class="btn">承認して token 発行</button>
-            </form>
-            <form id="formReject" class="stack" style="margin-top:1rem">
-              <label>Bridge ID <input name="bridgeId" required /></label>
-              <label>コード（任意） <input name="code" /></label>
-              <button type="submit" class="btn danger">拒否 / token 失効</button>
-            </form>
-            <pre class="result" id="opsResult"></pre>
-          </div>
-        </div>
-        <div class="card">
-          <h2>運用メモ</h2>
-          <ul class="bullets">
-            <li>HTTP は TLS なし。Private ネットワーク + Firewall 限定で運用してください。</li>
-            <li>公開同期: <code>POST /api/public/sync/messages</code> / 発見: UDP <span id="opsDiscoveryPort">42888</span></li>
-            <li>管理者キーは <code>%USERPROFILE%\.relay\admin.key</code> または環境変数に保存されます（画面には表示しません）。</li>
-            <li>Health: <a href="/api/health" target="_blank" rel="noopener">/api/health</a></li>
-          </ul>
-        </div>
-      </section>
-    </main>
-
-    <footer class="footer">
-      <span id="footerStatus">接続確認中…</span>
-      <span id="footerClock"></span>
-    </footer>
+  <div id="setup" class="setup" role="dialog" aria-modal="true" aria-labelledby="setupTitle">
+    <form id="setupForm" class="setup-card">
+      <div class="wordmark" aria-hidden="true">R</div>
+      <p class="eyebrow">STAFF ONLY</p>
+      <h1 id="setupTitle">Relay 救助拠点を開始</h1>
+      <p>対象地域は <strong>広島県安芸郡府中町</strong> です。運用者共通PINと、このPCの表示名を入力してください。</p>
+      <label>共通PIN（管理者キー）<input id="staffPin" type="password" required autocomplete="current-password"></label>
+      <label>このPCの表示名<input id="nodeId" required maxlength="64" value="fuchu-shelter-pc-1"></label>
+      <button class="button primary" type="submit">運用画面を開く</button>
+      <p class="fine">初回PINは <code>%USERPROFILE%\.relay\admin.key</code> にあります。PINはこのタブを閉じると消去されます。</p>
+    </form>
   </div>
 
-  <dialog id="detailDialog">
-    <form method="dialog" class="dialog-head">
-      <h2>メッセージ詳細</h2>
-      <button type="submit" class="btn secondary">閉じる</button>
-    </form>
-    <div id="detailBody" class="detail-body"></div>
-  </dialog>
+  <div id="criticalAlert" class="critical-alert hidden" role="alertdialog" aria-modal="true">
+    <div class="critical-card">
+      <p class="eyebrow">最優先</p>
+      <h2>命の危険があるSOSを受信</h2>
+      <p id="criticalSummary"></p>
+      <button id="ackCritical" class="button danger" type="button">確認して担当を開始</button>
+    </div>
+  </div>
 
+  <header class="app-header">
+    <div class="brand"><span class="wordmark small" aria-hidden="true">R</span><div><h1>Relay 救助拠点</h1><p>広島県安芸郡府中町</p></div></div>
+    <div class="header-status"><span id="connectionDot" class="dot"></span><span id="connectionLabel">接続確認中</span><span id="staffNodeLabel"></span><button id="lockButton" class="button quiet" type="button">ロック</button></div>
+  </header>
+
+  <aside id="officialAlert" class="official-alert">公式情報を確認中です</aside>
+
+  <nav class="tabs" aria-label="主要画面">
+    <button class="tab active" data-panel="rescue" type="button">救助依頼 <span id="requestCount" class="count">0</span></button>
+    <button class="tab" data-panel="map" type="button">地図</button>
+    <button class="tab" data-panel="official" type="button">公式情報</button>
+    <button class="tab" data-panel="settings" type="button">初期設定</button>
+  </nav>
+
+  <main>
+    <section id="panel-rescue" class="panel active">
+      <div class="rescue-layout">
+        <section class="request-column" aria-labelledby="requestHeading">
+          <div class="section-head"><div><p class="eyebrow">REQUESTS</p><h2 id="requestHeading">救助依頼</h2></div><button id="refreshButton" class="button quiet" type="button">更新</button></div>
+          <div class="filters" role="group" aria-label="救助依頼の絞り込み">
+            <button class="filter active" data-filter="active" type="button">未完了</button>
+            <button class="filter" data-filter="all" type="button">すべて</button>
+          </div>
+          <div id="requestList" class="request-list" aria-live="polite"></div>
+        </section>
+        <section class="map-column" aria-labelledby="mapHeading">
+          <div class="section-head"><div><p class="eyebrow">LOCATION</p><h2 id="mapHeading">府中町 救助地図</h2></div><span id="mapStatus" class="status-chip">地図確認中</span></div>
+          <div id="rescueMap" class="tile-map" aria-label="府中町の地図と救助依頼位置"></div>
+          <p class="attribution">出典：国土地理院「地理院タイル（標準地図）」</p>
+          <div id="selectedDetail" class="detail-card"><p class="empty">左の依頼を選ぶと、正確な位置と状況を表示します。</p></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="panel-map" class="panel">
+      <div class="wide-card">
+        <div class="section-head"><div><p class="eyebrow">OFFLINE MAP</p><h2>府中町オフライン地図</h2></div><button id="prepareMap" class="button primary" type="button">地図をダウンロード</button></div>
+        <p>縮尺13〜15の府中町周辺をPCへ保存します。災害時にインターネットが切れても、保存済み範囲を表示できます。</p>
+        <progress id="mapProgress" max="1" value="0"></progress><p id="mapProgressLabel" class="fine"></p>
+        <div id="fullMap" class="tile-map large" aria-label="府中町オフライン地図"></div>
+        <p class="attribution">出典：国土地理院「地理院タイル（標準地図）」。利用時は国土地理院コンテンツ利用規約に従います。</p>
+      </div>
+    </section>
+
+    <section id="panel-official" class="panel">
+      <div class="wide-card">
+        <p class="eyebrow">OFFICIAL SOURCES ONLY</p><h2>府中町の公式防災情報</h2>
+        <div id="warningDetail" class="warning-detail"></div>
+        <div id="officialSources" class="source-list"></div>
+      </div>
+    </section>
+
+    <section id="panel-settings" class="panel">
+      <div class="wide-card settings-grid">
+        <div><p class="eyebrow">PILOT AREA</p><h2>初期設定</h2><dl><dt>都道府県</dt><dd>広島県</dd><dt>市区町村</dt><dd>安芸郡府中町</dd><dt>このPC</dt><dd id="settingsNode"></dd></dl></div>
+        <div><h3>通信確認</h3><p id="healthStatus">確認中</p><h3>運用ルール</h3><ul><li>画面は避難所スタッフだけが使用</li><li>最初に確認したPCが担当</li><li>完了・取消から30日後に詳細を削除</li><li>一般利用者は避難所を選択しない</li></ul></div>
+      </div>
+    </section>
+  </main>
+
+  <footer><span>Relay v1 Fuchu Pilot</span><span id="lastUpdated">—</span></footer>
   <script src="/app.js"></script>
 </body>
 </html>

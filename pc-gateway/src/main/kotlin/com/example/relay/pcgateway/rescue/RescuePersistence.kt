@@ -21,6 +21,7 @@ interface RescuePersistence {
     fun latestVersion(requestId: String): Int?
     fun quarantine(envelope: QuarantinedRescueEnvelope)
     fun listQuarantined(): List<QuarantinedRescueEnvelope>
+    fun deleteTerminalBefore(cutoffEpochMillis: Long): Int
 }
 
 class InMemoryRescuePersistence : RescuePersistence {
@@ -40,6 +41,14 @@ class InMemoryRescuePersistence : RescuePersistence {
         .filter { it.requestId == requestId }.maxOfOrNull { it.requestVersion }
     @Synchronized override fun quarantine(envelope: QuarantinedRescueEnvelope) { quarantined += envelope }
     @Synchronized override fun listQuarantined(): List<QuarantinedRescueEnvelope> = quarantined.toList()
+    @Synchronized override fun deleteTerminalBefore(cutoffEpochMillis: Long): Int {
+        val before = requests.size
+        val expiredRequestIds = requests.values.filter {
+            it.terminalAtEpochMillis?.let { terminalAt -> terminalAt < cutoffEpochMillis } == true
+        }.mapTo(mutableSetOf()) { it.key.requestId }
+        requests.entries.removeAll { it.key.requestId in expiredRequestIds }
+        return before - requests.size
+    }
 }
 
 /**
@@ -66,6 +75,7 @@ class SqliteRescuePersistence(
                   request_id TEXT NOT NULL, request_version INTEGER NOT NULL,
                   envelope_hash TEXT NOT NULL, envelope_json TEXT NOT NULL, payload_json TEXT NOT NULL,
                   received_at INTEGER NOT NULL, response_status TEXT NOT NULL, receipt_json TEXT NOT NULL,
+                  assigned_node_id TEXT, status_updated_at INTEGER NOT NULL DEFAULT 0, terminal_at INTEGER,
                   PRIMARY KEY(request_id, request_version)
                 )
                 """.trimIndent(),
@@ -98,6 +108,10 @@ class SqliteRescuePersistence(
                 """.trimIndent(),
             )
             statement.execute("CREATE INDEX IF NOT EXISTS idx_rescue_requests_received ON rescue_requests(received_at DESC)")
+            // Migrate databases created before the v1 operator workflow.
+            runCatching { statement.execute("ALTER TABLE rescue_requests ADD COLUMN assigned_node_id TEXT") }
+            runCatching { statement.execute("ALTER TABLE rescue_requests ADD COLUMN status_updated_at INTEGER NOT NULL DEFAULT 0") }
+            runCatching { statement.execute("ALTER TABLE rescue_requests ADD COLUMN terminal_at INTEGER") }
         }
     }
 
@@ -121,13 +135,15 @@ class SqliteRescuePersistence(
 
     override fun insert(request: StoredRescueRequest) = synchronized(lock) {
         connection.prepareStatement(
-            """INSERT INTO rescue_requests(request_id,request_version,envelope_hash,envelope_json,payload_json,received_at,response_status,receipt_json)
-               VALUES(?,?,?,?,?,?,?,?)""",
+            """INSERT INTO rescue_requests(request_id,request_version,envelope_hash,envelope_json,payload_json,received_at,response_status,receipt_json,assigned_node_id,status_updated_at,terminal_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
         ).use { ps ->
             ps.setString(1, request.key.requestId); ps.setInt(2, request.key.requestVersion)
             ps.setString(3, request.envelopeHash); ps.setString(4, json.encodeToString(request.envelope))
             ps.setString(5, json.encodeToString(request.payload)); ps.setLong(6, request.receivedAtEpochMillis)
             ps.setString(7, request.responseStatus.name); ps.setString(8, json.encodeToString(request.receipt))
+            ps.setString(9, request.assignedNodeId); ps.setLong(10, request.statusUpdatedAtEpochMillis)
+            request.terminalAtEpochMillis?.let { ps.setLong(11, it) } ?: ps.setNull(11, java.sql.Types.BIGINT)
             check(ps.executeUpdate() == 1) { "request insert failed" }
         }
         replaceCarriersAndDeliveries(request)
@@ -135,13 +151,15 @@ class SqliteRescuePersistence(
 
     override fun replace(request: StoredRescueRequest) = synchronized(lock) {
         connection.prepareStatement(
-            """UPDATE rescue_requests SET envelope_hash=?,envelope_json=?,payload_json=?,received_at=?,response_status=?,receipt_json=?
+            """UPDATE rescue_requests SET envelope_hash=?,envelope_json=?,payload_json=?,received_at=?,response_status=?,receipt_json=?,assigned_node_id=?,status_updated_at=?,terminal_at=?
                WHERE request_id=? AND request_version=?""",
         ).use { ps ->
             ps.setString(1, request.envelopeHash); ps.setString(2, json.encodeToString(request.envelope))
             ps.setString(3, json.encodeToString(request.payload)); ps.setLong(4, request.receivedAtEpochMillis)
             ps.setString(5, request.responseStatus.name); ps.setString(6, json.encodeToString(request.receipt))
-            ps.setString(7, request.key.requestId); ps.setInt(8, request.key.requestVersion)
+            ps.setString(7, request.assignedNodeId); ps.setLong(8, request.statusUpdatedAtEpochMillis)
+            request.terminalAtEpochMillis?.let { ps.setLong(9, it) } ?: ps.setNull(9, java.sql.Types.BIGINT)
+            ps.setString(10, request.key.requestId); ps.setInt(11, request.key.requestVersion)
             check(ps.executeUpdate() == 1) { "request does not exist" }
         }
         replaceCarriersAndDeliveries(request)
@@ -187,8 +205,18 @@ class SqliteRescuePersistence(
         }
     }
 
+    override fun deleteTerminalBefore(cutoffEpochMillis: Long): Int = synchronized(lock) {
+        connection.prepareStatement(
+            "DELETE FROM rescue_requests WHERE request_id IN " +
+                "(SELECT request_id FROM rescue_requests WHERE terminal_at IS NOT NULL AND terminal_at < ?)",
+        ).use { ps ->
+            ps.setLong(1, cutoffEpochMillis)
+            ps.executeUpdate()
+        }
+    }
+
     private fun findInternal(key: RescueRequestKey): StoredRescueRequest? = connection.prepareStatement(
-        "SELECT envelope_hash,envelope_json,payload_json,received_at,response_status,receipt_json FROM rescue_requests WHERE request_id=? AND request_version=?",
+        "SELECT envelope_hash,envelope_json,payload_json,received_at,response_status,receipt_json,assigned_node_id,status_updated_at,terminal_at FROM rescue_requests WHERE request_id=? AND request_version=?",
     ).use { ps ->
         ps.setString(1, key.requestId); ps.setInt(2, key.requestVersion)
         ps.executeQuery().use { rs ->
@@ -198,6 +226,9 @@ class SqliteRescuePersistence(
                 json.decodeFromString<RescuePayload>(rs.getString(3)), rs.getLong(4),
                 RescueResponseStatus.valueOf(rs.getString(5)), carrierIds(key),
                 json.decodeFromString<SignedShelterReceipt>(rs.getString(6)), deliveryIds(key),
+                assignedNodeId = rs.getString(7),
+                statusUpdatedAtEpochMillis = rs.getLong(8).takeIf { it > 0 } ?: rs.getLong(4),
+                terminalAtEpochMillis = rs.getLong(9).takeIf { !rs.wasNull() },
             )
         }
     }

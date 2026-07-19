@@ -4,6 +4,8 @@ import com.example.relay.rescue.EncryptedRescueEnvelope
 import com.example.relay.rescue.RescueCryptography
 import com.example.relay.rescue.RescueKeyAlgorithm
 import com.example.relay.rescue.RescuePrivateKey
+import com.example.relay.rescue.RescueCondition
+import com.example.relay.rescue.RescueRequestAction
 import com.example.relay.rescue.RescueValidationResult
 import com.example.relay.rescue.ShelterReceiptStatus
 import com.example.relay.rescue.SignedShelterReceipt
@@ -114,10 +116,16 @@ class RescueIntakeService(
                 envelope = envelope,
                 payload = payload,
                 receivedAtEpochMillis = now,
-                responseStatus = RescueResponseStatus.UNCONFIRMED,
+                responseStatus = if (payload.action == RescueRequestAction.CANCELLED) {
+                    RescueResponseStatus.COMPLETED
+                } else {
+                    RescueResponseStatus.UNCONFIRMED
+                },
                 carrierIds = setOf(carrierId),
                 deliveryIds = setOf(courierDeliveryId),
                 receipt = signReceipt(envelope, now),
+                statusUpdatedAtEpochMillis = now,
+                terminalAtEpochMillis = now.takeIf { payload.action == RescueRequestAction.CANCELLED },
             )
             insert(request)
             RescueIngestResult.Accepted(request)
@@ -144,6 +152,11 @@ class RescueIntakeService(
                     responseStatus = request.responseStatus,
                     uniqueCarrierCount = request.uniqueCarrierCount,
                     isLatestVersion = latestVersions[request.key.requestId] == request.key.requestVersion,
+                    assignedNodeId = request.assignedNodeId,
+                    statusUpdatedAtEpochMillis = request.statusUpdatedAtEpochMillis,
+                    isLifeThreatening = request.payload.urgency == com.example.relay.rescue.RescueUrgency.IMMEDIATE ||
+                        RescueCondition.LIFE_THREATENING in request.payload.conditions,
+                    isCancelled = request.payload.action == RescueRequestAction.CANCELLED,
                 )
             }
             .toList()
@@ -161,21 +174,42 @@ class RescueIntakeService(
     fun updateStatus(
         requestId: String,
         status: RescueResponseStatus,
+        operatorNodeId: String = shelterId,
         requestVersion: Int? = null,
     ): RescueStatusUpdateResult {
+        if (!isIdentifier(operatorNodeId)) return RescueStatusUpdateResult.NotFound
         return persistence.transaction {
             val version = requestVersion ?: latestVersion(requestId)
                 ?: return@transaction RescueStatusUpdateResult.NotFound
             val current = find(RescueRequestKey(requestId, version))
                 ?: return@transaction RescueStatusUpdateResult.NotFound
+            if (current.assignedNodeId != null && current.assignedNodeId != operatorNodeId) {
+                return@transaction RescueStatusUpdateResult.AssignedElsewhere(current.assignedNodeId)
+            }
             if (status != current.responseStatus && status !in allowedNextStatuses.getValue(current.responseStatus)) {
                 return@transaction RescueStatusUpdateResult.InvalidTransition(current.responseStatus, status)
             }
-            val updated = if (status == current.responseStatus) current else current.copy(responseStatus = status)
-                .also(::replace)
+            val now = clock.nowEpochMillis()
+            val updated = if (status == current.responseStatus && current.assignedNodeId != null) {
+                current
+            } else {
+                current.copy(
+                    responseStatus = status,
+                    assignedNodeId = current.assignedNodeId ?: operatorNodeId.takeIf {
+                        status != RescueResponseStatus.UNCONFIRMED
+                    },
+                    statusUpdatedAtEpochMillis = now,
+                    terminalAtEpochMillis = now.takeIf { status in terminalStatuses },
+                ).also(::replace)
+            }
             RescueStatusUpdateResult.Updated(updated)
         }
     }
+
+    /** Deletes terminal request plaintext after the v1 30-day retention period. */
+    @Synchronized
+    fun purgeExpiredDetails(retentionMillis: Long = 30L * 24 * 60 * 60 * 1_000): Int =
+        persistence.transaction { deleteTerminalBefore(clock.nowEpochMillis() - retentionMillis) }
 
     @Synchronized
     fun receipt(requestId: String, requestVersion: Int? = null): SignedShelterReceipt? =
@@ -206,6 +240,11 @@ class RescueIntakeService(
         value.all { it.isLetterOrDigit() || it in "-_.:" }
 
     private companion object {
+        val terminalStatuses = setOf(
+            RescueResponseStatus.COMPLETED,
+            RescueResponseStatus.UNABLE,
+            RescueResponseStatus.DUPLICATE,
+        )
         val allowedNextStatuses = mapOf(
             RescueResponseStatus.UNCONFIRMED to setOf(
                 RescueResponseStatus.CONFIRMED,

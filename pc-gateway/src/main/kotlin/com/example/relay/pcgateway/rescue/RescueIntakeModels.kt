@@ -3,7 +3,9 @@ package com.example.relay.pcgateway.rescue
 import com.example.relay.rescue.EncryptedRescueEnvelope
 import com.example.relay.rescue.RescuePayload
 import com.example.relay.rescue.SignedShelterReceipt
+import kotlinx.serialization.Serializable
 
+@Serializable
 enum class RescueResponseStatus {
     UNCONFIRMED,
     CONFIRMED,
@@ -31,6 +33,10 @@ data class StoredRescueRequest(
      * so receiving the same frame again never inflates the delivery count.
      */
     val deliveryIds: Set<String> = emptySet(),
+    /** First staff node that confirmed the request. Shared storage makes this a first-writer claim. */
+    val assignedNodeId: String? = null,
+    val statusUpdatedAtEpochMillis: Long = receivedAtEpochMillis,
+    val terminalAtEpochMillis: Long? = null,
 ) {
     val uniqueCarrierCount: Int get() = carrierIds.size
     val uniqueDeliveryCount: Int get() = deliveryIds.size
@@ -51,6 +57,10 @@ data class RescueRequestSummary(
     val responseStatus: RescueResponseStatus,
     val uniqueCarrierCount: Int,
     val isLatestVersion: Boolean,
+    val assignedNodeId: String? = null,
+    val statusUpdatedAtEpochMillis: Long,
+    val isLifeThreatening: Boolean,
+    val isCancelled: Boolean,
 )
 
 data class QuarantinedRescueEnvelope(
@@ -93,4 +103,5 @@ sealed interface RescueStatusUpdateResult {
         val current: RescueResponseStatus,
         val requested: RescueResponseStatus,
     ) : RescueStatusUpdateResult
+    data class AssignedElsewhere(val assignedNodeId: String) : RescueStatusUpdateResult
 }

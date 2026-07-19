@@ -6,6 +6,12 @@ import com.example.relay.gateway.protocol.ReceiptResponse
 import com.example.relay.gateway.protocol.SyncMessagesRequest
 import com.example.relay.gateway.protocol.SyncMessagesResponse
 import com.example.relay.rescue.ShelterPublicKeyManifest
+import com.example.relay.pcgateway.rescue.RescueIntakeService
+import com.example.relay.pcgateway.rescue.RescueOperatorListResponse
+import com.example.relay.pcgateway.rescue.RescueStatusChangeRequest
+import com.example.relay.pcgateway.rescue.RescueStatusChangeResponse
+import com.example.relay.pcgateway.rescue.RescueStatusUpdateResult
+import com.example.relay.pcgateway.rescue.toOperatorRequest
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -61,6 +67,9 @@ fun Application.gatewayModule(
     rescueManifest: ShelterPublicKeyManifest? = null,
     /** True only after startup verified a root-signed manifest against this PC's local keys. */
     rescueBleReady: Boolean = false,
+    rescueIntakeService: RescueIntakeService? = null,
+    offlineMap: GsiTileCache? = null,
+    officialInformation: OfficialInformationService? = null,
     anonymousLimiter: AnonymousIngressRateLimiter = AnonymousIngressRateLimiter(
         config.maxAnonymousRequestsPerMinute,
         config.maxAnonymousMessagesPerMinute,
@@ -85,6 +94,94 @@ fun Application.gatewayModule(
             val manifest = rescueManifest ?: return@get call.respond(HttpStatusCode.NotFound)
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
             call.respond(manifest)
+        }
+        get("/api/rescue/requests") {
+            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
+                return@get call.respond(HttpStatusCode.Unauthorized)
+            }
+            val service = rescueIntakeService ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
+            service.purgeExpiredDetails()
+            val items = service.list(latestOnly = true).mapNotNull { summary ->
+                service.detail(summary.requestId, summary.requestVersion)?.toOperatorRequest()
+            }.sortedWith(
+                compareByDescending<com.example.relay.pcgateway.rescue.RescueOperatorRequest> {
+                    it.responseStatus == com.example.relay.pcgateway.rescue.RescueResponseStatus.UNCONFIRMED &&
+                        it.urgency == "IMMEDIATE" && it.action != "CANCELLED"
+                }.thenByDescending { it.urgency == "IMMEDIATE" }
+                    .thenByDescending { it.receivedAtEpochMillis },
+            )
+            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            call.respond(RescueOperatorListResponse(System.currentTimeMillis(), items = items))
+        }
+        get("/api/rescue/requests/{id}") {
+            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
+                return@get call.respond(HttpStatusCode.Unauthorized)
+            }
+            val service = rescueIntakeService ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
+            val id = call.parameters["id"] ?: return@get call.respond(HttpStatusCode.BadRequest)
+            val version = call.request.queryParameters["version"]?.toIntOrNull()
+            val detail = service.detail(id, version) ?: return@get call.respond(HttpStatusCode.NotFound)
+            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            call.respond(detail.toOperatorRequest())
+        }
+        post("/api/rescue/requests/{id}/status") {
+            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
+                return@post call.respond(HttpStatusCode.Unauthorized)
+            }
+            val service = rescueIntakeService ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val request = call.receive<RescueStatusChangeRequest>()
+            when (val result = service.updateStatus(id, request.status, request.operatorNodeId)) {
+                is RescueStatusUpdateResult.Updated -> call.respond(
+                    RescueStatusChangeResponse(
+                        updated = true,
+                        status = result.request.responseStatus,
+                        assignedNodeId = result.request.assignedNodeId,
+                    ),
+                )
+                RescueStatusUpdateResult.NotFound -> call.respond(
+                    HttpStatusCode.NotFound,
+                    RescueStatusChangeResponse(false, reason = "not_found"),
+                )
+                is RescueStatusUpdateResult.InvalidTransition -> call.respond(
+                    HttpStatusCode.Conflict,
+                    RescueStatusChangeResponse(false, result.current, reason = "invalid_transition"),
+                )
+                is RescueStatusUpdateResult.AssignedElsewhere -> call.respond(
+                    HttpStatusCode.Conflict,
+                    RescueStatusChangeResponse(false, assignedNodeId = result.assignedNodeId, reason = "assigned_elsewhere"),
+                )
+            }
+        }
+        get("/api/map/status") {
+            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
+                return@get call.respond(HttpStatusCode.Unauthorized)
+            }
+            val map = offlineMap ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
+            call.respond(map.status())
+        }
+        post("/api/map/prepare") {
+            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
+                return@post call.respond(HttpStatusCode.Unauthorized)
+            }
+            val map = offlineMap ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            map.prepare()
+            call.respond(HttpStatusCode.Accepted, map.status())
+        }
+        get("/api/map/tiles/{z}/{x}/{y}") {
+            val map = offlineMap ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
+            val z = call.parameters["z"]?.toIntOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
+            val x = call.parameters["x"]?.toIntOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
+            val y = call.parameters["y"]?.removeSuffix(".png")?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest)
+            val bytes = map.tile(z, x, y) ?: return@get call.respond(HttpStatusCode.NotFound)
+            call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=86400")
+            call.respondBytes(bytes, ContentType.Image.PNG)
+        }
+        get("/api/official-info") {
+            val information = officialInformation ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
+            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            call.respond(information.current())
         }
         get("/api/pair/code") {
             if (call.request.headers["X-Admin-Key"] != config.adminKey) {

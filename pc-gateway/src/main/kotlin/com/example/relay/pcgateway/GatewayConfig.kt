@@ -22,6 +22,10 @@ data class GatewayConfig(
     val shelterId: String = System.getenv("RELAY_SHELTER_ID") ?: gatewayId,
     val rescueKeyPath: String = System.getenv("RELAY_RESCUE_KEY_FILE")
         ?: File(System.getProperty("user.home"), ".relay/rescue-keys.json").path,
+    val offlineMapPath: String = System.getenv("RELAY_OFFLINE_MAP_DIR")
+        ?: File(System.getProperty("user.home"), ".relay/maps/gsi-fuchu").path,
+    val officialInfoCachePath: String = System.getenv("RELAY_OFFICIAL_INFO_CACHE")
+        ?: File(System.getProperty("user.home"), ".relay/official/jma-warning-340000.json").path,
     /**
      * Public regional root used to verify the shelter's signed BLE identity.
      *
