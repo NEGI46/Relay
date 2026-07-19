@@ -37,6 +37,7 @@ MeshtasticとBPv7はRelay coreへ直接取り込まず、外部プロセス／ex
 - Toxiproxy／障害注入: `test-lab/toxiproxy/`, `test-lab/fault_injection/`
 - Maestro UIフロー: `maestro/`
 - Gateway・配布fixture: `tests/`, `tests/gateway-recovery/`, `tests/distribution/`
+- 実装境界の安全契約: `scripts/verify-implementation-contracts.ps1`
 
 ### 運用・配布
 
@@ -51,8 +52,9 @@ MeshtasticとBPv7はRelay coreへ直接取り込まず、外部プロセス／ex
 1. 実装対象のモジュールと契約文書を確認する。
 2. 最小のunit/host testを追加する。
 3. `test-lab/run-host-checks.ps1` と関係するGradle taskを実行する。
-4. 署名・配布・外部境界はfixtureとfail-closed testを実行する。
-5. 機能単位でコミットし、実機未検証を文書に残す。
+4. `scripts/verify-implementation-contracts.ps1` で暗号化・権限・署名配線を確認する。
+5. 署名・配布・外部境界はfixtureとfail-closed testを実行する。
+6. 機能単位でコミットし、実機未検証を文書に残す。
 
 ## コミットしないもの
 
