@@ -59,6 +59,9 @@ data class RelayUiState(
     val debugEvents: List<String> = emptyList(),
     /** Last PC Gateway sync outcome (from settings store; public or authenticated path). */
     val gatewayLastResult: String? = null,
+    val gatewayDiscoveredIp: String? = null,
+    val gatewayDiscoveryResult: String? = null,
+    val gatewayDeliveryResult: String? = null,
     /** Last internet priority-pull summary for home status (optional). */
     val internetSyncLabel: String? = null,
 )
@@ -150,6 +153,9 @@ class RelayViewModel(
                     peers = runtime.peers,
                     debugEvents = runtime.debugEvents,
                     gatewayLastResult = gateway.lastSyncResult,
+                    gatewayDiscoveredIp = gateway.lastDiscoveredGatewayIp,
+                    gatewayDiscoveryResult = gateway.lastDiscoveryResult,
+                    gatewayDeliveryResult = gateway.lastDeliveryResult,
                 )
             }
         }
@@ -160,7 +166,12 @@ class RelayViewModel(
                 val gateway = gatewaySettingsStore.load()
                 _gatewaySettings.value = gateway
                 if (_uiState.value.gatewayLastResult != gateway.lastSyncResult) {
-                    _uiState.value = _uiState.value.copy(gatewayLastResult = gateway.lastSyncResult)
+                    _uiState.value = _uiState.value.copy(
+                        gatewayLastResult = gateway.lastSyncResult,
+                        gatewayDiscoveredIp = gateway.lastDiscoveredGatewayIp,
+                        gatewayDiscoveryResult = gateway.lastDiscoveryResult,
+                        gatewayDeliveryResult = gateway.lastDeliveryResult,
+                    )
                 }
             }
         }
