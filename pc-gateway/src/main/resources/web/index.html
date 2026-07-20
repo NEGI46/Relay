@@ -56,7 +56,7 @@
         </section>
         <section class="map-column" aria-labelledby="mapHeading">
           <div class="section-head"><div><p class="eyebrow">LOCATION</p><h2 id="mapHeading">府中町 救助地図</h2></div><span id="mapStatus" class="status-chip">地図確認中</span></div>
-          <div id="rescueMap" class="tile-map" aria-label="府中町の地図と救助依頼位置"></div>
+          <div id="rescueMap" class="tile-map" aria-label="府中町の地図と救助依頼位置。ボタン、マウスホイール、ピンチ、矢印キーで操作できます"></div>
           <p class="attribution">出典：国土地理院「地理院タイル（標準地図）」</p>
           <div id="selectedDetail" class="detail-card"><p class="empty">左の依頼を選ぶと、正確な位置と状況を表示します。</p></div>
         </section>
@@ -66,9 +66,9 @@
     <section id="panel-map" class="panel">
       <div class="wide-card">
         <div class="section-head"><div><p class="eyebrow">OFFLINE MAP</p><h2>府中町オフライン地図</h2></div><button id="prepareMap" class="button primary" type="button">地図をダウンロード</button></div>
-        <p>縮尺13〜15の府中町周辺をPCへ保存します。災害時にインターネットが切れても、保存済み範囲を表示できます。</p>
+        <p>縮尺13〜15の府中町周辺をPCへ保存します。災害時にインターネットが切れても、保存済みタイルだけで縮尺18まで拡大できます。ボタン、マウスホイール、ダブルクリック、ピンチ、ドラッグ、キーボードに対応しています。</p>
         <progress id="mapProgress" max="1" value="0"></progress><p id="mapProgressLabel" class="fine"></p>
-        <div id="fullMap" class="tile-map large" aria-label="府中町オフライン地図"></div>
+        <div id="fullMap" class="tile-map large" aria-label="府中町オフライン地図。ボタン、マウスホイール、ピンチ、矢印キーで操作できます"></div>
         <p class="attribution">出典：国土地理院「地理院タイル（標準地図）」。利用時は国土地理院コンテンツ利用規約に従います。</p>
       </div>
     </section>

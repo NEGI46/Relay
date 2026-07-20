@@ -6,6 +6,8 @@
 
 `pc-gateway/GsiTileCache` stores only the Fuchu Town bounding box at zoom 13–15 from the Geospatial Information Authority of Japan standard-tile endpoint. The operator starts the bounded background download from the initial-settings tab. Requests outside the prepared tile set are rejected, preventing the public local tile route from becoming an arbitrary proxy or unbounded disk writer. The UI always displays GSI attribution.
 
+The PC map keeps independent center/zoom state for the rescue and full-map views. It supports control buttons, mouse wheel, double click, keyboard, pointer dragging, and touch pinch. Zoom 16–18 is an offline overzoom of the cached zoom-15 tiles: it improves close-range marker inspection without requesting uncached tiles or turning the route into a network proxy. Panning is clamped to the pilot municipality bounds.
+
 Before real deployment, the operator must confirm the current GSI content terms and whether the planned use requires a Survey Act procedure. This cache is separate from the signed PMTiles contract below and must not be presented as a cryptographically signed map pack.
 
 `composeApp` has a verification boundary in `OfflineMapPackVerifier`. A local

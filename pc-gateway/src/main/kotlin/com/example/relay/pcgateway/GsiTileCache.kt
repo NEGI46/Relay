@@ -20,6 +20,9 @@ data class OfflineMapStatus(
     val state: String,
     val cachedTiles: Int,
     val expectedTiles: Int,
+    val minZoom: Int = MIN_TILE_ZOOM,
+    val maxNativeZoom: Int = MAX_TILE_ZOOM,
+    val maxZoom: Int = MAX_DISPLAY_ZOOM,
     val lastError: String? = null,
     val attribution: String = "国土地理院（地理院タイル・標準地図）",
 )
@@ -37,17 +40,20 @@ class GsiTileCache(private val root: Path) : AutoCloseable {
 
     init { Files.createDirectories(root) }
 
-    fun status(): OfflineMapStatus = OfflineMapStatus(
-        state = when {
-            preparing -> "preparing"
-            cachedTileCount() >= targets.size -> "ready"
-            cachedTileCount() > 0 -> "partial"
-            else -> "not_ready"
-        },
-        cachedTiles = cachedTileCount(),
-        expectedTiles = targets.size,
-        lastError = lastError,
-    )
+    fun status(): OfflineMapStatus {
+        val cachedTiles = cachedTileCount()
+        return OfflineMapStatus(
+            state = when {
+                preparing -> "preparing"
+                cachedTiles >= targets.size -> "ready"
+                cachedTiles > 0 -> "partial"
+                else -> "not_ready"
+            },
+            cachedTiles = cachedTiles,
+            expectedTiles = targets.size,
+            lastError = lastError,
+        )
+    }
 
     fun prepare(): Boolean = synchronized(this) {
         if (preparing) return false
@@ -108,7 +114,7 @@ class GsiTileCache(private val root: Path) : AutoCloseable {
     private fun cachedTileCount(): Int = targets.count { (z, x, y) -> Files.isRegularFile(tilePath(z, x, y)) }
 
     private fun buildTargets(): List<Triple<Int, Int, Int>> = buildList {
-        for (zoom in 13..15) {
+        for (zoom in MIN_TILE_ZOOM..MAX_TILE_ZOOM) {
             val xMin = longitudeToTileX(FUCHU_WEST, zoom)
             val xMax = longitudeToTileX(FUCHU_EAST, zoom)
             val yMin = latitudeToTileY(FUCHU_NORTH, zoom)
@@ -134,3 +140,13 @@ class GsiTileCache(private val root: Path) : AutoCloseable {
         }
     }
 }
+
+private const val MIN_TILE_ZOOM = 13
+private const val MAX_TILE_ZOOM = 15
+
+/**
+ * The browser can overzoom the highest-resolution cached tiles without performing
+ * any network requests. This keeps labels and rescue markers usable at close range
+ * while the bounded offline cache remains small enough for the pilot deployment.
+ */
+private const val MAX_DISPLAY_ZOOM = 18
