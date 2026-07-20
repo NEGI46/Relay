@@ -57,10 +57,16 @@ class BackupRecoverySmoke(unittest.TestCase):
             root = Path(td)
             identity = root / "key.txt"
             subprocess.run([age_keygen], check=True, capture_output=True, text=True, stdout=identity.open("w"))
-            try:
-                recipient = next(line.split(":", 1)[1].strip() for line in identity.read_text().splitlines() if line.startswith("# public key:"))
-            except StopIteration:
-                return
+            recipient = next(
+                (
+                    line.split(":", 1)[1].strip()
+                    for line in identity.read_text().splitlines()
+                    if line.startswith("# public key:")
+                ),
+                None,
+            )
+            if not recipient:
+                self.fail("age-keygen output did not include a public key")
             plain, encrypted, restored = root / "plain", root / "plain.age", root / "restored"
             plain.write_bytes(b"encrypted backup payload")
             subprocess.run([age, "-r", recipient, "-o", str(encrypted), str(plain)], check=True)
