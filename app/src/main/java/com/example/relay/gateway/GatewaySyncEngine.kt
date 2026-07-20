@@ -109,6 +109,7 @@ class GatewaySyncEngine(
                     }
                     ?: return@withLock GatewaySyncResult.Deferred("gateway_not_found").also {
                         settingsStore.recordDiscovery(null, "udp_timeout_no_fallback")
+                        settingsStore.recordDelivery("not_sent:gateway_not_found")
                         settingsStore.record("gateway_not_found")
                     }
                 settingsStore.recordDiscovery(gateway.host, if (gateway.gatewayId == "manual-fallback") "manual_fallback" else "beacon_received")
@@ -176,12 +177,14 @@ class GatewaySyncEngine(
                 receipts.size,
             )
         } catch (error: GatewayHttpException) {
+            settingsStore.recordDelivery("failed:http_${error.status}")
             settingsStore.record("http_${error.status}")
             GatewaySyncResult.Failed(
                 "http_${error.status}",
                 retryable = error.status >= 500 || error.status == 429,
             )
         } catch (error: Exception) {
+            settingsStore.recordDelivery("failed:network_error")
             settingsStore.record("network_error")
             GatewaySyncResult.Failed("network_error")
         }
