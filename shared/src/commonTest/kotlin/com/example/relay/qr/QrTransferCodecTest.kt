@@ -17,6 +17,16 @@ class QrTransferCodecTest {
     }
 
     @Test
+    fun maximumChunkSizeRoundTrips() {
+        val largePayload = ByteArray(4_097) { (it % 251).toByte() }
+        val frames = QrTransferCodec.encode("transfer-max", largePayload, 10_000, maxChunkBytes = 4_096)
+
+        val accepted = assertIs<QrTransferDecodeResult.Accepted>(QrTransferCodec.assemble(frames, 1_000))
+
+        assertContentEquals(largePayload, accepted.payload)
+    }
+
+    @Test
     fun missingFrameIsRejected() {
         val frames = QrTransferCodec.encode("transfer-1", payload, 10_000, maxChunkBytes = 128)
         assertEquals(QrTransferRejection.MISSING_FRAME, (QrTransferCodec.assemble(frames.drop(1), 1_000) as QrTransferDecodeResult.Rejected).reason)
