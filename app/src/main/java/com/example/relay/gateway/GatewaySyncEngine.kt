@@ -103,9 +103,15 @@ class GatewaySyncEngine(
                 client.push(settings, token!!, messages)
             } else {
                 val gateway = discovery?.discover()
+                    ?: settings.host.trim().takeIf(::isValidLanIpv4)?.let { host ->
+                        settingsStore.recordDiscovery(host, "manual_fallback")
+                        DiscoveredGateway(host, settings.port, "manual-fallback")
+                    }
                     ?: return@withLock GatewaySyncResult.Deferred("gateway_not_found").also {
+                        settingsStore.recordDiscovery(null, "udp_timeout_no_fallback")
                         settingsStore.record("gateway_not_found")
                     }
+                settingsStore.recordDiscovery(gateway.host, if (gateway.gatewayId == "manual-fallback") "manual_fallback" else "beacon_received")
                 if (localBridgeId.isBlank()) {
                     return@withLock GatewaySyncResult.Deferred("bridge_identity_missing").also {
                         settingsStore.record("bridge_identity_missing")
@@ -160,11 +166,11 @@ class GatewaySyncEngine(
                     .filter { it.reason.isTerminalGatewayRejection() }
                     .mapTo(linkedSetOf()) { it.messageId },
             )
-            settingsStore.record(
-                "sent=${push.response.acceptedMessageIds.size}, " +
-                    "duplicate=${push.response.duplicateMessageIds.size}, " +
-                    "receipts=${receipts.size}",
-            )
+            val deliverySummary = "sent=${push.response.acceptedMessageIds.size}, " +
+                "duplicate=${push.response.duplicateMessageIds.size}, " +
+                "receipts=${receipts.size}"
+            settingsStore.recordDelivery("success:$deliverySummary")
+            settingsStore.record(deliverySummary)
             GatewaySyncResult.Completed(
                 push.response.acceptedMessageIds.size + push.response.duplicateMessageIds.size,
                 receipts.size,
@@ -265,3 +271,10 @@ private fun String.isTerminalGatewayRejection(): Boolean = this in setOf(
     "invalid_status_change",
     "messageId collision",
 )
+
+
+private fun isValidLanIpv4(value: String): Boolean {
+    val octets = value.split('.')
+    return octets.size == 4 && octets.all { it.toIntOrNull()?.let { octet -> octet in 0..255 } == true } &&
+        value != "0.0.0.0" && value != "255.255.255.255"
+}
