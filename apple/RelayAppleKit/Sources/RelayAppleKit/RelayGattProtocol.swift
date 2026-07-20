@@ -4,10 +4,30 @@ import Foundation
 /// The fixed UUIDs exposed by the Windows Relay BLE bridge.  They are a wire
 /// contract shared with `pc-ble-bridge`; changing them needs a protocol bump.
 public enum RelayGattContract {
-    public static let service = UUID(uuidString: "1f7f7e90-4e0a-4b0b-8fad-1e3c5e3f4a01")!
-    public static let identity = UUID(uuidString: "1f7f7e91-4e0a-4b0b-8fad-1e3c5e3f4a01")!
-    public static let uplink = UUID(uuidString: "1f7f7e92-4e0a-4b0b-8fad-1e3c5e3f4a01")!
-    public static let downlink = UUID(uuidString: "1f7f7e93-4e0a-4b0b-8fad-1e3c5e3f4a01")!
+    public static let service: UUID = {
+        guard let uuid = UUID(uuidString: "1f7f7e90-4e0a-4b0b-8fad-1e3c5e3f4a01") else {
+            fatalError("Invalid UUID string: 1f7f7e90-4e0a-4b0b-8fad-1e3c5e3f4a01")
+        }
+        return uuid
+    }()
+    public static let identity: UUID = {
+        guard let uuid = UUID(uuidString: "1f7f7e91-4e0a-4b0b-8fad-1e3c5e3f4a01") else {
+            fatalError("Invalid UUID string: 1f7f7e91-4e0a-4b0b-8fad-1e3c5e3f4a01")
+        }
+        return uuid
+    }()
+    public static let uplink: UUID = {
+        guard let uuid = UUID(uuidString: "1f7f7e92-4e0a-4b0b-8fad-1e3c5e3f4a01") else {
+            fatalError("Invalid UUID string: 1f7f7e92-4e0a-4b0b-8fad-1e3c5e3f4a01")
+        }
+        return uuid
+    }()
+    public static let downlink: UUID = {
+        guard let uuid = UUID(uuidString: "1f7f7e93-4e0a-4b0b-8fad-1e3c5e3f4a01") else {
+            fatalError("Invalid UUID string: 1f7f7e93-4e0a-4b0b-8fad-1e3c5e3f4a01")
+        }
+        return uuid
+    }()
 }
 
 public enum RelayGattFrameKind: UInt8, Sendable {
