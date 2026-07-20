@@ -39,11 +39,16 @@ if (-not $env:RELAY_GATEWAY_DB) {
 }
 if (-not $env:RELAY_GATEWAY_ID) { $env:RELAY_GATEWAY_ID = 'pc-gateway-local' }
 if (-not $env:RELAY_GATEWAY_LAN_DISCOVERY) { $env:RELAY_GATEWAY_LAN_DISCOVERY = 'true' }
+if (-not $env:RELAY_RESCUE_KEY_FILE) { $env:RELAY_RESCUE_KEY_FILE = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'RelayPcGateway\rescue-keys.json')) }
+if (-not $env:RELAY_RESCUE_SIGNED_MANIFEST_FILE) { $env:RELAY_RESCUE_SIGNED_MANIFEST_FILE = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'RelayPcGateway\rescue-manifest.json')) }
+if (-not $env:RELAY_RESCUE_REGIONAL_ROOT_BUNDLE_FILE) { $env:RELAY_RESCUE_REGIONAL_ROOT_BUNDLE_FILE = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'RelayPcGateway\regional-root.json')) }
 
 $dbDir = Split-Path -Parent $env:RELAY_GATEWAY_DB
 if ($dbDir -and -not (Test-Path -LiteralPath $dbDir)) {
     New-Item -ItemType Directory -Force -Path $dbDir | Out-Null
 }
+$rescueDir = Split-Path -Parent $env:RELAY_RESCUE_KEY_FILE
+if ($rescueDir -and -not (Test-Path -LiteralPath $rescueDir)) { New-Item -ItemType Directory -Force -Path $rescueDir | Out-Null }
 
 $bin = Join-Path $Root 'pc-gateway\build\install\pc-gateway\bin\pc-gateway.bat'
 if (-not (Test-Path -LiteralPath $bin)) {

@@ -10,12 +10,15 @@ class DebugShelterManifestBootstrap(
     private val saveManifest: (ShelterPublicKeyManifest, String) -> Unit,
 ) {
     suspend fun enrollFromLocalTestGateway(): Boolean {
-        if (loadExisting() != null) return true
-        val gateway = discovery.discover() ?: return false
-        val manifest = runCatching { client.fetch(gateway.host, gateway.port) }.getOrNull() ?: return false
+        val existing = loadExisting()
+        val gateway = discovery.discover() ?: return existing != null
+        val manifest = runCatching { client.fetch(gateway.host, gateway.port) }.getOrNull()
+            ?: return existing != null
+        val fingerprint = manifest.fingerprint()
+        if (existing?.manifestFingerprint == fingerprint) return true
         return runCatching {
-            // DEBUG-only trust-on-first-use. Release builds use a regionally signed directory.
-            saveManifest(manifest, manifest.fingerprint())
+            // DEBUG-only trust-on-first-use. Always refresh when the local test Gateway rotates keys.
+            saveManifest(manifest, fingerprint)
             true
         }.getOrDefault(false)
     }

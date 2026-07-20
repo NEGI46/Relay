@@ -8,6 +8,8 @@ import java.util.Base64
 import java.util.UUID
 
 data class GatewayConfig(
+    val version: String = System.getenv("RELAY_VERSION") ?: "1.0.0",
+    val buildSha: String = System.getenv("GIT_COMMIT") ?: "unknown",
     /**
      * Bind on LAN by default. Operators must restrict exposure with the OS firewall
      * (Windows Private profile / macOS pf or Application Firewall).
@@ -39,6 +41,8 @@ data class GatewayConfig(
     val rescueSignedManifestPath: String? = System.getenv("RELAY_RESCUE_SIGNED_MANIFEST_FILE")
         ?.trim()
         ?.takeIf { it.isNotEmpty() },
+    val rescueRecipientKeyId: String? = System.getenv("RELAY_RESCUE_RECIPIENT_KEY_ID")?.trim()?.takeIf { it.isNotEmpty() },
+    val rescueManifestFingerprint: String? = System.getenv("RELAY_RESCUE_MANIFEST_FINGERPRINT")?.trim()?.takeIf { it.isNotEmpty() },
     /** Separate loopback-only listener used exclusively by the local Windows BLE sidecar. */
     val bleBridgeIngressHost: String = "127.0.0.1",
     val bleBridgeIngressPort: Int = (System.getenv("RELAY_BLE_BRIDGE_PORT") ?: "18081").toIntOrNull()

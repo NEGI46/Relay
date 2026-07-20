@@ -47,6 +47,14 @@ import io.ktor.server.routing.routing
     val lanDiscoveryPort: Int = 42888,
     /** Fail-closed until an authenticated local BLE bridge heartbeat is wired. */
     val bleBridgeStatus: String = "unavailable",
+    val version: String = "unknown",
+    val buildSha: String = "unknown",
+    val shelterId: String = "unknown",
+    val recipientKeyId: String? = null,
+    val manifestFingerprint: String? = null,
+    val rescueIngressReady: Boolean = false,
+    val rescueKeyPath: String? = null,
+    val runtimeUser: String = System.getProperty("user.name", "unknown"),
 )
 
 @Serializable
@@ -90,6 +98,13 @@ fun Application.gatewayModule(
                     anonymousIngress = config.anonymousIngressEnabled,
                     lanDiscoveryPort = config.lanDiscoveryPort,
                     bleBridgeStatus = if (rescueBleReady) "awaiting_sidecar" else "not_ready",
+                    version = config.version,
+                    buildSha = config.buildSha,
+                    shelterId = config.shelterId,
+                    recipientKeyId = config.rescueRecipientKeyId,
+                    manifestFingerprint = config.rescueManifestFingerprint,
+                    rescueIngressReady = rescueIntakeService != null,
+                    rescueKeyPath = config.rescueKeyPath,
                 ),
             )
         }
