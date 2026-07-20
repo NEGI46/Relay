@@ -24,6 +24,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private const val TEST_GATEWAY_TOKEN = "token"
+
 class GatewaySyncEngineTest {
     @Test fun `successful PC save response creates local Gateway Receipt and suppresses future uploads`() = runTest {
         val repository = InMemoryMessageRepository()
@@ -32,7 +34,7 @@ class GatewaySyncEngineTest {
         val settings = FakeSettings(GatewaySettings("127.0.0.1", 8080, "gateway", "bridge", enabled = true, automaticSync = true))
         val pending = FakePending()
         val client = FakeClient()
-        val engine = GatewaySyncEngine(repository, settings, FakeCredentials("token"), client, MessagePolicy(clock), backgroundScope, pending)
+        val engine = GatewaySyncEngine(repository, settings, FakeCredentials(TEST_GATEWAY_TOKEN), client, MessagePolicy(clock), backgroundScope, pending)
 
         assertTrue(engine.start(RelayRuntimeSettings(OperatingMode.DRILL, DeviceRole.GATEWAY)))
         assertEquals(GatewaySyncResult.Completed(1, 1), engine.syncOnce())
@@ -159,7 +161,7 @@ class GatewaySyncEngineTest {
         val engine = GatewaySyncEngine(
             repository,
             FakeSettings(GatewaySettings("127.0.0.1", 8080, "gateway", "bridge", enabled = true)),
-            FakeCredentials("token"),
+            FakeCredentials(TEST_GATEWAY_TOKEN),
             client,
             MessagePolicy(MutableClock(NOW)),
             backgroundScope,
@@ -277,7 +279,7 @@ class GatewaySyncEngineTest {
         val engine = GatewaySyncEngine(
             repository,
             FakeSettings(GatewaySettings("127.0.0.1", 8080, "gateway", "bridge", enabled = true, automaticSync = true)),
-            FakeCredentials("token"),
+            FakeCredentials(TEST_GATEWAY_TOKEN),
             client,
             MessagePolicy(MutableClock(NOW)),
             backgroundScope,

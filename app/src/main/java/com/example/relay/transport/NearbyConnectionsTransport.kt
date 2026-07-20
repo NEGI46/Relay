@@ -134,54 +134,66 @@ class NearbyConnectionsTransport(
             is NearbyPlatformEvent.EndpointFound -> addPeer(event.endpointId, event.endpointName)
             is NearbyPlatformEvent.EndpointLost -> removeDiscoveredEndpoint(event.endpointId)
             is NearbyPlatformEvent.ConnectionInitiated -> handleInitiated(event)
-            is NearbyPlatformEvent.ConnectionSucceeded -> endpointToPeer[event.endpointId]?.let { peerId ->
-                if (!connectingPeerIds.remove(peerId)) {
-                    platform.disconnect(event.endpointId)
-                    return@let
-                }
-                cancelConnectionAttemptTimeout(peerId)
-                cancelReconnect(peerId, resetAttempts = true)
-                _state.value = _state.value.copy(
-                    connectedPeerIds = _state.value.connectedPeerIds + peerId,
-                    pendingVerifications = _state.value.pendingVerifications - peerId,
-                )
-                _connectionEvents.emit(ConnectionEvent.Connected(Peer(peerId)))
-            }
-            is NearbyPlatformEvent.ConnectionFailed -> endpointToPeer[event.endpointId]?.let { peerId ->
-                val wasActive = peerId in connectingPeerIds || peerId in _state.value.connectedPeerIds
-                clearPeerConnection(peerId)
-                if (!wasActive) return@let
-                _connectionEvents.emit(ConnectionEvent.Failed(peerId, event.reason))
-                scheduleReconnect(peerId)
-            }
-            is NearbyPlatformEvent.Disconnected -> endpointToPeer[event.endpointId]?.let { peerId ->
-                val wasActive = peerId in connectingPeerIds || peerId in _state.value.connectedPeerIds
-                clearPeerConnection(peerId)
-                if (!wasActive) return@let
-                _connectionEvents.emit(ConnectionEvent.Disconnected(peerId))
-                scheduleReconnect(peerId)
-            }
-            is NearbyPlatformEvent.BytesReceived -> endpointToPeer[event.endpointId]?.let { peerId ->
-                if (peerId !in _state.value.connectedPeerIds) return@let
-                val bytes = event.bytes.copyOf()
-                _receivedPayloads.emit(ReceivedPayload(peerId, bytes))
-                _transportEvents.emit(TransportEvent.PayloadReceived(peerId, bytes.size))
-            }
-            is NearbyPlatformEvent.PayloadTransferSucceeded -> {
-                val outgoing = pendingTransfers.remove(event.payloadId)
-                outgoing?.completion?.complete(SendResult.PayloadTransferCompleted)
-                if (outgoing != null) {
-                    _transportEvents.emit(TransportEvent.PayloadTransferCompleted(outgoing.peerId, event.payloadId))
-                }
-            }
-            is NearbyPlatformEvent.PayloadTransferFailed -> {
-                val outgoing = pendingTransfers.remove(event.payloadId)
-                outgoing?.completion?.complete(SendResult.Failed(event.reason))
-                if (outgoing != null) {
-                    _transportEvents.emit(TransportEvent.PayloadTransferFailed(outgoing.peerId, event.payloadId, event.reason))
-                }
-            }
+            is NearbyPlatformEvent.ConnectionSucceeded -> handleConnectionSucceeded(event.endpointId)
+            is NearbyPlatformEvent.ConnectionFailed -> handleConnectionFailed(event)
+            is NearbyPlatformEvent.Disconnected -> handleDisconnected(event.endpointId)
+            is NearbyPlatformEvent.BytesReceived -> handleBytesReceived(event)
+            is NearbyPlatformEvent.PayloadTransferSucceeded -> handleTransferSucceeded(event)
+            is NearbyPlatformEvent.PayloadTransferFailed -> handleTransferFailed(event)
         }
+    }
+
+    private suspend fun handleConnectionSucceeded(endpointId: String) {
+        val peerId = endpointToPeer[endpointId] ?: return
+        if (!connectingPeerIds.remove(peerId)) {
+            platform.disconnect(endpointId)
+            return
+        }
+        cancelConnectionAttemptTimeout(peerId)
+        cancelReconnect(peerId, resetAttempts = true)
+        _state.value = _state.value.copy(
+            connectedPeerIds = _state.value.connectedPeerIds + peerId,
+            pendingVerifications = _state.value.pendingVerifications - peerId,
+        )
+        _connectionEvents.emit(ConnectionEvent.Connected(Peer(peerId)))
+    }
+
+    private suspend fun handleConnectionFailed(event: NearbyPlatformEvent.ConnectionFailed) {
+        val peerId = endpointToPeer[event.endpointId] ?: return
+        val wasActive = peerId in connectingPeerIds || peerId in _state.value.connectedPeerIds
+        clearPeerConnection(peerId)
+        if (!wasActive) return
+        _connectionEvents.emit(ConnectionEvent.Failed(peerId, event.reason))
+        scheduleReconnect(peerId)
+    }
+
+    private suspend fun handleDisconnected(endpointId: String) {
+        val peerId = endpointToPeer[endpointId] ?: return
+        val wasActive = peerId in connectingPeerIds || peerId in _state.value.connectedPeerIds
+        clearPeerConnection(peerId)
+        if (!wasActive) return
+        _connectionEvents.emit(ConnectionEvent.Disconnected(peerId))
+        scheduleReconnect(peerId)
+    }
+
+    private suspend fun handleBytesReceived(event: NearbyPlatformEvent.BytesReceived) {
+        val peerId = endpointToPeer[event.endpointId] ?: return
+        if (peerId !in _state.value.connectedPeerIds) return
+        val bytes = event.bytes.copyOf()
+        _receivedPayloads.emit(ReceivedPayload(peerId, bytes))
+        _transportEvents.emit(TransportEvent.PayloadReceived(peerId, bytes.size))
+    }
+
+    private suspend fun handleTransferSucceeded(event: NearbyPlatformEvent.PayloadTransferSucceeded) {
+        val outgoing = pendingTransfers.remove(event.payloadId) ?: return
+        outgoing.completion.complete(SendResult.PayloadTransferCompleted)
+        _transportEvents.emit(TransportEvent.PayloadTransferCompleted(outgoing.peerId, event.payloadId))
+    }
+
+    private suspend fun handleTransferFailed(event: NearbyPlatformEvent.PayloadTransferFailed) {
+        val outgoing = pendingTransfers.remove(event.payloadId) ?: return
+        outgoing.completion.complete(SendResult.Failed(event.reason))
+        _transportEvents.emit(TransportEvent.PayloadTransferFailed(outgoing.peerId, event.payloadId, event.reason))
     }
 
     private suspend fun addPeer(endpointId: String, peerId: String, initiateConnection: Boolean = true) {

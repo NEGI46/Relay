@@ -4,10 +4,14 @@ import android.content.Context
 import com.example.relay.rescue.EncryptedRescueEnvelope
 import com.example.relay.rescue.ReceiptApplicationResult
 import com.example.relay.rescue.RegionalShelterDirectoryResolver
+import com.example.relay.rescue.ResolvedShelterKeys
 import com.example.relay.rescue.RescueEnvelopeRepository
 import com.example.relay.rescue.RescueRequestKey
 import com.example.relay.rescue.RescueSubmissionStatus
 import com.example.relay.rescue.ShelterReceiptStatus
+import com.example.relay.rescue.SignedShelterManifest
+import com.example.relay.rescue.SignedShelterReceipt
+import com.example.relay.rescue.StoredRescueRecord
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -67,62 +71,7 @@ class ShelterDeliveryCoordinator(
     private suspend fun deliverTo(advertisement: ShelterAdvertisement) {
         try {
             withTimeout(sessionDeadlineMillis) {
-                client.connect(advertisement).use { session ->
-                    // The BLE bridge has no signed manifest characteristic. It returns the
-                    // exact same compact identity it advertised; resolve that pair only in
-                    // the already verified, locally provisioned directory.
-                    val identity = session.readIdentity()
-                    val manifest = directoryResolver.resolveBeaconIdentity(
-                        identity.signedManifestFingerprint,
-                        clock(),
-                    ) ?: run {
-                        _state.value = ShelterDeliveryState.WaitingToRetry("untrusted shelter advertisement")
-                        return@withTimeout
-                    }
-                    if (!directoryResolver.verifyAdvertisedManifest(manifest, clock())) {
-                        _state.value = ShelterDeliveryState.WaitingToRetry("untrusted shelter advertisement")
-                        return@withTimeout
-                    }
-                    val candidate = repository.all().firstOrNull { record ->
-                        record.state.submissionStatus in DELIVERABLE_STATUSES &&
-                            record.envelope.destinationShelterId == manifest.manifest.shelterId &&
-                            record.envelope.expiresAtEpochMillis > clock()
-                    } ?: return@withTimeout
-                    val encoded = json.encodeToString(EncryptedRescueEnvelope.serializer(), candidate.envelope).encodeToByteArray()
-                    if (encoded.size !in 1..maxEnvelopeBytes) {
-                        _state.value = ShelterDeliveryState.WaitingToRetry("encrypted envelope exceeds BLE limit")
-                        return@withTimeout
-                    }
-                    _state.value = ShelterDeliveryState.Delivering(manifest.manifest.shelterId)
-                    val keys = directoryResolver.resolveForEnvelope(
-                        manifest.regionId, manifest.manifest.shelterId, candidate.envelope.recipientKeyId, clock(),
-                    ) ?: run {
-                        _state.value = ShelterDeliveryState.WaitingToRetry("shelter key does not match envelope")
-                        return@withTimeout
-                    }
-                    val receipt = when (val result = session.submit(
-                        RescueBleSubmission(deliveryIds.idFor(candidate.key), carrierId, encoded),
-                    )) {
-                        is RescueBleSubmissionResult.Accepted -> result.receipt
-                        is RescueBleSubmissionResult.Duplicate -> result.receipt
-                        is RescueBleSubmissionResult.Rejected -> {
-                            _state.value = ShelterDeliveryState.WaitingToRetry("shelter rejected delivery")
-                            return@withTimeout
-                        }
-                    }
-                    when (repository.applyReceipt(candidate.key, receipt, keys.receiptSigningPublicKey)) {
-                        ReceiptApplicationResult.APPLIED -> {
-                            onRepositoryChanged()
-                            if (receipt.receipt.status.isTerminalDeliveryReceipt()) deliveryIds.remove(candidate.key)
-                            _state.value = ShelterDeliveryState.Scanning
-                        }
-                        ReceiptApplicationResult.ALREADY_APPLIED -> {
-                            if (receipt.receipt.status.isTerminalDeliveryReceipt()) deliveryIds.remove(candidate.key)
-                            _state.value = ShelterDeliveryState.Scanning
-                        }
-                        else -> _state.value = ShelterDeliveryState.WaitingToRetry("invalid shelter receipt")
-                    }
-                }
+                client.connect(advertisement).use { deliverSession(it) }
             }
         } catch (_: TimeoutCancellationException) {
             _state.value = ShelterDeliveryState.WaitingToRetry("BLE delivery timed out")
@@ -130,6 +79,93 @@ class ShelterDeliveryCoordinator(
             // Preserve the encrypted record and replay the same idempotency key next time.
             _state.value = ShelterDeliveryState.WaitingToRetry("BLE shelter unavailable")
         }
+    }
+
+    private suspend fun deliverSession(session: ShelterBleSession) {
+        val manifest = resolveTrustedManifest(session) ?: return
+        val candidate = selectCandidate(manifest.manifest.shelterId) ?: return
+        val encoded = encodeCandidate(candidate) ?: return
+        _state.value = ShelterDeliveryState.Delivering(manifest.manifest.shelterId)
+        val keys = resolveEnvelopeKeys(manifest, candidate) ?: return
+        val receipt = submitCandidate(session, candidate, encoded) ?: return
+        applyShelterReceipt(candidate, receipt, keys)
+    }
+
+    private suspend fun resolveTrustedManifest(session: ShelterBleSession): SignedShelterManifest? {
+        // The bridge exposes the same compact identity in its advertisement and read
+        // characteristic. Resolve it only against the already verified local directory.
+        val identity = session.readIdentity()
+        val now = clock()
+        val manifest = directoryResolver.resolveBeaconIdentity(identity.signedManifestFingerprint, now)
+        if (manifest == null || !directoryResolver.verifyAdvertisedManifest(manifest, now)) {
+            _state.value = ShelterDeliveryState.WaitingToRetry("untrusted shelter advertisement")
+            return null
+        }
+        return manifest
+    }
+
+    private fun selectCandidate(shelterId: String): StoredRescueRecord? {
+        val now = clock()
+        return repository.all().firstOrNull { record ->
+            record.state.submissionStatus in DELIVERABLE_STATUSES &&
+                record.envelope.destinationShelterId == shelterId &&
+                record.envelope.expiresAtEpochMillis > now
+        }
+    }
+
+    private fun encodeCandidate(candidate: StoredRescueRecord): ByteArray? {
+        val encoded = json.encodeToString(EncryptedRescueEnvelope.serializer(), candidate.envelope).encodeToByteArray()
+        if (encoded.size in 1..maxEnvelopeBytes) return encoded
+        _state.value = ShelterDeliveryState.WaitingToRetry("encrypted envelope exceeds BLE limit")
+        return null
+    }
+
+    private fun resolveEnvelopeKeys(
+        manifest: SignedShelterManifest,
+        candidate: StoredRescueRecord,
+    ): ResolvedShelterKeys? {
+        val keys = directoryResolver.resolveForEnvelope(
+            manifest.regionId,
+            manifest.manifest.shelterId,
+            candidate.envelope.recipientKeyId,
+            clock(),
+        )
+        if (keys == null) _state.value = ShelterDeliveryState.WaitingToRetry("shelter key does not match envelope")
+        return keys
+    }
+
+    private suspend fun submitCandidate(
+        session: ShelterBleSession,
+        candidate: StoredRescueRecord,
+        encoded: ByteArray,
+    ): SignedShelterReceipt? = when (val result = session.submit(
+        RescueBleSubmission(deliveryIds.idFor(candidate.key), carrierId, encoded),
+    )) {
+        is RescueBleSubmissionResult.Accepted -> result.receipt
+        is RescueBleSubmissionResult.Duplicate -> result.receipt
+        is RescueBleSubmissionResult.Rejected -> null.also {
+            _state.value = ShelterDeliveryState.WaitingToRetry("shelter rejected delivery")
+        }
+    }
+
+    private suspend fun applyShelterReceipt(
+        candidate: StoredRescueRecord,
+        receipt: SignedShelterReceipt,
+        keys: ResolvedShelterKeys,
+    ) {
+        when (repository.applyReceipt(candidate.key, receipt, keys.receiptSigningPublicKey)) {
+            ReceiptApplicationResult.APPLIED -> {
+                onRepositoryChanged()
+                finishReceipt(candidate.key, receipt)
+            }
+            ReceiptApplicationResult.ALREADY_APPLIED -> finishReceipt(candidate.key, receipt)
+            else -> _state.value = ShelterDeliveryState.WaitingToRetry("invalid shelter receipt")
+        }
+    }
+
+    private fun finishReceipt(key: RescueRequestKey, receipt: SignedShelterReceipt) {
+        if (receipt.receipt.status.isTerminalDeliveryReceipt()) deliveryIds.remove(key)
+        _state.value = ShelterDeliveryState.Scanning
     }
 
     private companion object {
