@@ -110,9 +110,6 @@ private class AndroidGattShelterBleSession private constructor(
         } catch (cancelled: CancellationException) {
             runCatching { writeFrames(listOf(RescueBleFrameCodec.abort(sessionId))) }
             throw cancelled
-        } catch (failure: Exception) {
-            runCatching { writeFrames(listOf(RescueBleFrameCodec.abort(sessionId))) }
-            throw failure
         }
     }
 

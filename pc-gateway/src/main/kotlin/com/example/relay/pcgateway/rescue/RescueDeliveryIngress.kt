@@ -32,8 +32,6 @@ class RescueDeliveryIngress(
             GatewayJson.decodeFromString<EncryptedRescueEnvelope>(envelopeBytes.toString(Charsets.UTF_8))
         } catch (_: SerializationException) {
             return RescueIngestResult.Rejected(RescueRejectionCode.MALFORMED_SERIALIZATION)
-        } catch (_: IllegalArgumentException) {
-            return RescueIngestResult.Rejected(RescueRejectionCode.MALFORMED_SERIALIZATION)
         }
         return intakeService.ingest(envelope, carrierId, courierDeliveryId)
     }

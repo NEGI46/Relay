@@ -71,8 +71,6 @@ internal sealed interface MessageCreationUiResult {
 internal suspend fun executeMessageCreation(create: suspend () -> Unit): MessageCreationUiResult = try {
     create()
     MessageCreationUiResult.Success
-} catch (cancelled: CancellationException) {
-    throw cancelled
 } catch (failure: Exception) {
     val reason = when (failure) {
         is LegacyMessageCreationException.InvalidMessage -> "入力内容を確認してください"

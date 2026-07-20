@@ -120,9 +120,6 @@ class ShelterDeliveryCoordinator(
             }
         } catch (_: TimeoutCancellationException) {
             _state.value = ShelterDeliveryState.WaitingToRetry("BLE delivery timed out")
-        } catch (_: Exception) {
-            // Preserve the encrypted record and replay the same idempotency key next time.
-            _state.value = ShelterDeliveryState.WaitingToRetry("BLE shelter unavailable")
         }
     }
 
