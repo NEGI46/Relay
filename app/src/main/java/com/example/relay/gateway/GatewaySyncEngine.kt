@@ -103,9 +103,16 @@ class GatewaySyncEngine(
                 client.push(settings, token!!, messages)
             } else {
                 val gateway = discovery?.discover()
+                    ?: settings.host.trim().takeIf(::isValidLanIpv4)?.let { host ->
+                        settingsStore.recordDiscovery(host, "manual_fallback")
+                        DiscoveredGateway(host, settings.port, "manual-fallback")
+                    }
                     ?: return@withLock GatewaySyncResult.Deferred("gateway_not_found").also {
+                        settingsStore.recordDiscovery(null, "udp_timeout_no_fallback")
+                        settingsStore.recordDelivery("not_sent:gateway_not_found")
                         settingsStore.record("gateway_not_found")
                     }
+                settingsStore.recordDiscovery(gateway.host, if (gateway.gatewayId == "manual-fallback") "manual_fallback" else "beacon_received")
                 if (localBridgeId.isBlank()) {
                     return@withLock GatewaySyncResult.Deferred("bridge_identity_missing").also {
                         settingsStore.record("bridge_identity_missing")
@@ -160,24 +167,29 @@ class GatewaySyncEngine(
                     .filter { it.reason.isTerminalGatewayRejection() }
                     .mapTo(linkedSetOf()) { it.messageId },
             )
-            settingsStore.record(
-                "sent=${push.response.acceptedMessageIds.size}, " +
-                    "duplicate=${push.response.duplicateMessageIds.size}, " +
-                    "receipts=${receipts.size}",
-            )
+            val deliverySummary = "sent=${push.response.acceptedMessageIds.size}, " +
+                "duplicate=${push.response.duplicateMessageIds.size}, " +
+                "receipts=${receipts.size}"
+            settingsStore.recordDelivery("success:$deliverySummary")
+            settingsStore.record(deliverySummary)
             GatewaySyncResult.Completed(
                 push.response.acceptedMessageIds.size + push.response.duplicateMessageIds.size,
                 receipts.size,
             )
-        } catch (error: GatewayHttpException) {
-            settingsStore.record("http_${error.status}")
-            GatewaySyncResult.Failed(
-                "http_${error.status}",
-                retryable = error.status >= 500 || error.status == 429,
-            )
         } catch (error: Exception) {
-            settingsStore.record("network_error")
-            GatewaySyncResult.Failed("network_error")
+            val httpError = error as? GatewayHttpException
+            if (httpError != null) {
+                settingsStore.recordDelivery("failed:http_${httpError.status}")
+                settingsStore.record("http_${httpError.status}")
+                GatewaySyncResult.Failed(
+                    "http_${httpError.status}",
+                    retryable = httpError.status >= 500 || httpError.status == 429,
+                )
+            } else {
+                settingsStore.recordDelivery("failed:network_error")
+                settingsStore.record("network_error")
+                GatewaySyncResult.Failed("network_error")
+            }
         }
     }
 
@@ -265,3 +277,10 @@ private fun String.isTerminalGatewayRejection(): Boolean = this in setOf(
     "invalid_status_change",
     "messageId collision",
 )
+
+
+private fun isValidLanIpv4(value: String): Boolean {
+    val octets = value.split('.')
+    return octets.size == 4 && octets.all { it.toIntOrNull()?.let { octet -> octet in 0..255 } == true } &&
+        value != "0.0.0.0" && value != "255.255.255.255"
+}

@@ -1,5 +1,7 @@
 package com.example.relay.gateway
 
+import android.content.Context
+import android.net.wifi.WifiManager
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
@@ -20,59 +22,69 @@ private data class AndroidGatewayLanAnnouncement(
     val receiptTrust: String = "UNVERIFIED",
 )
 
+data class GatewayDiscoveryDiagnostic(val gatewayIp: String?, val result: String)
+
 interface GatewayDiscovery {
-    /**
-     * Wait for a LAN beacon. Default timeout covers at least one PC beacon interval (5s).
-     */
     suspend fun discover(timeoutMs: Int = 6_000): DiscoveredGateway?
 }
 
-/**
- * Dependency-free discovery matching the PC Gateway UDP beacon.
- *
- * The PC gateway sends announcements **to** [port] (default 42888). This client must bind
- * that same port to receive them; an ephemeral socket never sees the packets.
- */
 class UdpGatewayDiscovery(
+    private val context: Context? = null,
     private val port: Int = 42888,
     private val json: Json = Json { ignoreUnknownKeys = true },
+    private val multicastLockFactory: (() -> AutoCloseable?)? = null,
+    private val onDiagnostic: (GatewayDiscoveryDiagnostic) -> Unit = {},
 ) : GatewayDiscovery {
     override suspend fun discover(timeoutMs: Int): DiscoveredGateway? = withContext(Dispatchers.IO) {
-        runCatching {
-            val waitMs = timeoutMs.coerceIn(1_000, 15_000)
-            DatagramSocket(null).use { socket ->
-                socket.reuseAddress = true
-                socket.broadcast = true
-                socket.bind(InetSocketAddress(port))
-                // Short per-packet timeout so we can loop until the overall deadline.
-                socket.soTimeout = minOf(2_000, waitMs)
-                val deadline = System.currentTimeMillis() + waitMs
-                val buffer = ByteArray(8192)
-                while (System.currentTimeMillis() < deadline) {
-                    val packet = DatagramPacket(buffer, buffer.size)
-                    try {
-                        socket.receive(packet)
-                    } catch (_: SocketTimeoutException) {
-                        continue
+        val waitMs = timeoutMs.coerceIn(1_000, 15_000)
+        val lock = runCatching { multicastLockFactory?.invoke() ?: acquireWifiMulticastLock() }.getOrNull()
+        try {
+            val result = runCatching {
+                DatagramSocket(null).use { socket ->
+                    socket.reuseAddress = true
+                    socket.broadcast = true
+                    socket.bind(InetSocketAddress(port))
+                    socket.soTimeout = minOf(2_000, waitMs)
+                    val deadline = System.currentTimeMillis() + waitMs
+                    val buffer = ByteArray(8192)
+                    while (System.currentTimeMillis() < deadline) {
+                        val packet = DatagramPacket(buffer, buffer.size)
+                        try {
+                            socket.receive(packet)
+                        } catch (_: SocketTimeoutException) {
+                            continue
+                        }
+                        val announcement = runCatching {
+                            json.decodeFromString<AndroidGatewayLanAnnouncement>(
+                                String(packet.data, 0, packet.length, Charsets.UTF_8),
+                            )
+                        }.getOrNull() ?: continue
+                        if (announcement.service != "relay-pc-gateway" ||
+                            announcement.discoveryVersion != 1 ||
+                            announcement.apiPort !in 1..65_535 ||
+                            announcement.gatewayId.isBlank() ||
+                            announcement.anonymousIngressPath != "/api/public/sync/messages"
+                        ) continue
+                        val host = packet.address.hostAddress ?: continue
+                        return@runCatching DiscoveredGateway(host, announcement.apiPort, announcement.gatewayId)
                     }
-                    val announcement = runCatching {
-                        json.decodeFromString<AndroidGatewayLanAnnouncement>(
-                            String(packet.data, 0, packet.length, Charsets.UTF_8),
-                        )
-                    }.getOrNull() ?: continue
-                    if (announcement.service != "relay-pc-gateway" ||
-                        announcement.discoveryVersion != 1 ||
-                        announcement.apiPort !in 1..65_535 ||
-                        announcement.gatewayId.isBlank() ||
-                        announcement.anonymousIngressPath != "/api/public/sync/messages"
-                    ) {
-                        continue
-                    }
-                    val host = packet.address.hostAddress ?: continue
-                    return@runCatching DiscoveredGateway(host, announcement.apiPort, announcement.gatewayId)
+                    null
                 }
-                null
             }
-        }.getOrNull()
+            result.onSuccess { gateway ->
+                onDiagnostic(GatewayDiscoveryDiagnostic(gateway?.host, if (gateway == null) "udp_timeout" else "beacon_received"))
+            }.onFailure {
+                onDiagnostic(GatewayDiscoveryDiagnostic(null, "udp_error"))
+            }
+            result.getOrNull()
+        } finally {
+            runCatching { lock?.close() }
+        }
+    }
+
+    private fun acquireWifiMulticastLock(): AutoCloseable? {
+        val wifi = context?.applicationContext?.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return null
+        val lock = wifi.createMulticastLock("relay-gateway-discovery").apply { setReferenceCounted(false); acquire() }
+        return AutoCloseable { runCatching { if (lock.isHeld) lock.release() } }
     }
 }

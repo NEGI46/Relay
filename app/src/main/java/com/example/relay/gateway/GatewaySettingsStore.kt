@@ -6,6 +6,8 @@ interface GatewaySettingsStoreContract {
     fun load(): GatewaySettings
     fun save(settings: GatewaySettings)
     fun record(result: String, connectedAt: Long = System.currentTimeMillis())
+    fun recordDiscovery(ip: String?, result: String) {}
+    fun recordDelivery(result: String) {}
 }
 
 class GatewaySettingsStore(context: Context) : GatewaySettingsStoreContract {
@@ -19,7 +21,12 @@ class GatewaySettingsStore(context: Context) : GatewaySettingsStoreContract {
         automaticSync = preferences.getBoolean("automatic", true),
         lastConnectedAt = preferences.getLong("lastConnected", 0).takeIf { it > 0 },
         lastSyncResult = preferences.getString("lastResult", null),
+        lastDiscoveredGatewayIp = preferences.getString("discoveredGatewayIp", null),
+        lastDiscoveryResult = preferences.getString("discoveryResult", null),
+        lastDeliveryResult = preferences.getString("deliveryResult", null),
     )
     override fun save(settings: GatewaySettings) { preferences.edit().putString("host", settings.host.trim()).putInt("port", settings.port).putString("name", settings.gatewayName.trim()).putString("bridgeId", settings.bridgeId.trim()).putBoolean("enabled", settings.enabled).putBoolean("automatic", settings.automaticSync).apply() }
     override fun record(result: String, connectedAt: Long) { preferences.edit().putString("lastResult", result.take(160)).putLong("lastConnected", connectedAt).apply() }
+    override fun recordDiscovery(ip: String?, result: String) { preferences.edit().putString("discoveredGatewayIp", ip?.take(64)).putString("discoveryResult", result.take(80)).apply() }
+    override fun recordDelivery(result: String) { preferences.edit().putString("deliveryResult", result.take(80)).apply() }
 }

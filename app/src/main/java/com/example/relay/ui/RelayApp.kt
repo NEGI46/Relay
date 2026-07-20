@@ -393,6 +393,20 @@ private fun SettingsScreen(state: RelayUiState, openAppSettings: () -> Unit, ope
                 Text(if (state.transportRunning) "災害通信: 動作中" else "災害通信: 停止中")
                 Text("中継拠点への保存は未検証の証跡です。公式到達ではありません。")
             } } }
+            item {
+                Card(
+                    Modifier
+                        .fillMaxWidth()
+                        .semantics { contentDescription = "PC Gateway診断情報" },
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("PC Gateway診断", style = MaterialTheme.typography.titleSmall)
+                        Text("発見IP: " + (state.gatewayDiscoveredIp ?: "未検出"))
+                        Text("探索結果: " + (state.gatewayDiscoveryResult ?: "未実行"))
+                        Text("配送結果: " + (state.gatewayDeliveryResult ?: state.gatewayLastResult ?: "未実行"))
+                    }
+                }
+            }
             if (state.debugEvents.isNotEmpty()) {
                 item {
                     Card(
