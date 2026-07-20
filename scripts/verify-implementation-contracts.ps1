@@ -20,6 +20,12 @@ function Require-Text([string]$Text, [string]$Needle, [string]$Description) {
     }
 }
 
+function Reject-Text([string]$Text, [string]$Needle, [string]$Description) {
+    if ($Text.IndexOf($Needle, [StringComparison]::Ordinal) -ge 0) {
+        throw "Implementation contract failed: $Description"
+    }
+}
+
 $versions = Read-Text 'gradle/libs.versions.toml'
 $application = Read-Text 'app/src/main/java/com/example/relay/RelayApplication.kt'
 $passphrase = Read-Text 'app/src/main/java/com/example/relay/data/local/SqlCipherPassphraseStore.kt'
@@ -32,6 +38,9 @@ $backup = Read-Text 'scripts/backup-gateway.ps1'
 $signing = Read-Text 'scripts/sign-artifacts.ps1'
 $distributionVerify = Read-Text 'scripts/verify-distribution-signatures.ps1'
 $tufVerify = Read-Text 'scripts/verify-tuf-metadata.ps1'
+$pcGatewayPackage = Read-Text 'scripts/build-pc-gateway-exe.ps1'
+$releaseWorkflow = Read-Text '.github/workflows/publish-release.yml'
+$gatewayConfig = Read-Text 'pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayConfig.kt'
 
 # At-rest data protection must remain fail-closed and tied to Android Keystore.
 Require-Text $versions 'sqlcipher-android' 'SQLCipher dependency'
@@ -59,6 +68,17 @@ Require-Text $signing 'TufPrivateKey' 'TUF signing key input'
 Require-Text $signing 'cosign sign-blob' 'cosign artifact signing'
 Require-Text $distributionVerify 'RequireBundles' 'cosign bundle verification gate'
 Require-Text $tufVerify 'TrustedRootPath' 'trusted-root TUF verification gate'
+
+# Windows releases must remain upgradeable and report the version that was packaged.
+Require-Text $pcGatewayPackage '[string]$AppVersion' 'PC Gateway package version is an explicit input'
+Require-Text $pcGatewayPackage '--app-version $AppVersion' 'jpackage receives the release version'
+Require-Text $pcGatewayPackage '--name RelayPcGateway' 'Windows upgrade identity keeps the published app name'
+Require-Text $pcGatewayPackage '--vendor Relay' 'Windows upgrade identity keeps the published vendor'
+Require-Text $pcGatewayPackage '-Drelay.version=$AppVersion' 'packaged runtime receives the release version'
+Reject-Text $pcGatewayPackage "`$appVersion = '0.1.0'" 'PC Gateway package version must not be hard-coded'
+Require-Text $releaseWorkflow 'RELEASE_TAG: ${{ inputs.tag }}' 'release tag is passed to the Windows packaging step'
+Require-Text $releaseWorkflow '-AppVersion $Matches.version' 'release tag drives the Windows package version'
+Require-Text $gatewayConfig 'System.getProperty("relay.version")' 'Gateway health reports the packaged release version'
 
 # Keep the contract itself in the required CI path; this prevents silent removal.
 Require-Text $workflow 'verify-implementation-contracts.ps1' 'implementation contract CI step'
