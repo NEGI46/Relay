@@ -463,13 +463,14 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                     """
                     UPDATE messages
                     SET route_authentication='AUTHENTICATED_BRIDGE',
-                        content_verification='UNVERIFIED', ingress_trust='UNVERIFIED',
+                        content_verification=?, ingress_trust='UNVERIFIED',
                         source_bridge_id=COALESCE(?, source_bridge_id)
                     WHERE message_id=?
                     """.trimIndent(),
                 ).use { ps ->
-                    ps.setString(1, sourceBridgeId)
-                    ps.setString(2, message.messageId)
+                    ps.setString(1, contentVerification)
+                    ps.setString(2, sourceBridgeId)
+                    ps.setString(3, message.messageId)
                     ps.executeUpdate()
                 }
             }
@@ -662,7 +663,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                 """
                 SELECT
                   COALESCE(SUM(CASE WHEN content_verification='VERIFIED' THEN 1 ELSE 0 END),0),
-                  COALESCE(SUM(CASE WHEN content_verification='UNVERIFIED' THEN 1 ELSE 0 END),0)
+                  COALESCE(SUM(CASE WHEN content_verification<>'VERIFIED' THEN 1 ELSE 0 END),0)
                 FROM messages
                 """.trimIndent(),
             ).use { rs ->
@@ -735,7 +736,12 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         rows.asSequence()
             .filter { type == null || it.messageType == type }
             .filter { status == null || it.status == status }
-            .filter { trust == null || it.contentVerification.equals(trust, ignoreCase = true) }
+            .filter {
+                trust == null ||
+                    it.contentVerification.equals(trust, ignoreCase = true) ||
+                    (trust.equals(CONTENT_UNVERIFIED, ignoreCase = true) &&
+                        !it.contentVerification.equals("VERIFIED", ignoreCase = true))
+            }
             .filter {
                 routeAuthentication == null ||
                     it.routeAuthentication.equals(routeAuthentication, ignoreCase = true)
