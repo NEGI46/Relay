@@ -23,6 +23,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private const val DEVICE_A = "device-A"
+private const val DEVICE_B = "device-B"
+
 /**
  * Failed transport sends must surface as SendFailed/Rejected — never as PayloadTransferCompleted.
  * Exercises the real [SyncCoordinator] + [FakeOfflineTransport] path.
@@ -35,12 +38,12 @@ class SyncSendFailureObservabilityTest {
         val scope = CoroutineScope(coroutineContext + SupervisorJob())
         val aRepo = InMemoryMessageRepository().also { it.insert(message(id = "message-fail-1")) }
         val bRepo = InMemoryMessageRepository()
-        val aTransport = FakeOfflineTransport("device-A", network)
-        val bTransport = FakeOfflineTransport("device-B", network)
+        val aTransport = FakeOfflineTransport(DEVICE_A, network)
+        val bTransport = FakeOfflineTransport(DEVICE_B, network)
         val aPolicy = MessagePolicy(clock)
         val bPolicy = MessagePolicy(clock)
         val a = SyncCoordinator(
-            "device-A",
+            DEVICE_A,
             aTransport,
             aRepo,
             SyncPlanner(aRepo, aPolicy),
@@ -50,7 +53,7 @@ class SyncSendFailureObservabilityTest {
             scope,
         )
         val b = SyncCoordinator(
-            "device-B",
+            DEVICE_B,
             bTransport,
             bRepo,
             SyncPlanner(bRepo, bPolicy),
@@ -95,7 +98,7 @@ class SyncSendFailureObservabilityTest {
         val network = FakeNetwork()
         val clock = MutableClock(NOW)
         val scope = CoroutineScope(coroutineContext + SupervisorJob())
-        val aRepo = InMemoryMessageRepository().also { it.insert(message(id = "message-recover")) }
+        val aRepo = InMemoryMessageRepository().also { it.insert(message(id = MESSAGE_RECOVER_ID)) }
         val bRepo = InMemoryMessageRepository()
         val aTransport = FakeOfflineTransport("device-A", network)
         val bTransport = FakeOfflineTransport("device-B", network)

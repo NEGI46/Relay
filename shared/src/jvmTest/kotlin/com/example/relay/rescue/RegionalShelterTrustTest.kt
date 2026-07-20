@@ -8,16 +8,19 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class RegionalShelterTrustTest {
+    private const val TEST_REGION_ID = "region-1"
+    private const val TEST_SHELTER_ID = "shelter-1"
+
     @Test
     fun rootSignedDirectorySelectsNewestCurrentRecipientAndReceiptKey() {
         val rootPair = RescueCryptography.generateShelterSigningKeyPair()
-        val root = RegionalRootBundle(regionId = "region-1", rootSigningPublicKey = rootPair.publicKey)
+        val root = RegionalRootBundle(regionId = TEST_REGION_ID, rootSigningPublicKey = rootPair.publicKey)
         val oldRecipient = RescueCryptography.generateRecipientKeyPair()
         val oldReceipt = RescueCryptography.generateShelterSigningKeyPair()
         val newRecipient = RescueCryptography.generateRecipientKeyPair()
         val newReceipt = RescueCryptography.generateShelterSigningKeyPair()
-        val oldManifest = signedManifest(root.regionId, "shelter-1", oldRecipient, oldReceipt, 1, rootPair.privateKey)
-        val newManifest = signedManifest(root.regionId, "shelter-1", newRecipient, newReceipt, 2, rootPair.privateKey)
+        val oldManifest = signedManifest(root.regionId, TEST_SHELTER_ID, oldRecipient, oldReceipt, 1, rootPair.privateKey)
+        val newManifest = signedManifest(root.regionId, TEST_SHELTER_ID, newRecipient, newReceipt, 2, rootPair.privateKey)
         val directory = UnsignedRegionalShelterDirectory(
             regionId = root.regionId,
             generation = 2,
@@ -30,10 +33,10 @@ class RegionalShelterTrustTest {
 
         assertTrue(verifyRegionalShelterDirectory(signedDirectory, root, 1_500))
         assertIs<DirectoryAcceptance.Accepted>(resolver.accept(signedDirectory, 1_500))
-        val newest = assertNotNull(resolver.resolveForNewRequest("region-1", "shelter-1", 1_500))
+        val newest = assertNotNull(resolver.resolveForNewRequest(TEST_REGION_ID, TEST_SHELTER_ID, 1_500))
         assertEquals(newRecipient.publicKey, newest.recipientPublicKey)
         assertEquals(newReceipt.publicKey, newest.receiptSigningPublicKey)
-        assertEquals(oldRecipient.publicKey, resolver.resolveForEnvelope("region-1", "shelter-1", oldRecipient.publicKey.keyId, 1_500)?.recipientPublicKey)
+        assertEquals(oldRecipient.publicKey, resolver.resolveForEnvelope(TEST_REGION_ID, TEST_SHELTER_ID, oldRecipient.publicKey.keyId, 1_500)?.recipientPublicKey)
         assertTrue(resolver.verifyAdvertisedManifest(newManifest, 1_500))
     }
 

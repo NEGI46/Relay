@@ -7,6 +7,8 @@ import java.security.SecureRandom
 import java.util.Base64
 import java.util.UUID
 
+private const val RELAY_HOME_DIR = ".relay"
+
 data class GatewayConfig(
     val version: String = System.getenv("RELAY_VERSION") ?: "1.0.0",
     val buildSha: String = System.getenv("GIT_COMMIT") ?: "unknown",
@@ -19,15 +21,15 @@ data class GatewayConfig(
     // Packaged apps (Windows EXE / macOS app image) may start with a read-only CWD.
     // Keep the default database under the user's writable home profile.
     val dbPath: String = System.getenv("RELAY_GATEWAY_DB")
-        ?: File(System.getProperty("user.home"), ".relay/relay-gateway.db").path,
+        ?: File(System.getProperty("user.home"), "$RELAY_HOME_DIR/relay-gateway.db").path,
     val gatewayId: String = System.getenv("RELAY_GATEWAY_ID") ?: "pc-gateway-local",
     val shelterId: String = System.getenv("RELAY_SHELTER_ID") ?: gatewayId,
     val rescueKeyPath: String = System.getenv("RELAY_RESCUE_KEY_FILE")
-        ?: File(System.getProperty("user.home"), ".relay/rescue-keys.json").path,
+        ?: File(System.getProperty("user.home"), "$RELAY_HOME_DIR/rescue-keys.json").path,
     val offlineMapPath: String = System.getenv("RELAY_OFFLINE_MAP_DIR")
-        ?: File(System.getProperty("user.home"), ".relay/maps/gsi-fuchu").path,
+        ?: File(System.getProperty("user.home"), "$RELAY_HOME_DIR/maps/gsi-fuchu").path,
     val officialInfoCachePath: String = System.getenv("RELAY_OFFICIAL_INFO_CACHE")
-        ?: File(System.getProperty("user.home"), ".relay/official/jma-warning-340000.json").path,
+        ?: File(System.getProperty("user.home"), "$RELAY_HOME_DIR/official/jma-warning-340000.json").path,
     /**
      * Public regional root used to verify the shelter's signed BLE identity.
      *
@@ -41,8 +43,12 @@ data class GatewayConfig(
     val rescueSignedManifestPath: String? = System.getenv("RELAY_RESCUE_SIGNED_MANIFEST_FILE")
         ?.trim()
         ?.takeIf { it.isNotEmpty() },
-    val rescueRecipientKeyId: String? = System.getenv("RELAY_RESCUE_RECIPIENT_KEY_ID")?.trim()?.takeIf { it.isNotEmpty() },
-    val rescueManifestFingerprint: String? = System.getenv("RELAY_RESCUE_MANIFEST_FINGERPRINT")?.trim()?.takeIf { it.isNotEmpty() },
+    val rescueRecipientKeyId: String? = System.getenv("RELAY_RESCUE_RECIPIENT_KEY_ID")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() },
+    val rescueManifestFingerprint: String? = System.getenv("RELAY_RESCUE_MANIFEST_FINGERPRINT")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() },
     /** Separate loopback-only listener used exclusively by the local Windows BLE sidecar. */
     val bleBridgeIngressHost: String = "127.0.0.1",
     val bleBridgeIngressPort: Int = (System.getenv("RELAY_BLE_BRIDGE_PORT") ?: "18081").toIntOrNull()

@@ -22,11 +22,12 @@ class MessagePolicyRepositoryTest {
     }
 
     @Test
+    private const val FIRST_NOTE = "first"
     fun `same id with different immutable body is rejected as collision`() = runBlocking {
         val repository = InMemoryMessageRepository()
-        repository.insert(message(note = "first"))
+        repository.insert(message(note = FIRST_NOTE))
         assertEquals(InsertResult.Collision, repository.insert(message(note = "forged")))
-        assertEquals("first", (repository.find("message-1")!!.payload as SafetyPayload).note)
+        assertEquals(FIRST_NOTE, (repository.find("message-1")!!.payload as SafetyPayload).note)
     }
 
     @Test
@@ -66,34 +67,39 @@ class MessagePolicyRepositoryTest {
     }
 
     @Test
+    companion object {
+        private const val MESSAGE_ID = "message-1"
+        private const val PEER_B = "peer-B"
+    }
+
     fun `acknowledgement is peer specific and idempotent`() = runBlocking {
         val repository = InMemoryMessageRepository()
         repository.insert(message())
-        val first = MessageDelivery("message-1", "peer-B", NOW, "packet-1")
+        val first = MessageDelivery(MESSAGE_ID, PEER_B, NOW, "packet-1")
         repository.markAcknowledged(first)
         repository.markAcknowledged(first.copy(acknowledgedAt = NOW + 1))
-        assertTrue(repository.wasAcknowledged("message-1", "peer-B"))
-        assertFalse(repository.wasAcknowledged("message-1", "peer-C"))
+        assertTrue(repository.wasAcknowledged(MESSAGE_ID, PEER_B))
+        assertFalse(repository.wasAcknowledged(MESSAGE_ID, "peer-C"))
         assertEquals(1, repository.deliveries().size)
     }
-
-    @Test
-    fun `receipt for an unknown message is rejected`() = runBlocking {
         val repository = InMemoryMessageRepository()
         val receipt = DeliveryReceipt("receipt-1", "missing", ReceiptType.PEER_RECEIVED, "peer-B", NOW)
 
-        assertEquals(InsertResult.Rejected("unknown message"), repository.insertReceipt(receipt))
+        assertEquals(InsertResult.Rejected(UNKNOWN_MESSAGE), repository.insertReceipt(receipt))
         assertTrue(repository.allReceipts().isEmpty())
     }
 
     @Test
+    private const val MESSAGE_ID_1 = "message-1"
+    private const val MESSAGE_ID_2 = "message-2"
+
     fun `receipt duplicate and collision semantics remain stable at capacity`() = runBlocking {
         val repository = InMemoryMessageRepository(
             ResourcePolicy(maxStoredReceipts = 1, maxStoredReceiptsPerMessage = 1),
         )
-        repository.insert(message(id = "message-1"))
-        repository.insert(message(id = "message-2"))
-        val receipt = DeliveryReceipt("receipt-1", "message-1", ReceiptType.PEER_RECEIVED, "peer-B", NOW)
+        repository.insert(message(id = MESSAGE_ID_1))
+        repository.insert(message(id = MESSAGE_ID_2))
+        val receipt = DeliveryReceipt("receipt-1", MESSAGE_ID_1, ReceiptType.PEER_RECEIVED, "peer-B", NOW)
 
         assertEquals(InsertResult.Inserted, repository.insertReceipt(receipt))
         assertEquals(InsertResult.Duplicate, repository.insertReceipt(receipt))
@@ -107,7 +113,7 @@ class MessagePolicyRepositoryTest {
         )
         assertEquals(
             InsertResult.Rejected("max stored receipts"),
-            repository.insertReceipt(receipt.copy(receiptId = "receipt-2", messageId = "message-2")),
+            repository.insertReceipt(receipt.copy(receiptId = "receipt-2", messageId = MESSAGE_ID_2)),
         )
         assertEquals(1, repository.allReceipts().size)
     }

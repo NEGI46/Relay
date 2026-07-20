@@ -16,51 +16,64 @@ import org.junit.Test
 
 class SyncPlannerTest {
     @Test
-    fun `difference excludes held ids and send order is deterministic`() = runBlocking {
-        val repository = InMemoryMessageRepository()
-        val policy = MessagePolicy(MutableClock(NOW))
-        val planner = SyncPlanner(repository, policy)
-        repository.insert(message("low", MessagePriority.LOW))
-        repository.insert(message("critical", MessagePriority.CRITICAL))
-        repository.insert(message("high", MessagePriority.HIGH))
+    private const val LOW_MESSAGE_ID = "low"
+    private const val CRITICAL_MESSAGE_ID = "critical"
+    private const val HIGH_MESSAGE_ID = "high"
+    private const val REMOTE_ONLY_MESSAGE_ID = "remote-only"
+        fun `difference excludes held ids and send order is deterministic`() = runBlocking {
+            val repository = InMemoryMessageRepository()
+            val policy = MessagePolicy(MutableClock(NOW))
+            val planner = SyncPlanner(repository, policy)
+            repository.insert(message(LOW_MESSAGE_ID, MessagePriority.LOW))
+            repository.insert(message(CRITICAL_MESSAGE_ID, MessagePriority.CRITICAL))
+            repository.insert(message(HIGH_MESSAGE_ID, MessagePriority.HIGH))
 
-        val template = planner.manifest().first()
-        val remoteManifest = listOf(template.copy(messageId = "critical"), template.copy(messageId = "remote-only"))
-        assertEquals(listOf("remote-only"), planner.missingFromLocal(remoteManifest))
+            val template = planner.manifest().first()
+            val remoteManifest = listOf(template.copy(messageId = CRITICAL_MESSAGE_ID), template.copy(messageId = REMOTE_ONLY_MESSAGE_ID))
+            assertEquals(listOf(REMOTE_ONLY_MESSAGE_ID), planner.missingFromLocal(remoteManifest))
 
-        assertEquals(
-            listOf("critical", "high", "low"),
-            planner.messagesToSend("peer-B", listOf("low", "critical", "high")).map { it.messageId },
-        )
-    }
+            assertEquals(
+                listOf(CRITICAL_MESSAGE_ID, HIGH_MESSAGE_ID, LOW_MESSAGE_ID),
+                planner.messagesToSend("peer-B", listOf(LOW_MESSAGE_ID, CRITICAL_MESSAGE_ID, HIGH_MESSAGE_ID)).map { it.messageId },
+            )
+        }
 
     @Test
+    private companion object {
+        private const val EXPIRED = "expired"
+        private const val HOP = "hop"
+        private const val ACKED = "acked"
+        private const val PEER_B = "peer-B"
+    }
+
     fun `expired hop limited and acknowledged messages are excluded`() = runBlocking {
         val repository = InMemoryMessageRepository()
         val policy = MessagePolicy(MutableClock(NOW))
         val planner = SyncPlanner(repository, policy)
         repository.insert(message(
-            "expired",
+            EXPIRED,
             createdAt = NOW - policy.limits.clockSkewToleranceMillis - 60_000,
             expiresAt = NOW - policy.limits.clockSkewToleranceMillis,
         ))
-        repository.insert(message("hop", hopCount = 2, maxHopCount = 2))
-        repository.insert(message("acked"))
-        repository.markAcknowledged(MessageDelivery("acked", "peer-B", NOW, "packet"))
+        repository.insert(message(HOP, hopCount = 2, maxHopCount = 2))
+        repository.insert(message(ACKED))
+        repository.markAcknowledged(MessageDelivery(ACKED, PEER_B, NOW, "packet"))
 
-        assertEquals(emptyList<String>(), planner.messagesToSend("peer-B", listOf("expired", "hop", "acked")).map { it.messageId })
+        assertEquals(emptyList<String>(), planner.messagesToSend(PEER_B, listOf(EXPIRED, HOP, ACKED)).map { it.messageId })
     }
 
     @Test
+    private const val REPORT = "report"
+    private const val CHANGE = "change"
     fun `status change is sent before reports`() = runBlocking {
         val repository = InMemoryMessageRepository()
         val policy = MessagePolicy(MutableClock(NOW))
         val planner = SyncPlanner(repository, policy)
-        repository.insert(message("report", MessagePriority.CRITICAL))
-        repository.insert(message("change", MessagePriority.NORMAL).copy(
+        repository.insert(message(REPORT, MessagePriority.CRITICAL))
+        repository.insert(message(CHANGE, MessagePriority.NORMAL).copy(
             recordType = RelayRecordType.STATUS_CHANGE,
-            payload = StatusChangePayload("change", "report", ReportStatus.RESOLVED, "resolved", NOW, "device-A"),
+            payload = StatusChangePayload(CHANGE, REPORT, ReportStatus.RESOLVED, "resolved", NOW, "device-A"),
         ))
-        assertEquals(listOf("change", "report"), planner.messagesToSend("peer-B", listOf("report", "change")).map { it.messageId })
+        assertEquals(listOf(CHANGE, REPORT), planner.messagesToSend("peer-B", listOf(REPORT, CHANGE)).map { it.messageId })
     }
 }

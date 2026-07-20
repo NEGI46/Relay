@@ -19,9 +19,9 @@ class CommunicationShutdownCoordinatorTest {
         val coordinator = CommunicationShutdownCoordinator(
             scope = backgroundScope,
             stopGateway = {
-                calls += "gateway-start"
+                calls += GATEWAY_START
                 allowGatewayStopToFinish.await()
-                calls += "gateway-finished"
+                calls += GATEWAY_FINISHED
             },
             stopCommunication = { calls += "communication" },
         )

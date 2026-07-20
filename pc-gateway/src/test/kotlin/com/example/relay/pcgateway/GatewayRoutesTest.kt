@@ -53,11 +53,15 @@ class GatewayRoutesTest {
         },
     )
 
+    companion object {
+        private const val HEALTH_ROUTE = "/api/health"
+    }
+
     @Test fun `health route starts and sync endpoint requires bridge token`() = testApplication {
         val db = Files.createTempFile("relay-route", ".db").toString()
         val config = GatewayConfig(dbPath = db, gatewayId = "gateway", adminKey = "admin")
         GatewayStore(config).use { store -> application { gatewayModule(config, store) } }
-        val response = client.post("/api/health")
+        val response = client.post(HEALTH_ROUTE)
         assertEquals(HttpStatusCode.MethodNotAllowed, response.status)
     }
 
@@ -71,12 +75,17 @@ class GatewayRoutesTest {
         assertTrue(response.status == HttpStatusCode.Unauthorized || response.status == HttpStatusCode.Forbidden)
     }
 
+    companion object {
+        private const val BRIDGE_ID = "bridge"
+        private const val BRIDGE_NAME = "Bridge"
+    }
+
     @Test fun `authenticated same batch report and status change are both stored and applied`() = testApplication {
         val config = GatewayConfig(dbPath = Files.createTempFile("relay-route-batch", ".db").toString(), adminKey = "admin")
         val store = GatewayStore(config)
         val code = store.createPairingCode(1_000)
-        store.requestPair(code, "bridge", "Bridge", 1_001)
-        val token = store.approvePair("bridge", code, 1_002)!!
+        store.requestPair(code, BRIDGE_ID, BRIDGE_NAME, 1_001)
+        val token = store.approvePair(BRIDGE_ID, code, 1_002)!!
         application { gatewayModule(config, store) }
         val report = report()
         val change = statusChange(report.messageId)
@@ -87,8 +96,8 @@ class GatewayRoutesTest {
                 setBody(
                     GatewayJson.encodeToString(
                         SyncMessagesRequest(
-                            bridgeId = "bridge",
-                            bridgeName = "Bridge",
+                            bridgeId = BRIDGE_ID,
+                            bridgeName = BRIDGE_NAME,
                             messages = listOf(change, report),
                         ),
                     ),

@@ -135,10 +135,11 @@ actual object RescueCryptography {
 
     actual fun sha256Hex(bytes: ByteArray): String = digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
+    private const val SIGNATURE_ALGORITHM = "SHA256withECDSA"
     actual fun signReceipt(receipt: UnsignedShelterReceipt, shelterPrivateKey: RescuePrivateKey): SignedShelterReceipt = guarded("receipt_signing_failed") {
         require(receipt.validate() == RescueValidationResult.Valid)
         require(shelterPrivateKey.algorithm == RescueKeyAlgorithm.ECDSA_P256_SHA256)
-        val signature = Signature.getInstance("SHA256withECDSA").apply {
+        val signature = Signature.getInstance(SIGNATURE_ALGORITHM).apply {
             initSign(parsePrivate(shelterPrivateKey), random)
             update(receipt.signingBytes())
         }.sign()

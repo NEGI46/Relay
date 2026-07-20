@@ -43,6 +43,9 @@ class RescueViewModelTest {
     }
 
     @Test
+    companion object {
+        private const val SHELTER_ID = "shelter-1"
+    }
     fun `request creation fails closed when shelter public key is unavailable`() = runBlocking {
         val repository = InMemoryRescueEnvelopeRepository()
         val viewModel = RescueViewModel(
@@ -53,7 +56,7 @@ class RescueViewModelTest {
         viewModel.onNavigate(RescueScreen.REQUEST_FORM)
         viewModel.onDraftChange(
             requireNotNull(viewModel.state.value.draft).copy(
-                destinationShelterId = "shelter-1",
+                destinationShelterId = SHELTER_ID,
                 freeText = PRIVATE_NOTE,
             ),
         )

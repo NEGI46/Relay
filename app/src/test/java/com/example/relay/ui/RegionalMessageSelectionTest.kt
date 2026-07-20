@@ -19,6 +19,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class RegionalMessageSelectionTest {
+    companion object {
+        private const val RESOLVED_UNVERIFIED_STATUS_TEXT = "報告状態: 解決済み（未検証の更新）"
+    }
+
     @Test
     fun `status change is projected onto its report without becoming another card`() {
         val policy = MessagePolicy(MutableClock(NOW))
@@ -35,7 +39,7 @@ class RegionalMessageSelectionTest {
         assertEquals(listOf("report-1"), selected.map { it.report.messageId })
         assertEquals(ReportStatus.RESOLVED, selected.single().reportStatus)
         assertEquals(true, selected.single().isStatusUpdateUnverified)
-        assertEquals("報告状態: 解決済み（未検証の更新）", regionalReportStatusText(selected.single()))
+        assertEquals(RESOLVED_UNVERIFIED_STATUS_TEXT, regionalReportStatusText(selected.single()))
     }
 
     @Test
@@ -73,6 +77,9 @@ class RegionalMessageSelectionTest {
         assertEquals(ReportStatus.ACTIVE, selected.single().reportStatus)
     }
 
+    companion object {
+        private const val DEVICE_B = "device-B"
+    }
     @Test
     fun `status update is ignored unless its claimed creator matches message and report origins`() {
         val policy = MessagePolicy(MutableClock(NOW + 10))
@@ -82,7 +89,7 @@ class RegionalMessageSelectionTest {
             target = report.messageId,
             status = ReportStatus.RESOLVED,
             createdAt = NOW,
-            origin = "device-B",
+            origin = DEVICE_B,
             createdBy = "device-A",
         )
         val reportOriginMismatch = statusChange(
@@ -90,8 +97,8 @@ class RegionalMessageSelectionTest {
             target = report.messageId,
             status = ReportStatus.RETRACTED,
             createdAt = NOW + 1,
-            origin = "device-B",
-            createdBy = "device-B",
+            origin = DEVICE_B,
+            createdBy = DEVICE_B,
         )
 
         val selected = selectRegionalMessageItems(listOf(report, messageOriginMismatch, reportOriginMismatch), policy)

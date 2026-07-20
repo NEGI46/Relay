@@ -41,23 +41,37 @@ class RelayTestSnippetService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
+    private companion object {
+        private const val METHOD_CONTRACT = "contract"
+        private const val METHOD_CREATE_REPORT = "createReport"
+        private const val METHOD_FIND_MESSAGE = "findMessage"
+        private const val METHOD_DELIVERY_LEDGER = "deliveryLedger"
+        private const val METHOD_NEARBY_START = "nearbyStart"
+        private const val METHOD_NEARBY_STOP = "nearbyStop"
+        private const val METHOD_GATEWAY_START = "gatewayStart"
+        private const val METHOD_GATEWAY_STOP = "gatewayStop"
+        private const val METHOD_BLE_START = "bleStart"
+        private const val METHOD_BLE_STOP = "bleStop"
+        private const val METHOD_STATE = "state"
+        private const val UNKNOWN_METHOD_PREFIX = "unknown method: "
+    }
     internal fun dispatch(method: String, arguments: Bundle): Bundle = try {
         when (method) {
-            "contract" -> ok().apply {
+            METHOD_CONTRACT -> ok().apply {
                 putInt("protocolVersion", PROTOCOL_VERSION)
                 putString("methods", SUPPORTED_METHODS.joinToString(","))
             }
-            "createReport" -> createReport(arguments)
-            "findMessage" -> findMessage(arguments)
-            "deliveryLedger" -> deliveryLedger()
-            "nearbyStart" -> startNearby(arguments)
-            "nearbyStop" -> stopNearby()
-            "gatewayStart" -> startGateway(arguments)
-            "gatewayStop" -> stopGateway()
-            "bleStart" -> startBle()
-            "bleStop" -> stopBle()
-            "state" -> state()
-            else -> fail("unknown method: $method")
+            METHOD_CREATE_REPORT -> createReport(arguments)
+            METHOD_FIND_MESSAGE -> findMessage(arguments)
+            METHOD_DELIVERY_LEDGER -> deliveryLedger()
+            METHOD_NEARBY_START -> startNearby(arguments)
+            METHOD_NEARBY_STOP -> stopNearby()
+            METHOD_GATEWAY_START -> startGateway(arguments)
+            METHOD_GATEWAY_STOP -> stopGateway()
+            METHOD_BLE_START -> startBle()
+            METHOD_BLE_STOP -> stopBle()
+            METHOD_STATE -> state()
+            else -> fail(UNKNOWN_METHOD_PREFIX + method)
         }
     } catch (error: Exception) {
         fail(error.message ?: error.javaClass.simpleName)
@@ -106,13 +120,14 @@ class RelayTestSnippetService : Service() {
 
     private fun startNearby(arguments: Bundle): Bundle = runBlocking(Dispatchers.IO) {
         val started = app.communicationRuntime.start(runtimeSettings(arguments))
-        ok().apply { putBoolean("started", started) }
+        ok().apply { putBoolean(KEY_STARTED, started) }
     }
 
     private fun stopNearby(): Bundle = runBlocking(Dispatchers.IO) {
         app.communicationRuntime.stop()
-        ok().apply { putBoolean("stopped", true) }
-    }
+        private const val STOPPED_KEY = "stopped"
+
+                ok().apply { putBoolean(STOPPED_KEY, true) }
 
     private fun startGateway(arguments: Bundle): Bundle = runBlocking(Dispatchers.IO) {
         val started = app.gatewaySyncEngine.start(runtimeSettings(arguments))
@@ -124,11 +139,17 @@ class RelayTestSnippetService : Service() {
         ok().apply { putBoolean("stopped", true) }
     }
 
+    companion object {
+        private const val KEY_STARTED = "started"
+        private const val KEY_STATE = "state"
+        private const val STATE_UNAVAILABLE = "Unavailable"
+    }
+
     private fun startBle(): Bundle = ok().apply {
         val coordinator = app.rescueDeliveryCoordinator
-        putBoolean("started", coordinator != null)
+        putBoolean(KEY_STARTED, coordinator != null)
         coordinator?.start(serviceScope)
-        putString("state", coordinator?.state?.value?.javaClass?.simpleName ?: "Unavailable")
+        putString(KEY_STATE, coordinator?.state?.value?.javaClass?.simpleName ?: STATE_UNAVAILABLE)
     }
 
     private fun stopBle(): Bundle = ok().apply {

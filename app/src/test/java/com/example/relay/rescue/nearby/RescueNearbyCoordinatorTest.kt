@@ -36,9 +36,11 @@ import org.junit.Test
 
 class RescueNearbyCoordinatorTest {
     @Test
+    private const val SECRET_LOCATION_AND_INJURY_DETAILS = "secret location and injury details"
+
     fun `inventory is metadata only and never exposes encrypted rescue plaintext`() = runTest {
         val store = InMemoryRescueEnvelopeRepository()
-        createAndStore(store, freeText = "secret location and injury details")
+        createAndStore(store, freeText = SECRET_LOCATION_AND_INJURY_DETAILS)
         val transport = RecordingTransport()
         val coordinator = RescueNearbyCoordinator(store, transport, nowEpochMillis = { NOW })
 
@@ -54,8 +56,11 @@ class RescueNearbyCoordinatorTest {
         assertFalse(sent.second.decodeToString().contains("injury details"))
         assertFalse(sent.second.decodeToString().contains("ciphertextBase64"))
     }
-
     @Test
+    companion object {
+        private const val MEMBER_A = "member-a"
+    }
+
     fun `incoming encrypted envelope is durably stored before acknowledgement`() = runTest {
         val source = InMemoryRescueEnvelopeRepository()
         val envelope = createAndStore(source, freeText = "do not reveal")
@@ -74,7 +79,7 @@ class RescueNearbyCoordinatorTest {
         val coordinator = RescueNearbyCoordinator(durableStore, transport, nowEpochMillis = System::currentTimeMillis)
 
         coordinator.handlePayload(
-            "member-a",
+            MEMBER_A,
             RescueNearbyPacketCodec().encode(RescueNearbyPacket.Envelope(transferredEnvelope)),
         )
 

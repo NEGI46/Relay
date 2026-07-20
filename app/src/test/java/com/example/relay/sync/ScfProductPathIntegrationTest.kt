@@ -32,6 +32,7 @@ import org.junit.Test
  * create safety on A → hop B → gateway role C issues UNVERIFIED receipt → returns to A.
  * Asserts UI label mapping never claims official final delivery.
  */
+private const val SCF_PRODUCT_ID = "scf-product-1"
 class ScfProductPathIntegrationTest {
     private data class Node(
         val repository: InMemoryMessageRepository,
@@ -65,7 +66,7 @@ class ScfProductPathIntegrationTest {
             MessagePolicy(clock),
             clock,
             "device-A",
-            MessageIdGenerator { "scf-product-1" },
+            MessageIdGenerator { SCF_PRODUCT_ID },
         )(SafetyState.SAFE, 0, "north shelter", "product path")
 
         val drill = RelayRuntimeSettings(OperatingMode.DRILL)
@@ -75,14 +76,14 @@ class ScfProductPathIntegrationTest {
 
         a.transport.connect("device-B")
         withTimeout(8_000) {
-            while (a.repository.let { b.repository.find("scf-product-1") } == null) yield()
+            while (a.repository.let { b.repository.find(SCF_PRODUCT_ID) } == null) yield()
         }
-        assertEquals(1, b.repository.find("scf-product-1")!!.hopCount)
+        assertEquals(1, b.repository.find(SCF_PRODUCT_ID)!!.hopCount)
 
         a.transport.disconnect("device-B")
         b.transport.connect("device-C")
         withTimeout(8_000) {
-            while (c.repository.find("scf-product-1") == null) yield()
+            while (c.repository.find(SCF_PRODUCT_ID) == null) yield()
         }
         assertEquals(2, c.repository.find("scf-product-1")!!.hopCount)
         withTimeout(8_000) {

@@ -15,7 +15,11 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class GatewayStoreTest {
-    private fun store(): GatewayStore = GatewayStore(GatewayConfig(dbPath = Files.createTempFile("relay-gateway", ".db").toString(), gatewayId = "gateway-test"))
+    private const val TEMP_FILE_PREFIX = "relay-gateway"
+    private const val TEMP_FILE_SUFFIX = ".db"
+    private const val TEST_GATEWAY_ID = "gateway-test"
+
+        private fun store(): GatewayStore = GatewayStore(GatewayConfig(dbPath = Files.createTempFile(TEMP_FILE_PREFIX, TEMP_FILE_SUFFIX).toString(), gatewayId = TEST_GATEWAY_ID))
 
     private fun message(id: String = "m-1", age: Long = 0) = GatewayMessage(
         messageId = id, messageType = "SAFETY", recordType = "REPORT", priority = "HIGH", status = "ACTIVE",
@@ -23,41 +27,51 @@ class GatewayStoreTest {
         hopCount = 1, hopLimit = 8, originDeviceId = "origin", payload = JsonPrimitive("safe"), receivedAt = 1_000,
     )
 
-    private fun statusChange(
-        id: String = "change-1",
-        targetMessageId: String = "m-1",
-        newStatus: String = "RESOLVED",
-        eventCreatedAt: Long = 2_000,
-    ) =
-        message(id).copy(
-            recordType = "STATUS_CHANGE",
-            priority = "CRITICAL",
-            createdAt = eventCreatedAt,
-            expiresAt = eventCreatedAt + 86_400_000,
-            receivedAt = eventCreatedAt,
-            payload = buildJsonObject {
-                put("eventId", "event-$id")
-                put("targetMessageId", targetMessageId)
-                put("newStatus", newStatus)
-                put("reason", "safe")
-                put("createdAt", eventCreatedAt)
-                put("createdBy", "admin")
-            },
-        )
+    private const val DEFAULT_STATUS_CHANGE_ID = "change-1"
+    private const val DEFAULT_TARGET_MESSAGE_ID = "m-1"
+    private const val DEFAULT_NEW_STATUS = "RESOLVED"
+    private const val DEFAULT_REASON = "safe"
+    private const val DEFAULT_CREATED_BY = "admin"
+    private const val DEFAULT_RECORD_TYPE = "STATUS_CHANGE"
+    private const val DEFAULT_PRIORITY = "CRITICAL"
+
+        private fun statusChange(
+            id: String = DEFAULT_STATUS_CHANGE_ID,
+            targetMessageId: String = DEFAULT_TARGET_MESSAGE_ID,
+            newStatus: String = DEFAULT_NEW_STATUS,
+            eventCreatedAt: Long = 2_000,
+        ) =
+            message(id).copy(
+                recordType = DEFAULT_RECORD_TYPE,
+                priority = DEFAULT_PRIORITY,
+                createdAt = eventCreatedAt,
+                expiresAt = eventCreatedAt + 86_400_000,
+                receivedAt = eventCreatedAt,
+                payload = buildJsonObject {
+                    put("eventId", "event-$id")
+                    put("targetMessageId", targetMessageId)
+                    put("newStatus", newStatus)
+                    put("reason", DEFAULT_REASON)
+                    put("createdAt", eventCreatedAt)
+                    put("createdBy", DEFAULT_CREATED_BY)
+                },
+            )
 
     @Test fun `saving creates gateway receipt and duplicate is idempotent`() {
         store().use { db ->
+            val BRIDGE = "bridge"
+            val MESSAGE_ID = "m-1"
             val code = db.createPairingCode(1_000)
-            assertEquals(true, db.requestPair(code, "bridge", "Bridge", 1_001))
-            assertNotNull(db.approvePair("bridge", code, 1_002))
-            val result = db.ingest("bridge", listOf(message()), now = 2_000)
+            assertEquals(true, db.requestPair(code, BRIDGE, "Bridge", 1_001))
+            assertNotNull(db.approvePair(BRIDGE, code, 1_002))
+            val result = db.ingest(BRIDGE, listOf(message()), now = 2_000)
             assertEquals("STORED", result.single().disposition)
-            assertEquals("AUTHENTICATED_BRIDGE", db.messageDetail("m-1")?.routeAuthentication)
-            assertEquals("UNVERIFIED", db.messageDetail("m-1")?.contentVerification)
+            assertEquals("AUTHENTICATED_BRIDGE", db.messageDetail(MESSAGE_ID)?.routeAuthentication)
+            assertEquals("UNVERIFIED", db.messageDetail(MESSAGE_ID)?.contentVerification)
             assertEquals(0 to 1, db.trustCounts())
             assertEquals(RouteAuthenticationCounts(1, 0), db.routeAuthenticationCounts())
             assertEquals(1, db.receipts().size)
-            val duplicate = db.ingest("bridge", listOf(message()), now = 3_000)
+            val duplicate = db.ingest(BRIDGE, listOf(message()), now = 3_000)
             assertEquals("DUPLICATE", duplicate.single().disposition)
             assertEquals(1, db.receipts().size)
         }
@@ -277,27 +291,28 @@ class GatewayStoreTest {
 
     @Test fun `reject pair revokes token and prevents authentication`() {
         store().use { db ->
+            val BRIDGE_ID = "bridge-a"
             val code = db.createPairingCode(1_000)
-            db.requestPair(code, "bridge-a", "Bridge A", 1_001)
-            val token = db.approvePair("bridge-a", code, 1_002)!!
-            assertEquals(true, db.authenticate("bridge-a", token))
-            assertEquals(true, db.rejectPair("bridge-a", code = null, now = 1_003))
-            assertEquals(false, db.authenticate("bridge-a", token))
+            db.requestPair(code, BRIDGE_ID, "Bridge A", 1_001)
+            val token = db.approvePair(BRIDGE_ID, code, 1_002)!!
+            assertEquals(true, db.authenticate(BRIDGE_ID, token))
+            assertEquals(true, db.rejectPair(BRIDGE_ID, code = null, now = 1_003))
+            assertEquals(false, db.authenticate(BRIDGE_ID, token))
         }
     }
 
     @Test fun `receipts for bridge are scoped to that bridge submissions`() {
         store().use { db ->
             val codeA = db.createPairingCode(1_000)
-            db.requestPair(codeA, "bridge-a", "A", 1_001)
-            db.approvePair("bridge-a", codeA, 1_002)
+            db.requestPair(codeA, BRIDGE_A, "A", 1_001)
+            db.approvePair(BRIDGE_A, codeA, 1_002)
             val codeB = db.createPairingCode(1_010)
-            db.requestPair(codeB, "bridge-b", "B", 1_011)
-            db.approvePair("bridge-b", codeB, 1_012)
-            db.ingest("bridge-a", listOf(message("from-a")), 2_000)
-            db.ingest("bridge-b", listOf(message("from-b")), 2_100)
-            assertEquals(listOf("from-a"), db.receiptsForBridge("bridge-a").map { it.messageId })
-            assertEquals(listOf("from-b"), db.receiptsForBridge("bridge-b").map { it.messageId })
+            db.requestPair(codeB, BRIDGE_B, "B", 1_011)
+            db.approvePair(BRIDGE_B, codeB, 1_012)
+            db.ingest(BRIDGE_A, listOf(message("from-a")), 2_000)
+            db.ingest(BRIDGE_B, listOf(message("from-b")), 2_100)
+            assertEquals(listOf("from-a"), db.receiptsForBridge(BRIDGE_A).map { it.messageId })
+            assertEquals(listOf("from-b"), db.receiptsForBridge(BRIDGE_B).map { it.messageId })
             assertEquals(2, db.receipts().size)
         }
     }
@@ -318,6 +333,8 @@ class GatewayStoreTest {
     @Test fun `legacy verified ingress migrates to authenticated route but unverified content`() {
         val path = Files.createTempFile("relay-gateway-legacy-trust", ".db").toString()
         Class.forName("org.sqlite.JDBC")
+        private const val INGRESS_TRUST_VERIFIED = "VERIFIED"
+
         DriverManager.getConnection("jdbc:sqlite:$path").use { connection ->
             connection.createStatement().use { statement ->
                 statement.execute(
@@ -327,7 +344,7 @@ class GatewayStoreTest {
                       record_type TEXT NOT NULL, priority TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL,
                       expires_at INTEGER NOT NULL, lifetime_ms INTEGER NOT NULL, accumulated_age_ms INTEGER NOT NULL,
                       hop_count INTEGER NOT NULL, hop_limit INTEGER NOT NULL, origin_id TEXT NOT NULL, received_at INTEGER NOT NULL,
-                      ingress_trust TEXT NOT NULL DEFAULT 'VERIFIED', source_bridge_id TEXT,
+                      ingress_trust TEXT NOT NULL DEFAULT '${INGRESS_TRUST_VERIFIED}', source_bridge_id TEXT,
                       status_event_created_at INTEGER NOT NULL DEFAULT -1, status_event_id TEXT NOT NULL DEFAULT ''
                     )
                     """.trimIndent(),
@@ -356,7 +373,7 @@ class GatewayStoreTest {
                 ps.setInt(12, legacy.hopLimit)
                 ps.setString(13, legacy.originDeviceId)
                 ps.setLong(14, legacy.receivedAt)
-                ps.setString(15, "VERIFIED")
+                ps.setString(15, INGRESS_TRUST_VERIFIED)
                 ps.setString(16, "legacy-bridge")
                 ps.executeUpdate()
             }

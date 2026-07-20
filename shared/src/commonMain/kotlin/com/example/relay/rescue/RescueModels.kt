@@ -218,11 +218,16 @@ fun UnsignedShelterReceipt.validate(): RescueValidationResult = validationResult
     require(ciphertextSha256Hex.length == 64 && ciphertextSha256Hex.all(::isLowerHex), "invalid_ciphertext_hash")
 }
 
+private const val INVALID_RECEIPT = "invalid_receipt"
+private const val INVALID_SIGNER_KEY_ID = "invalid_signer_key_id"
+private const val UNSUPPORTED_SIGNATURE = "unsupported_signature"
+private const val INVALID_SIGNATURE = "invalid_signature"
+
 fun SignedShelterReceipt.validate(): RescueValidationResult = validationResult {
-    require(receipt.validate() == RescueValidationResult.Valid, "invalid_receipt")
-    requireIdentifier(signerKeyId, "invalid_signer_key_id")
-    require(signatureAlgorithm == RescueAlgorithms.ECDSA_P256_SHA256, "unsupported_signature")
-    require(signatureBase64.length in 64..256, "invalid_signature")
+    require(receipt.validate() == RescueValidationResult.Valid, INVALID_RECEIPT)
+    requireIdentifier(signerKeyId, INVALID_SIGNER_KEY_ID)
+    require(signatureAlgorithm == RescueAlgorithms.ECDSA_P256_SHA256, UNSUPPORTED_SIGNATURE)
+    require(signatureBase64.length in 64..256, INVALID_SIGNATURE)
 }
 
 fun TrustDocumentSignature.validate(): RescueValidationResult = validationResult {

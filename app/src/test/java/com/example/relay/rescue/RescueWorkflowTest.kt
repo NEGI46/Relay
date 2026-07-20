@@ -12,6 +12,8 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class RescueWorkflowTest {
+    private const val REQUEST_ID = "request-1"
+
     @Test
     fun creatorCourierAndSignedReceiptCompleteEncryptedWorkflow() {
         val recipient = RescueCryptography.generateRecipientKeyPair()
@@ -23,10 +25,9 @@ class RescueWorkflowTest {
             as RescueCreationResult.Stored
 
         val memberTransfer = FakeRescueTransferService(memberStore)
-        val packet = memberTransfer.export(RescueRequestKey("request-1", 1), 2_000)!!
-        assertEquals(0, memberStore.get(RescueRequestKey("request-1", 1))!!.envelope.hopCount)
-        assertEquals(true, memberTransfer.confirmExport(RescueRequestKey("request-1", 1), packet))
-        assertEquals(1, memberStore.get(RescueRequestKey("request-1", 1))!!.envelope.hopCount)
+        val packet = memberTransfer.export(RescueRequestKey(REQUEST_ID, 1), 2_000)!!
+        assertEquals(0, memberStore.get(RescueRequestKey(REQUEST_ID, 1))!!.envelope.hopCount)
+        assertEquals(true, memberTransfer.confirmExport(RescueRequestKey(REQUEST_ID, 1), packet))
         FakeRescueTransferService(courierStore).import(packet, 2_100)
 
         val courierItem = CourierRescuePresenter(courierStore).items().single()
@@ -34,7 +35,7 @@ class RescueWorkflowTest {
         assertFalse(packet.decodeToString().contains("private-note"))
         assertNotNull(created.record.envelope.ciphertextBase64)
 
-        val envelope = courierStore.get(RescueRequestKey("request-1", 1))!!.envelope
+        val envelope = courierStore.get(RescueRequestKey(REQUEST_ID, 1))!!.envelope
         val receipt = RescueCryptography.signReceipt(
             UnsignedShelterReceipt(
                 receiptId = "receipt-1",
@@ -54,11 +55,11 @@ class RescueWorkflowTest {
         )
         assertEquals(
             ReceiptApplicationResult.INVALID_SIGNATURE,
-            courierStore.applyReceipt(RescueRequestKey("request-1", 1), forgedReceipt, signer.publicKey),
+            courierStore.applyReceipt(RescueRequestKey(REQUEST_ID, 1), forgedReceipt, signer.publicKey),
         )
         assertEquals(
             ReceiptApplicationResult.APPLIED,
-            courierStore.applyReceipt(RescueRequestKey("request-1", 1), receipt, signer.publicKey),
+            courierStore.applyReceipt(RescueRequestKey(REQUEST_ID, 1), receipt, signer.publicKey),
         )
         assertEquals(RescueSubmissionStatus.SHELTER_ACCEPTED, CourierRescuePresenter(courierStore).items().single().submissionStatus)
     }

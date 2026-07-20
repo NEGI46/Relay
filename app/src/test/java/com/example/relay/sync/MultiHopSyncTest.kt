@@ -30,11 +30,15 @@ import org.junit.Test
 
 class MultiHopSyncTest {
     @Test
+    companion object {
+        private const val HANDSHAKE_ID = "handshake"
+        private const val MESSAGE_LATE_ID = "message-late"
+    }
     fun `report created after peers connect is synchronized without reconnecting`() = runBlocking {
         val network = FakeNetwork()
         val clock = MutableClock(NOW)
         val scope = CoroutineScope(coroutineContext + SupervisorJob())
-        val aRepo = InMemoryMessageRepository().also { it.insert(message(id = "handshake")) }
+        val aRepo = InMemoryMessageRepository().also { it.insert(message(id = HANDSHAKE_ID)) }
         val bRepo = InMemoryMessageRepository()
         val aTransport = FakeOfflineTransport("device-A", network)
         val bTransport = FakeOfflineTransport("device-B", network)
@@ -52,25 +56,27 @@ class MultiHopSyncTest {
         a.start(RelayRuntimeSettings(OperatingMode.DRILL))
         b.start(RelayRuntimeSettings(OperatingMode.DRILL))
         aTransport.connect("device-B")
-        await { bRepo.find("handshake") != null }
-        aRepo.insert(message(id = "message-late"))
+        await { bRepo.find(HANDSHAKE_ID) != null }
+        aRepo.insert(message(id = MESSAGE_LATE_ID))
 
-        await { bRepo.find("message-late") != null }
-        assertEquals(1, bRepo.find("message-late")!!.hopCount)
+        await { bRepo.find(MESSAGE_LATE_ID) != null }
+        assertEquals(1, bRepo.find(MESSAGE_LATE_ID)!!.hopCount)
         scope.cancel()
     }
 
     @Test
+    private const val MESSAGE_ID = "message-1"
+
     fun `receipt created after peers connect propagates without reconnecting`() = runBlocking {
         val network = FakeNetwork()
         val clock = MutableClock(NOW)
         val scope = CoroutineScope(coroutineContext + SupervisorJob())
         val aRepo = InMemoryMessageRepository().also {
-            it.insert(message(id = "message-1"))
+            it.insert(message(id = MESSAGE_ID))
             it.insert(message(id = "handshake-A"))
         }
         val bRepo = InMemoryMessageRepository().also {
-            it.insert(message(id = "message-1"))
+            it.insert(message(id = MESSAGE_ID))
             it.insert(message(id = "handshake-B"))
         }
         val aTransport = FakeOfflineTransport("device-A", network)
@@ -91,11 +97,11 @@ class MultiHopSyncTest {
         aTransport.connect("device-B")
         await { aRepo.find("handshake-B") != null && bRepo.find("handshake-A") != null }
         bRepo.insertReceipt(
-            DeliveryReceipt("receipt-gateway", "message-1", ReceiptType.GATEWAY_RECEIVED_UNVERIFIED, "gateway-1", NOW),
+            DeliveryReceipt("receipt-gateway", MESSAGE_ID, ReceiptType.GATEWAY_RECEIVED_UNVERIFIED, "gateway-1", NOW),
         )
 
-        await { aRepo.receiptsFor("message-1").any { it.receiptId == "receipt-gateway" } }
-        assertEquals(1, aRepo.receiptsFor("message-1").count { it.receiptId == "receipt-gateway" })
+        await { aRepo.receiptsFor(MESSAGE_ID).any { it.receiptId == "receipt-gateway" } }
+        assertEquals(1, aRepo.receiptsFor(MESSAGE_ID).count { it.receiptId == "receipt-gateway" })
         scope.cancel()
     }
 
@@ -188,6 +194,9 @@ class MultiHopSyncTest {
     }
 
     @Test
+    companion object {
+        private const val MESSAGE_ID = "message-1"
+    }
     fun `report reaches gateway and receipt returns to origin exactly once`() = runBlocking {
         val network = FakeNetwork()
         val clock = MutableClock(NOW)
@@ -206,34 +215,34 @@ class MultiHopSyncTest {
             MessagePolicy(clock),
             clock,
             "device-A",
-            MessageIdGenerator { "message-1" },
+            MessageIdGenerator { MESSAGE_ID },
         )(SafetyState.SAFE, 1, "north area", "created by A")
         val drill = RelayRuntimeSettings(OperatingMode.DRILL)
         a.coordinator.start(drill); b.coordinator.start(drill)
         c.coordinator.start(RelayRuntimeSettings(OperatingMode.DRILL, DeviceRole.GATEWAY))
 
         a.transport.connect("device-B")
-        await { b.repository.find("message-1") != null }
+        await { b.repository.find(MESSAGE_ID) != null }
         a.transport.disconnect("device-B")
         b.transport.connect("device-C")
-        await { c.repository.find("message-1") != null }
+        await { c.repository.find(MESSAGE_ID) != null }
         assertEquals(1, c.repository.all().size)
-        await { c.repository.receiptsFor("message-1").any { it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED } }
-        assertEquals(1, c.repository.receiptsFor("message-1").count { it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED })
+        await { c.repository.receiptsFor(MESSAGE_ID).any { it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED } }
+        assertEquals(1, c.repository.receiptsFor(MESSAGE_ID).count { it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED })
 
         b.transport.disconnect("device-C")
         c.transport.connect("device-B")
-        await { b.repository.receiptsFor("message-1").any { it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED } }
+        await { b.repository.receiptsFor(MESSAGE_ID).any { it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED } }
         c.transport.disconnect("device-B")
         b.transport.connect("device-A")
-        await { a.repository.receiptsFor("message-1").any { it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED } }
+        await { a.repository.receiptsFor(MESSAGE_ID).any { it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED } }
 
         assertEquals(1, a.repository.all().size)
-        assertEquals(1, a.repository.receiptsFor("message-1").count { it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED })
+        assertEquals(1, a.repository.receiptsFor(MESSAGE_ID).count { it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED })
         b.transport.disconnect("device-A")
         b.transport.connect("device-A")
-        await { a.repository.receiptsFor("message-1").size >= 1 }
-        assertEquals(1, a.repository.receiptsFor("message-1").count { it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED })
+        await { a.repository.receiptsFor(MESSAGE_ID).size >= 1 }
+        assertEquals(1, a.repository.receiptsFor(MESSAGE_ID).count { it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED })
         scope.cancel()
     }
 
@@ -312,6 +321,11 @@ class MultiHopSyncTest {
     }
 
     @Test
+    companion object {
+        private const val DEVICE_A_ID = "device-A"
+        private const val DEVICE_G_ID = "device-G"
+    }
+
     fun `gateway storage rejection creates neither ACK nor gateway receipt`() = runBlocking {
         val network = FakeNetwork()
         val clock = MutableClock(NOW)
@@ -320,20 +334,20 @@ class MultiHopSyncTest {
         val gatewayRepo = InMemoryMessageRepository(ResourcePolicy(maxStoredMessages = 0))
         val aPolicy = MessagePolicy(clock)
         val gatewayPolicy = MessagePolicy(clock)
-        val aTransport = FakeOfflineTransport("device-A", network)
-        val gatewayTransport = FakeOfflineTransport("device-G", network)
-        val a = SyncCoordinator("device-A", aTransport, aRepo, SyncPlanner(aRepo, aPolicy), aPolicy, PacketCodec(aPolicy), clock, scope)
-        val gateway = SyncCoordinator("device-G", gatewayTransport, gatewayRepo, SyncPlanner(gatewayRepo, gatewayPolicy), gatewayPolicy, PacketCodec(gatewayPolicy), clock, scope)
+        val aTransport = FakeOfflineTransport(DEVICE_A_ID, network)
+        val gatewayTransport = FakeOfflineTransport(DEVICE_G_ID, network)
+        val a = SyncCoordinator(DEVICE_A_ID, aTransport, aRepo, SyncPlanner(aRepo, aPolicy), aPolicy, PacketCodec(aPolicy), clock, scope)
+        val gateway = SyncCoordinator(DEVICE_G_ID, gatewayTransport, gatewayRepo, SyncPlanner(gatewayRepo, gatewayPolicy), gatewayPolicy, PacketCodec(gatewayPolicy), clock, scope)
         aRepo.insert(message())
         a.start(RelayRuntimeSettings(OperatingMode.DRILL, DeviceRole.MEMBER))
         gateway.start(RelayRuntimeSettings(OperatingMode.DRILL, DeviceRole.GATEWAY))
 
-        aTransport.connect("device-G")
+        aTransport.connect(DEVICE_G_ID)
         kotlinx.coroutines.delay(100)
 
         assertTrue(gatewayRepo.all().isEmpty())
         assertTrue(gatewayRepo.allReceipts().isEmpty())
-        assertTrue(!aRepo.wasAcknowledged("message-1", "device-G"))
+        assertTrue(!aRepo.wasAcknowledged("message-1", DEVICE_G_ID))
         scope.cancel()
     }
 

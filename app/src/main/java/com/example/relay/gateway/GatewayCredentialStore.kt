@@ -19,11 +19,16 @@ class GatewayCredentialStore(context: Context) : GatewayCredentialStoreContract 
     private val preferences = context.getSharedPreferences("relay_gateway_credentials", Context.MODE_PRIVATE)
     private val keyAlias = "relay_gateway_token"
 
+    companion object {
+        private const val PREF_KEY_TOKEN = "token"
+        private const val AES_TRANSFORMATION = "AES/GCM/NoPadding"
+    }
+
     override fun save(token: String) {
         val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key(), GCMParameterSpec(128, iv)) }
+        val cipher = Cipher.getInstance(AES_TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key(), GCMParameterSpec(128, iv)) }
         val encrypted = cipher.doFinal(token.toByteArray(Charsets.UTF_8))
-        preferences.edit().putString("token", Base64.encodeToString(iv + encrypted, Base64.NO_WRAP)).apply()
+        preferences.edit().putString(PREF_KEY_TOKEN, Base64.encodeToString(iv + encrypted, Base64.NO_WRAP)).apply()
     }
 
     override fun load(): String? = runCatching {

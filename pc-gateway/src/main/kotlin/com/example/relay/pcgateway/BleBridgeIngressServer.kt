@@ -73,6 +73,8 @@ class BleBridgeReplayGuard(
     }
 }
 
+private const val ERROR_KEY = "error"
+
 fun Application.bleBridgeIngressModule(
     config: GatewayConfig,
     ingress: RescueDeliveryIngress,
@@ -83,28 +85,28 @@ fun Application.bleBridgeIngressModule(
         post(BLE_DELIVERY_PATH) {
             // Defense in depth if a future change accidentally changes the listener binding.
             if (!call.request.local.remoteHost.isLoopbackPeer()) {
-                return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "loopback_required"))
+                return@post call.respond(HttpStatusCode.Forbidden, mapOf(ERROR_KEY to "loopback_required"))
             }
             val contentLength = call.request.headers["Content-Length"]?.toIntOrNull()
             if (contentLength == null || contentLength !in 1..config.maxBleBridgeRequestBytes) {
-                return@post call.respond(HttpStatusCode.PayloadTooLarge, mapOf("error" to "invalid_content_length"))
+                return@post call.respond(HttpStatusCode.PayloadTooLarge, mapOf(ERROR_KEY to "invalid_content_length"))
             }
             val raw = call.receiveText()
             val rawBytes = raw.encodeToByteArray()
             if (rawBytes.size !in 1..config.maxBleBridgeRequestBytes) {
-                return@post call.respond(HttpStatusCode.PayloadTooLarge, mapOf("error" to "request_too_large"))
+                return@post call.respond(HttpStatusCode.PayloadTooLarge, mapOf(ERROR_KEY to "request_too_large"))
             }
             val timestamp = call.request.headers[BLE_TIMESTAMP_HEADER]?.toLongOrNull()
-                ?: return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "missing_timestamp"))
+                ?: return@post call.respond(HttpStatusCode.Unauthorized, mapOf(ERROR_KEY to "missing_timestamp"))
             val nonce = call.request.headers[BLE_NONCE_HEADER]
-                ?: return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "missing_nonce"))
+                ?: return@post call.respond(HttpStatusCode.Unauthorized, mapOf(ERROR_KEY to "missing_nonce"))
             val signature = call.request.headers[BLE_SIGNATURE_HEADER]
-                ?: return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "missing_signature"))
+                ?: return@post call.respond(HttpStatusCode.Unauthorized, mapOf(ERROR_KEY to "missing_signature"))
             if (!verifyBleBridgeSignature(config.bleBridgeSharedSecret, timestamp, nonce, rawBytes, signature)) {
-                return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "invalid_signature"))
+                return@post call.respond(HttpStatusCode.Unauthorized, mapOf(ERROR_KEY to "invalid_signature"))
             }
             if (!replayGuard.accept(timestamp, nonce)) {
-                return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "stale_or_replayed_request"))
+                return@post call.respond(HttpStatusCode.Conflict, mapOf(ERROR_KEY to "stale_or_replayed_request"))
             }
             val request = runCatching {
                 GatewayJson.decodeFromString(BleBridgeDeliveryRequest.serializer(), raw)
@@ -112,7 +114,7 @@ fun Application.bleBridgeIngressModule(
                 return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "malformed_json"))
             }
             val envelope = runCatching { Base64.getDecoder().decode(request.envelopeBase64) }.getOrElse {
-                return@post call.respond(HttpStatusCode.UnprocessableEntity, BleBridgeDeliveryResponse("rejected", "MALFORMED_SERIALIZATION"))
+                return@post call.respond(HttpStatusCode.UnprocessableEntity, BleBridgeDeliveryResponse("rejected", MALFORMED_SERIALIZATION_CODE))
             }
             if (envelope.size > RescueDeliveryIngress.DEFAULT_MAX_ENVELOPE_BYTES) {
                 return@post call.respond(HttpStatusCode.PayloadTooLarge, BleBridgeDeliveryResponse("rejected", "PAYLOAD_TOO_LARGE"))

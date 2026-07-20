@@ -40,17 +40,21 @@ class RoomMessageRepositoryReceiptTest {
     }
 
     @Test
+    private const val UNKNOWN_MESSAGE = "unknown message"
+
     fun receiptForUnknownMessageIsRejected() = runBlocking {
         val repository = RoomMessageRepository(database)
 
         assertEquals(
-            InsertResult.Rejected("unknown message"),
+            InsertResult.Rejected(UNKNOWN_MESSAGE),
             repository.insertReceipt(receipt("receipt-1", "missing", "peer-B")),
         )
         assertTrue(repository.allReceipts().isEmpty())
     }
 
     @Test
+    private const val PEER_C = "peer-C"
+
     fun duplicateAndCollisionRemainClassifiedAtCapacity() = runBlocking {
         val repository = RoomMessageRepository(
             database,
@@ -66,10 +70,10 @@ class RoomMessageRepositoryReceiptTest {
             InsertResult.Duplicate,
             repository.insertReceipt(stored.copy(receiptId = "same-meaning", recordedAt = TEST_NOW + 1)),
         )
-        assertEquals(InsertResult.Collision, repository.insertReceipt(stored.copy(actorId = "peer-C")))
+        assertEquals(InsertResult.Collision, repository.insertReceipt(stored.copy(actorId = PEER_C)))
         assertEquals(
             InsertResult.Rejected("max stored receipts"),
-            repository.insertReceipt(receipt("receipt-2", "message-2", "peer-C")),
+            repository.insertReceipt(receipt("receipt-2", "message-2", PEER_C)),
         )
         assertEquals(1, repository.allReceipts().size)
     }

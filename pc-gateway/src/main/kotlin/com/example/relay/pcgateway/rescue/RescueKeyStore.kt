@@ -121,20 +121,24 @@ class RescueKeyStore(
         selfTest(keys)
     }
 
+    companion object {
+        private const val SELF_TEST_ID = "key-self-test"
+    }
+
     private fun selfTest(keys: RescueGatewayKeys) {
         val payload = RescuePayload(
-            requestId = "key-self-test",
-            senderDeviceId = "key-self-test",
+            requestId = SELF_TEST_ID,
+            senderDeviceId = SELF_TEST_ID,
             destinationShelterId = shelterId,
             createdAtEpochMillis = 1,
             expiresAtEpochMillis = 2,
             urgency = RescueUrgency.ROUTINE,
         )
-        val envelope = RescueCryptography.encrypt(payload, keys.manifest.recipientPublicKey, "key-self-test")
+        val envelope = RescueCryptography.encrypt(payload, keys.manifest.recipientPublicKey, SELF_TEST_ID)
         require(RescueCryptography.decrypt(envelope, keys.recipientPrivateKey) == payload) { "recipient key pair mismatch" }
         val receipt = RescueCryptography.signReceipt(
             UnsignedShelterReceipt(
-                receiptId = "key-self-test",
+                receiptId = SELF_TEST_ID,
                 envelopeId = envelope.envelopeId,
                 requestId = envelope.requestId,
                 requestVersion = envelope.requestVersion,

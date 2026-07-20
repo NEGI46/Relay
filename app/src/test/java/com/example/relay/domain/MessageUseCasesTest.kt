@@ -15,6 +15,9 @@ import org.junit.Test
 
 class MessageUseCasesTest {
     @Test
+    private const val DEVICE_KEY = "device-key"
+    private const val SIGNED_SAFETY_ID = "signed-safety"
+
     fun `production injection point signs safety reports before persistence`() = runBlocking {
         val clock = MutableClock(NOW)
         val repository = InMemoryMessageRepository()
@@ -23,8 +26,8 @@ class MessageUseCasesTest {
             calls++
             report.copy(
                 reportSignature = ReportSignature(
-                    signerKeyId = "device-key",
-                    publicKey = RescuePublicKey("device-key", RescueKeyAlgorithm.ECDSA_P256_SHA256, "public"),
+                    signerKeyId = DEVICE_KEY,
+                    publicKey = RescuePublicKey(DEVICE_KEY, RescueKeyAlgorithm.ECDSA_P256_SHA256, "public"),
                     signatureBase64 = "A".repeat(64),
                 ),
             )
@@ -34,13 +37,13 @@ class MessageUseCasesTest {
             MessagePolicy(clock),
             clock,
             "device-A",
-            MessageIdGenerator { "signed-safety" },
+            MessageIdGenerator { SIGNED_SAFETY_ID },
             reportSigner = signer,
         )(SafetyState.SAFE, 1, "north", "ok")
 
         assertEquals(1, calls)
         assertNotNull(created.reportSignature)
-        assertEquals(created, repository.find("signed-safety"))
+        assertEquals(created, repository.find(SIGNED_SAFETY_ID))
     }
 
     @Test

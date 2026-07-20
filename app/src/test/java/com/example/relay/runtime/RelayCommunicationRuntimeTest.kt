@@ -15,10 +15,12 @@ import org.junit.Test
 
 class RelayCommunicationRuntimeTest {
     @Test
+    private const val LOCAL_TRANSPORT_ID = "local"
+
     fun `normal mode cannot start and double start is idempotent`() = runTest {
         val session = FakeSyncSession()
         val runtime = RelayCommunicationRuntime(
-            FakeOfflineTransport("local", FakeNetwork()),
+            FakeOfflineTransport(LOCAL_TRANSPORT_ID, FakeNetwork()),
             session,
             backgroundScope,
         )

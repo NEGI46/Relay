@@ -16,11 +16,13 @@ import org.junit.Test
 class PacketCodecTest {
     private val codec = PacketCodec(MessagePolicy(MutableClock(NOW)))
 
+    private const val MESSAGE_ID = "message-1"
+
     @Test
     fun `valid packet round trips`() {
         val decoded = codec.decode(codec.encode("device-A", NOW, MessageDataBody(message())))
         assertTrue(decoded is DecodeResult.Success)
-        assertEquals("message-1", ((decoded as DecodeResult.Success).packet.body as MessageDataBody).message.messageId)
+        assertEquals(MESSAGE_ID, ((decoded as DecodeResult.Success).packet.body as MessageDataBody).message.messageId)
     }
 
     @Test
@@ -72,13 +74,13 @@ class PacketCodecTest {
     fun `peer acknowledgement requires a matching peer received receipt from envelope sender`() {
         val receipt = DeliveryReceipt(
             "receipt-peer",
-            "message-1",
+            MESSAGE_1,
             ReceiptType.PEER_RECEIVED,
-            "device-B",
+            DEVICE_B,
             NOW,
         )
         val result = codec.decode(
-            codec.encode("device-B", NOW, AckBody("message-1", "data-packet", receipt)),
+            codec.encode(DEVICE_B, NOW, AckBody(MESSAGE_1, "data-packet", receipt)),
         )
 
         assertTrue(result is DecodeResult.Success)

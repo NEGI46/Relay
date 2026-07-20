@@ -17,12 +17,19 @@ data class RegionalRootBundle(
     val regionId: String,
     val rootSigningPublicKey: RescuePublicKey,
 ) {
+    companion object {
+        private const val UNSUPPORTED_ROOT_PROTOCOL = "unsupported_root_protocol"
+        private const val INVALID_REGION_ID = "invalid_region_id"
+        private const val INVALID_ROOT_KEY = "invalid_root_key"
+        private const val INVALID_ROOT_KEY_ID = "invalid_root_key_id"
+        private const val INVALID_ROOT_KEY_SIZE = "invalid_root_key_size"
+    }
     fun validate(): RescueValidationResult = validationResult {
-        require(protocolVersion == REGIONAL_SHELTER_TRUST_PROTOCOL_VERSION, "unsupported_root_protocol")
-        requireIdentifier(regionId, "invalid_region_id")
-        require(rootSigningPublicKey.algorithm == RescueKeyAlgorithm.ECDSA_P256_SHA256, "invalid_root_key")
-        requireIdentifier(rootSigningPublicKey.keyId, "invalid_root_key_id")
-        require(rootSigningPublicKey.encodedBase64.length in 64..2_048, "invalid_root_key_size")
+        require(protocolVersion == REGIONAL_SHELTER_TRUST_PROTOCOL_VERSION, UNSUPPORTED_ROOT_PROTOCOL)
+        requireIdentifier(regionId, INVALID_REGION_ID)
+        require(rootSigningPublicKey.algorithm == RescueKeyAlgorithm.ECDSA_P256_SHA256, INVALID_ROOT_KEY)
+        requireIdentifier(rootSigningPublicKey.keyId, INVALID_ROOT_KEY_ID)
+        require(rootSigningPublicKey.encodedBase64.length in 64..2_048, INVALID_ROOT_KEY_SIZE)
     }
 }
 

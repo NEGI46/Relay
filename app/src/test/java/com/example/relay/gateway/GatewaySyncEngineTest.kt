@@ -25,11 +25,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GatewaySyncEngineTest {
+    private const val TEST_GATEWAY_NAME = "gateway"
+
     @Test fun `successful PC save response creates local Gateway Receipt and suppresses future uploads`() = runTest {
         val repository = InMemoryMessageRepository()
         val clock = MutableClock(NOW)
         repository.insert(com.example.relay.message())
-        val settings = FakeSettings(GatewaySettings("127.0.0.1", 8080, "gateway", "bridge", enabled = true, automaticSync = true))
+        val settings = FakeSettings(GatewaySettings("127.0.0.1", 8080, TEST_GATEWAY_NAME, "bridge", enabled = true, automaticSync = true))
         val pending = FakePending()
         val client = FakeClient()
         val engine = GatewaySyncEngine(repository, settings, FakeCredentials("token"), client, MessagePolicy(clock), backgroundScope, pending)
@@ -56,10 +58,14 @@ class GatewaySyncEngineTest {
         assertEquals(0, client.pushes)
     }
 
+    companion object {
+        private const val UNVERIFIED_RECEIPT_TYPE = "GATEWAY_RECEIVED_UNVERIFIED"
+    }
+
     @Test fun `unconfigured bridge uses discovered public gateway without token`() = runTest {
         val repository = InMemoryMessageRepository().also { it.insert(com.example.relay.message()) }
         val client = FakeClient(publicReceipts = listOf(
-            GatewayReceipt("r-unverified", "message-1", "GATEWAY_RECEIVED_UNVERIFIED", "pc-gateway", NOW),
+            GatewayReceipt("r-unverified", "message-1", UNVERIFIED_RECEIPT_TYPE, "pc-gateway", NOW),
         ))
         val engine = GatewaySyncEngine(
             repository,
@@ -153,15 +159,17 @@ class GatewaySyncEngineTest {
     }
 
     @Test fun `status change and its target report are both uploaded with status change first`() = runTest {
+        val MESSAGE_ID = "message-1"
+        val STATUS_ID = "status-1"
         val repository = InMemoryMessageRepository().also {
-            it.insert(com.example.relay.message(id = "message-1"))
+            it.insert(com.example.relay.message(id = MESSAGE_ID))
             it.insert(
-                com.example.relay.message(id = "status-1").copy(
+                com.example.relay.message(id = STATUS_ID).copy(
                     recordType = RelayRecordType.STATUS_CHANGE,
                     priority = MessagePriority.CRITICAL,
                     payload = StatusChangePayload(
-                        eventId = "status-1",
-                        targetMessageId = "message-1",
+                        eventId = STATUS_ID,
+                        targetMessageId = MESSAGE_ID,
                         newStatus = ReportStatus.RESOLVED,
                         reason = "resolved",
                         createdAt = NOW,

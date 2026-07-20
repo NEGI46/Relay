@@ -39,6 +39,8 @@ import io.ktor.server.routing.routing
 @Serializable data class PairApproveRequest(val code: String, val bridgeId: String)
 @Serializable data class PairRejectRequest(val bridgeId: String, val code: String? = null)
 @Serializable data class PairResponse(val paired: Boolean, val token: String? = null, val reason: String? = null)
+private const val DEFAULT_UNKNOWN = "unknown"
+
 @Serializable data class HealthResponse(
     val status: String,
     val gatewayId: String,
@@ -47,14 +49,14 @@ import io.ktor.server.routing.routing
     val lanDiscoveryPort: Int = 42888,
     /** Fail-closed until an authenticated local BLE bridge heartbeat is wired. */
     val bleBridgeStatus: String = "unavailable",
-    val version: String = "unknown",
-    val buildSha: String = "unknown",
-    val shelterId: String = "unknown",
+    val version: String = DEFAULT_UNKNOWN,
+    val buildSha: String = DEFAULT_UNKNOWN,
+    val shelterId: String = DEFAULT_UNKNOWN,
     val recipientKeyId: String? = null,
     val manifestFingerprint: String? = null,
     val rescueIngressReady: Boolean = false,
     val rescueKeyPath: String? = null,
-    val runtimeUser: String = System.getProperty("user.name", "unknown"),
+    val runtimeUser: String = System.getProperty("user.name", DEFAULT_UNKNOWN),
 )
 
 @Serializable
@@ -108,29 +110,31 @@ fun Application.gatewayModule(
                 ),
             )
         }
+        private const val NO_STORE = "no-store"
+
         get("/api/public/rescue/manifest") {
             val manifest = rescueManifest ?: return@get call.respond(HttpStatusCode.NotFound)
-            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            call.response.headers.append(HttpHeaders.CacheControl, NO_STORE)
             call.respond(manifest)
-        }
-        get("/api/rescue/requests") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@get call.respond(HttpStatusCode.Unauthorized)
-            }
-            val service = rescueIntakeService ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
-            service.purgeExpiredDetails()
-            val items = service.list(latestOnly = true).mapNotNull { summary ->
-                service.detail(summary.requestId, summary.requestVersion)?.toOperatorRequest()
-            }.sortedWith(
-                compareByDescending<com.example.relay.pcgateway.rescue.RescueOperatorRequest> {
-                    it.responseStatus == com.example.relay.pcgateway.rescue.RescueResponseStatus.UNCONFIRMED &&
-                        it.urgency == "IMMEDIATE" && it.action != "CANCELLED"
-                }.thenByDescending { it.urgency == "IMMEDIATE" }
-                    .thenByDescending { it.receivedAtEpochMillis },
-            )
-            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-            call.respond(RescueOperatorListResponse(System.currentTimeMillis(), items = items))
-        }
+        private const val URGENCY_IMMEDIATE = "IMMEDIATE"
+                }
+                    if (call.request.headers["X-Admin-Key"] != config.adminKey) {
+                        return@get call.respond(HttpStatusCode.Unauthorized)
+                    }
+                    val service = rescueIntakeService ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
+                    service.purgeExpiredDetails()
+                    val items = service.list(latestOnly = true).mapNotNull { summary ->
+                        service.detail(summary.requestId, summary.requestVersion)?.toOperatorRequest()
+                    }.sortedWith(
+                        compareByDescending<com.example.relay.pcgateway.rescue.RescueOperatorRequest> {
+                            it.responseStatus == com.example.relay.pcgateway.rescue.RescueResponseStatus.UNCONFIRMED &&
+                                it.urgency == URGENCY_IMMEDIATE && it.action != "CANCELLED"
+                        }.thenByDescending { it.urgency == URGENCY_IMMEDIATE }
+                            .thenByDescending { it.receivedAtEpochMillis },
+                    )
+                    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+                    call.respond(RescueOperatorListResponse(System.currentTimeMillis(), items = items))
+                }
         get("/api/rescue/requests/{id}") {
             if (call.request.headers["X-Admin-Key"] != config.adminKey) {
                 return@get call.respond(HttpStatusCode.Unauthorized)
@@ -220,18 +224,21 @@ fun Application.gatewayModule(
             val token = store.approvePair(request.bridgeId, request.code)
             call.respond(if (token == null) PairResponse(false, reason = "pairing_failed") else PairResponse(true, token))
         }
-        post("/api/pair/reject") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@post call.respond(HttpStatusCode.Unauthorized)
-            }
-            val request = call.receive<PairRejectRequest>()
-            if (request.bridgeId.isBlank()) {
-                return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "bridgeId_required"))
-            }
-            val ok = store.rejectPair(request.bridgeId, request.code)
-            call.respond(if (ok) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
-        }
-        post("/api/sync/messages") {
+        private const val BRIDGE_ID_REQUIRED = "bridgeId_required"
+
+                post("/api/pair/reject") {
+                    if (call.request.headers["X-Admin-Key"] != config.adminKey) {
+                        return@post call.respond(HttpStatusCode.Unauthorized)
+                    }
+                    val request = call.receive<PairRejectRequest>()
+                    if (request.bridgeId.isBlank()) {
+                        return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to BRIDGE_ID_REQUIRED))
+                    }
+                    val ok = store.rejectPair(request.bridgeId, request.code)
+                    call.respond(if (ok) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
+                }
+        val SYNC_MESSAGES_PATH = "/api/sync/messages"
+        post(SYNC_MESSAGES_PATH) {
             val contentLength = call.request.headers["Content-Length"]?.toLongOrNull()
             if (contentLength != null && contentLength > config.maxPayloadBytes.toLong() * config.maxMessagesPerRequest) {
                 return@post call.respond(HttpStatusCode.PayloadTooLarge)
@@ -268,7 +275,6 @@ fun Application.gatewayModule(
             call.response.headers.append("X-Relay-Receipt-Semantics", "gateway_saved")
             call.respond(syncResponse(stored, rejected))
         }
-        post("/api/public/sync/messages") {
             if (!config.anonymousIngressEnabled) return@post call.respond(HttpStatusCode.NotFound)
             val declaredLength = call.request.headers["Content-Length"]?.toLongOrNull()
             if (declaredLength != null && declaredLength > config.maxAnonymousRequestBytes) {

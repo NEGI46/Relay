@@ -11,6 +11,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RescueIntakeServiceTest {
+    companion object {
+        private const val REQUEST_ID = "request-1"
+    }
+
     @Test
     fun pcDecryptsDeduplicatesCountsCarriersAndIssuesVerifiedReceipt() {
         val recipient = RescueCryptography.generateRecipientKeyPair()
@@ -29,8 +33,8 @@ class RescueIntakeServiceTest {
 
         assertEquals("private-note", accepted.request.payload.freeText)
         assertEquals(2, duplicate.request.uniqueCarrierCount)
-        assertEquals(ShelterReceiptStatus.STORED, service.receipt("request-1")!!.receipt.status)
-        assertTrue(RescueCryptography.verifyReceipt(service.receipt("request-1")!!, signer.publicKey))
+        assertEquals(ShelterReceiptStatus.STORED, service.receipt(REQUEST_ID)!!.receipt.status)
+        assertTrue(RescueCryptography.verifyReceipt(service.receipt(REQUEST_ID)!!, signer.publicKey))
     }
 
     @Test
@@ -56,6 +60,10 @@ class RescueIntakeServiceTest {
         )
     }
 
+    companion object {
+        private const val REQUEST_ID = "request-1"
+    }
+
     @Test
     fun firstConfirmingNodeOwnsResponseAndTerminalDetailsExpireAfterThirtyDays() {
         val recipient = RescueCryptography.generateRecipientKeyPair()
@@ -69,23 +77,23 @@ class RescueIntakeServiceTest {
         )
         service.ingest(RescueCryptography.encrypt(payload(1), recipient.publicKey, "envelope-1"), "courier-1")
 
-        val claimed = service.updateStatus("request-1", RescueResponseStatus.CONFIRMED, "operator-a")
+        val claimed = service.updateStatus(REQUEST_ID, RescueResponseStatus.CONFIRMED, "operator-a")
             as RescueStatusUpdateResult.Updated
         assertEquals("operator-a", claimed.request.assignedNodeId)
-        assertEquals(ShelterReceiptStatus.ACCEPTED, service.receipt("request-1")!!.receipt.status)
-        val conflict = service.updateStatus("request-1", RescueResponseStatus.PREPARING, "operator-b")
+        assertEquals(ShelterReceiptStatus.ACCEPTED, service.receipt(REQUEST_ID)!!.receipt.status)
+        val conflict = service.updateStatus(REQUEST_ID, RescueResponseStatus.PREPARING, "operator-b")
             as RescueStatusUpdateResult.AssignedElsewhere
         assertEquals("operator-a", conflict.assignedNodeId)
 
-        service.updateStatus("request-1", RescueResponseStatus.PREPARING, "operator-a")
-        service.updateStatus("request-1", RescueResponseStatus.RESPONDING, "operator-a")
-        assertEquals(ShelterReceiptStatus.RESPONDING, service.receipt("request-1")!!.receipt.status)
-        service.updateStatus("request-1", RescueResponseStatus.COMPLETED, "operator-a")
-        assertEquals(ShelterReceiptStatus.COMPLETED, service.receipt("request-1")!!.receipt.status)
+        service.updateStatus(REQUEST_ID, RescueResponseStatus.PREPARING, "operator-a")
+        service.updateStatus(REQUEST_ID, RescueResponseStatus.RESPONDING, "operator-a")
+        assertEquals(ShelterReceiptStatus.RESPONDING, service.receipt(REQUEST_ID)!!.receipt.status)
+        service.updateStatus(REQUEST_ID, RescueResponseStatus.COMPLETED, "operator-a")
+        assertEquals(ShelterReceiptStatus.COMPLETED, service.receipt(REQUEST_ID)!!.receipt.status)
         now += 31L * 24 * 60 * 60 * 1_000
 
         assertEquals(1, service.purgeExpiredDetails())
-        assertEquals(null, service.detail("request-1"))
+        assertEquals(null, service.detail(REQUEST_ID))
     }
 
     @Test

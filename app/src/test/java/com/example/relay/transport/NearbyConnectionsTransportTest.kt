@@ -16,16 +16,20 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class NearbyConnectionsTransportTest {
     @Test
+    companion object {
+        private const val ENDPOINT_ID = "endpoint-1"
+    }
+
     fun `platform discovery maps endpoint name to domain peer and loss removes it`() = runTest {
         val platform = FakeNearbyPlatform()
         val transport = NearbyConnectionsTransport("local", platform, AllowedNearbyPermissionGate, backgroundScope)
         transport.start()
 
-        platform.events.emit(NearbyPlatformEvent.EndpointFound("endpoint-1", "device-B"))
+        platform.events.emit(NearbyPlatformEvent.EndpointFound(ENDPOINT_ID, "device-B"))
         runCurrent()
         assertEquals(listOf(Peer("device-B")), transport.discoveredPeers.value)
 
-        platform.events.emit(NearbyPlatformEvent.EndpointLost("endpoint-1"))
+        platform.events.emit(NearbyPlatformEvent.EndpointLost(ENDPOINT_ID))
         runCurrent()
         assertTrue(transport.discoveredPeers.value.isEmpty())
     }
@@ -47,32 +51,41 @@ class NearbyConnectionsTransportTest {
     }
 
     @Test
+    private companion object {
+        private const val ENDPOINT_ID = "endpoint-1"
+        private const val DEVICE_B = "device-B"
+    }
     fun `outgoing connection request is not duplicated when initiation callback arrives`() = runTest {
         val platform = FakeNearbyPlatform()
         val transport = NearbyConnectionsTransport("device-A", platform, AllowedNearbyPermissionGate, backgroundScope)
         transport.start()
 
-        platform.events.emit(NearbyPlatformEvent.EndpointFound("endpoint-1", "device-B"))
+        platform.events.emit(NearbyPlatformEvent.EndpointFound(ENDPOINT_ID, DEVICE_B))
         runCurrent()
-        assertEquals(listOf("endpoint-1"), platform.requested)
+        assertEquals(listOf(ENDPOINT_ID), platform.requested)
 
-        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("endpoint-1", "device-B", "1234", false))
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated(ENDPOINT_ID, DEVICE_B, "1234", false))
         runCurrent()
 
-        assertEquals(listOf("endpoint-1"), platform.requested)
-        assertEquals(listOf("endpoint-1"), platform.accepted)
+        assertEquals(listOf(ENDPOINT_ID), platform.requested)
+        assertEquals(listOf(ENDPOINT_ID), platform.accepted)
     }
 
     @Test
+    private companion object {
+        private const val ENDPOINT_ID = "endpoint-1"
+        private const val FAILURE_TYPE = "transient"
+    }
+
     fun `failed deterministic initiator retries with exponential backoff`() = runTest {
         val platform = FakeNearbyPlatform()
         val transport = NearbyConnectionsTransport("device-A", platform, AllowedNearbyPermissionGate, backgroundScope)
         transport.start()
-        platform.events.emit(NearbyPlatformEvent.EndpointFound("endpoint-1", "device-B"))
+        platform.events.emit(NearbyPlatformEvent.EndpointFound(ENDPOINT_ID, "device-B"))
         runCurrent()
         assertEquals(1, platform.requested.size)
 
-        platform.events.emit(NearbyPlatformEvent.ConnectionFailed("endpoint-1", "transient"))
+        platform.events.emit(NearbyPlatformEvent.ConnectionFailed(ENDPOINT_ID, FAILURE_TYPE))
         runCurrent()
         advanceTimeBy(999)
         runCurrent()
@@ -81,7 +94,7 @@ class NearbyConnectionsTransportTest {
         runCurrent()
         assertEquals(2, platform.requested.size)
 
-        platform.events.emit(NearbyPlatformEvent.ConnectionFailed("endpoint-1", "transient"))
+        platform.events.emit(NearbyPlatformEvent.ConnectionFailed(ENDPOINT_ID, FAILURE_TYPE))
         runCurrent()
         advanceTimeBy(1_999)
         runCurrent()

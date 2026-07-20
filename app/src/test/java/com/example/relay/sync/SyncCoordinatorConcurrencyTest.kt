@@ -49,6 +49,8 @@ import org.junit.Test
 
 class SyncCoordinatorConcurrencyTest {
     @Test
+    private val DEVICE_ID = "device-A"
+
     fun `concurrent starts invoke transport start exactly once`() = runBlocking {
         val transport = BlockingStartTransport()
         val repository = InMemoryMessageRepository()
@@ -56,7 +58,7 @@ class SyncCoordinatorConcurrencyTest {
         val policy = MessagePolicy(clock)
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
         val coordinator = SyncCoordinator(
-            "device-A",
+            DEVICE_ID,
             transport,
             repository,
             SyncPlanner(repository, policy),
@@ -95,6 +97,7 @@ class SyncCoordinatorConcurrencyTest {
             ManifestBody(SyncPlanner(repository, policy).manifest(), listOf("receipt-1")),
             packetId,
         ).size
+        private const val SENT_BYTE_LIMIT_REASON = "sent byte limit"
         val byteBudget = maxOf(helloBytes, manifestBytes).toLong()
         val transport = BlockingSendTransport()
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -113,7 +116,7 @@ class SyncCoordinatorConcurrencyTest {
         assertTrue(coordinator.start(RelayRuntimeSettings(OperatingMode.DRILL)))
         val rejected = scope.async(start = CoroutineStart.UNDISPATCHED) {
             coordinator.debugEvents.first {
-                it is SyncDebugEvent.Rejected && it.reason == "sent byte limit"
+                it is SyncDebugEvent.Rejected && it.reason == SENT_BYTE_LIMIT_REASON
             }
         }
 

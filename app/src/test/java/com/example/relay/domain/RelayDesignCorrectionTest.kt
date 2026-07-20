@@ -40,15 +40,18 @@ class RelayDesignCorrectionTest {
     }
 
     @Test
+    companion object {
+        private const val MESSAGE_ID = "message-1"
+    }
     fun `receipts derive gateway state and are deduplicated`() = runBlocking {
         val repository = InMemoryMessageRepository()
         repository.insert(message())
-        val peer = DeliveryReceipt("receipt-peer", "message-1", ReceiptType.PEER_RECEIVED, "device-B", NOW)
+        val peer = DeliveryReceipt("receipt-peer", MESSAGE_ID, ReceiptType.PEER_RECEIVED, "device-B", NOW)
         assertEquals(InsertResult.Inserted, repository.insertReceipt(peer))
         assertEquals(InsertResult.Duplicate, repository.insertReceipt(peer))
-        assertEquals(DeliveryPresentation.PEER_RECEIVED, deriveDeliveryPresentation(repository.receiptsFor("message-1")))
-        repository.insertReceipt(DeliveryReceipt("receipt-gateway", "message-1", ReceiptType.GATEWAY_RECEIVED, "device-C", NOW))
-        assertEquals(DeliveryPresentation.GATEWAY_RECEIVED, deriveDeliveryPresentation(repository.receiptsFor("message-1")))
+        assertEquals(DeliveryPresentation.PEER_RECEIVED, deriveDeliveryPresentation(repository.receiptsFor(MESSAGE_ID)))
+        repository.insertReceipt(DeliveryReceipt("receipt-gateway", MESSAGE_ID, ReceiptType.GATEWAY_RECEIVED, "device-C", NOW))
+        assertEquals(DeliveryPresentation.GATEWAY_RECEIVED, deriveDeliveryPresentation(repository.receiptsFor(MESSAGE_ID)))
     }
 
     @Test

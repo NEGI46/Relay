@@ -8,15 +8,17 @@ import kotlin.test.assertIs
 class QrTransferCodecTest {
     private val payload = ByteArray(300) { ((it % 251) + 1).toByte() }
 
-    @Test
-    fun roundTripAcceptsShuffledFrames() {
-        val frames = QrTransferCodec.encode("transfer-1", payload, 10_000, maxChunkBytes = 128)
-        val accepted = assertIs<QrTransferDecodeResult.Accepted>(QrTransferCodec.assemble(frames.shuffled(), 1_000))
-        assertEquals("transfer-1", accepted.transferId)
-        assertContentEquals(payload, accepted.payload)
+    companion object {
+        private const val TRANSFER_ID = "transfer-1"
     }
 
     @Test
+    fun roundTripAcceptsShuffledFrames() {
+        val frames = QrTransferCodec.encode(TRANSFER_ID, payload, 10_000, maxChunkBytes = 128)
+        val accepted = assertIs<QrTransferDecodeResult.Accepted>(QrTransferCodec.assemble(frames.shuffled(), 1_000))
+        assertEquals(TRANSFER_ID, accepted.transferId)
+        assertContentEquals(payload, accepted.payload)
+    }
     fun missingFrameIsRejected() {
         val frames = QrTransferCodec.encode("transfer-1", payload, 10_000, maxChunkBytes = 128)
         assertEquals(QrTransferRejection.MISSING_FRAME, (QrTransferCodec.assemble(frames.drop(1), 1_000) as QrTransferDecodeResult.Rejected).reason)

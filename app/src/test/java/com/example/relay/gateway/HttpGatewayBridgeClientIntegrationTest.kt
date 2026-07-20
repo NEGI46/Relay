@@ -105,16 +105,17 @@ class HttpGatewayBridgeClientIntegrationTest {
     }
 
     @Test
+    private const val HTTP_PUBLIC_MESSAGE_ID = "http-public-1"
     fun `public push uses real HTTP client and returns unverified gateway receipt type`() = runBlocking {
         val client = HttpGatewayBridgeClient()
         val result = client.pushPublic(
             DiscoveredGateway("127.0.0.1", port, "pc-gateway-local"),
             bridgeId = "bridge-http-test",
             bridgeName = "Relay Bridge",
-            messages = listOf(message(id = "http-public-1")),
+            messages = listOf(message(id = HTTP_PUBLIC_MESSAGE_ID)),
         )
         assertTrue(lastPath.get().contains("/api/public/sync/messages"))
-        assertTrue(lastBody.get().contains("http-public-1"))
+        assertTrue(lastBody.get().contains(HTTP_PUBLIC_MESSAGE_ID))
         assertEquals(1, result.response.acceptedMessageIds.size)
         assertEquals("GATEWAY_RECEIVED_UNVERIFIED", result.response.receipts.single().receiptType)
     }

@@ -35,11 +35,12 @@ class DashboardUiTest {
     )
 
     @Test
+    private const val GATEWAY_ID = "gw-ui"
     fun `dashboard and static console are available without admin key`() = testApplication {
         val config = GatewayConfig(
             dbPath = Files.createTempFile("relay-ui", ".db").toString(),
             adminKey = "admin-secret",
-            gatewayId = "gw-ui",
+            gatewayId = GATEWAY_ID,
         )
         GatewayStore(config).use { store ->
             store.ingestUnregistered(listOf(message()), 2_000)
@@ -48,7 +49,7 @@ class DashboardUiTest {
             val dash = client.get("/api/dashboard")
             assertEquals(HttpStatusCode.OK, dash.status)
             val body = dash.bodyAsText()
-            assertTrue(body.contains("\"gatewayId\":\"gw-ui\""))
+            assertTrue(body.contains("\"gatewayId\":\"$GATEWAY_ID\""))
             assertTrue(body.contains("\"unverifiedMessages\":1"))
             assertTrue(body.contains("\"verifiedMessages\":0"))
             assertTrue(body.contains("\"contentUnverifiedMessages\":1"))
@@ -73,25 +74,26 @@ class DashboardUiTest {
             dbPath = Files.createTempFile("relay-ui2", ".db").toString(),
             adminKey = "admin-secret",
         )
+        val detailId = "detail-1"
         GatewayStore(config).use { store ->
-            store.ingestUnregistered(listOf(message("detail-1")), 2_000)
+            store.ingestUnregistered(listOf(message(detailId)), 2_000)
             application { gatewayModule(config, store) }
 
-            assertEquals(HttpStatusCode.Unauthorized, client.get("/api/messages/detail-1").status)
+            assertEquals(HttpStatusCode.Unauthorized, client.get("/api/messages/$detailId").status)
             assertEquals(HttpStatusCode.Unauthorized, client.get("/api/messages/export.csv").status)
 
-            val detail = client.get("/api/messages/detail-1") {
+            val detail = client.get("/api/messages/$detailId") {
                 header("X-Admin-Key", "admin-secret")
             }
             assertEquals(HttpStatusCode.OK, detail.status)
-            assertTrue(detail.bodyAsText().contains("detail-1"))
+            assertTrue(detail.bodyAsText().contains(detailId))
 
             val csv = client.get("/api/messages/export.csv") {
                 header("X-Admin-Key", "admin-secret")
             }
             assertEquals(HttpStatusCode.OK, csv.status)
             assertTrue(csv.bodyAsText().contains("messageId"))
-            assertTrue(csv.bodyAsText().contains("detail-1"))
+            assertTrue(csv.bodyAsText().contains(detailId))
         }
     }
 
@@ -118,15 +120,18 @@ class DashboardUiTest {
             dbPath = Files.createTempFile("relay-ui-route", ".db").toString(),
             adminKey = "admin-secret",
         )
+        val BRIDGE_ID = "bridge-a"
+        val ADMIN_HEADER = "X-Admin-Key"
+        val ADMIN_SECRET = "admin-secret"
         GatewayStore(config).use { store ->
             val code = store.createPairingCode(1_000)
-            store.requestPair(code, "bridge-a", "Bridge A", 1_001)
-            store.approvePair("bridge-a", code, 1_002)
-            store.ingest("bridge-a", listOf(message("paired-1")), 2_000)
+            store.requestPair(code, BRIDGE_ID, "Bridge A", 1_001)
+            store.approvePair(BRIDGE_ID, code, 1_002)
+            store.ingest(BRIDGE_ID, listOf(message("paired-1")), 2_000)
             application { gatewayModule(config, store) }
 
             val authenticated = client.get("/api/messages?routeAuthentication=AUTHENTICATED_BRIDGE") {
-                header("X-Admin-Key", "admin-secret")
+                header(ADMIN_HEADER, ADMIN_SECRET)
             }
             assertEquals(HttpStatusCode.OK, authenticated.status)
             assertTrue(authenticated.bodyAsText().contains("paired-1"))
@@ -134,7 +139,7 @@ class DashboardUiTest {
             assertTrue(authenticated.bodyAsText().contains("\"routeAuthentication\":\"AUTHENTICATED_BRIDGE\""))
 
             val contentVerified = client.get("/api/messages?trust=VERIFIED") {
-                header("X-Admin-Key", "admin-secret")
+                header(ADMIN_HEADER, ADMIN_SECRET)
             }
             assertEquals(HttpStatusCode.OK, contentVerified.status)
             assertTrue(!contentVerified.bodyAsText().contains("paired-1"))

@@ -40,57 +40,60 @@ class PlaintextDatabaseMigrationTest {
                     status TEXT NOT NULL,
                     receivedAt INTEGER NOT NULL
                 )""",
-            )
-            plaintext.insertOrThrow(
-                "messages",
-                null,
-                ContentValues().apply {
-                    put("messageId", "legacy-message")
-                    put("messageType", "SAFETY")
-                    put("createdAt", 1L)
-                    put("expiresAt", 2L)
-                    put("priority", "NORMAL")
-                    put("originDeviceId", "legacy-device")
-                    put("payloadJson", "{}")
-                    put("hopCount", 0)
-                    put("maxHopCount", 8)
-                    put("status", "CREATED")
-                    put("receivedAt", 1L)
-                },
-            )
-            plaintext.close()
+    private const val LEGACY_MESSAGE = "legacy-message"
+    private const val PLAINTEXT_MIGRATION_SUFFIX = ".plaintext-migration"
 
-            PlaintextDatabaseMigration.migrateIfNeeded(context, name, passphrase)
+                )
+                plaintext.insertOrThrow(
+                    "messages",
+                    null,
+                    ContentValues().apply {
+                        put("messageId", LEGACY_MESSAGE)
+                        put("messageType", "SAFETY")
+                        put("createdAt", 1L)
+                        put("expiresAt", 2L)
+                        put("priority", "NORMAL")
+                        put("originDeviceId", "legacy-device")
+                        put("payloadJson", "{}")
+                        put("hopCount", 0)
+                        put("maxHopCount", 8)
+                        put("status", "CREATED")
+                        put("receivedAt", 1L)
+                    },
+                )
+                plaintext.close()
 
-            val header = ByteArray(16)
-            file.inputStream().use { it.read(header) }
-            assertFalse(header.contentEquals("SQLite format 3\u0000".encodeToByteArray()))
-            assertFalse(File("${file.path}.plaintext-migration").exists())
+                PlaintextDatabaseMigration.migrateIfNeeded(context, name, passphrase)
 
-            val encrypted = Room.databaseBuilder(context, RelayDatabase::class.java, name)
-                .openHelperFactory(SupportOpenHelperFactory(passphrase))
-                .build()
-            try {
-                runBlocking {
-                    assertEquals(1, encrypted.relayDao().messageCount())
-                    assertTrue(encrypted.relayDao().findMessage("legacy-message") != null)
+                val header = ByteArray(16)
+                file.inputStream().use { it.read(header) }
+                assertFalse(header.contentEquals("SQLite format 3\u0000".encodeToByteArray()))
+                assertFalse(File(file.path + PLAINTEXT_MIGRATION_SUFFIX).exists())
+
+                val encrypted = Room.databaseBuilder(context, RelayDatabase::class.java, name)
+                    .openHelperFactory(SupportOpenHelperFactory(passphrase))
+                    .build()
+                try {
+                    runBlocking {
+                        assertEquals(1, encrypted.relayDao().messageCount())
+                        assertTrue(encrypted.relayDao().findMessage(LEGACY_MESSAGE) != null)
+                    }
+                } finally {
+                    encrypted.close()
                 }
             } finally {
-                encrypted.close()
+                context.deleteDatabase(name)
+                File(file.path + PLAINTEXT_MIGRATION_SUFFIX).delete()
             }
-        } finally {
-            context.deleteDatabase(name)
-            File("${file.path}.plaintext-migration").delete()
         }
-    }
 
-    @Test
-    fun failedInstallRestoresTheOriginalPlaintextDatabase() {
-        System.loadLibrary("sqlcipher")
-        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        val name = "plaintext-migration-rollback-${UUID.randomUUID()}.db"
-        val file = context.getDatabasePath(name)
-        try {
+        @Test
+        fun failedInstallRestoresTheOriginalPlaintextDatabase() {
+            System.loadLibrary("sqlcipher")
+            val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+            val name = "plaintext-migration-rollback-${UUID.randomUUID()}.db"
+            val file = context.getDatabasePath(name)
+            try {
             createLegacyMessageDatabase(file)
 
             val failure = runCatching {

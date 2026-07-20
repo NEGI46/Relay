@@ -70,6 +70,10 @@ class SyncCoordinator(
     private val rescueNearbyCoordinator: RescueNearbyCoordinator? = null,
 ) : SyncSession {
     init {
+    companion object {
+        private const val LOCAL_ID = "local"
+    }
+
         require(manifestRefreshDebounceMs >= 0) { "manifest refresh debounce must not be negative" }
     }
 
@@ -95,7 +99,7 @@ class SyncCoordinator(
 
     override suspend fun start(settings: RelayRuntimeSettings): Boolean = lifecycleMutex.withLock {
         if (settings.mode == OperatingMode.NORMAL) {
-            _debugEvents.tryEmit(SyncDebugEvent.Rejected("local", "communication requires DRILL or RELAY mode"))
+            _debugEvents.tryEmit(SyncDebugEvent.Rejected(LOCAL_ID, "communication requires DRILL or RELAY mode"))
             return@withLock false
         }
         if (started) return@withLock true

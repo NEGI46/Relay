@@ -127,6 +127,11 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
      * Durable rescue storage sharing the gateway database file, but using its own
      * WAL-configured connection so legacy gateway work cannot hold a rescue intake lock.
      */
+    companion object {
+        private const val DEFAULT_UNVERIFIED = "UNVERIFIED"
+        private const val DEFAULT_ANONYMOUS_LAN = "ANONYMOUS_LAN"
+    }
+
     fun rescuePersistence(): RescuePersistence = rescuePersistenceDelegate.value
 
     init {
@@ -143,24 +148,24 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                   record_type TEXT NOT NULL, priority TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL,
                   expires_at INTEGER NOT NULL, lifetime_ms INTEGER NOT NULL, accumulated_age_ms INTEGER NOT NULL,
                   hop_count INTEGER NOT NULL, hop_limit INTEGER NOT NULL, origin_id TEXT NOT NULL, received_at INTEGER NOT NULL,
-                  ingress_trust TEXT NOT NULL DEFAULT 'UNVERIFIED',
-                  route_authentication TEXT NOT NULL DEFAULT 'ANONYMOUS_LAN',
-                  content_verification TEXT NOT NULL DEFAULT 'UNVERIFIED',
+                  ingress_trust TEXT NOT NULL DEFAULT '$DEFAULT_UNVERIFIED',
+                  route_authentication TEXT NOT NULL DEFAULT '$DEFAULT_ANONYMOUS_LAN',
+                  content_verification TEXT NOT NULL DEFAULT '$DEFAULT_UNVERIFIED',
                   source_bridge_id TEXT,
                   status_event_created_at INTEGER NOT NULL DEFAULT -1,
                   status_event_id TEXT NOT NULL DEFAULT ''
                 )
                 """.trimIndent(),
             )
-            ensureColumn(statement, "messages", "ingress_trust", "TEXT NOT NULL DEFAULT 'UNVERIFIED'")
+            ensureColumn(statement, "messages", "ingress_trust", "TEXT NOT NULL DEFAULT '$DEFAULT_UNVERIFIED'")
             ensureColumn(statement, "messages", "source_bridge_id", "TEXT")
             val routeColumnAdded = ensureColumn(
                 statement,
                 "messages",
                 "route_authentication",
-                "TEXT NOT NULL DEFAULT 'ANONYMOUS_LAN'",
+                "TEXT NOT NULL DEFAULT '$DEFAULT_ANONYMOUS_LAN'",
             )
-            ensureColumn(statement, "messages", "content_verification", "TEXT NOT NULL DEFAULT 'UNVERIFIED'")
+            ensureColumn(statement, "messages", "content_verification", "TEXT NOT NULL DEFAULT '$DEFAULT_UNVERIFIED'")
             if (routeColumnAdded) {
                 // Legacy ingress_trust represented whether the transport Bridge was authenticated,
                 // not whether the report content or claimed origin had been verified.
@@ -170,14 +175,14 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                     SET route_authentication = CASE
                       WHEN ingress_trust='VERIFIED' OR source_bridge_id IS NOT NULL
                         THEN 'AUTHENTICATED_BRIDGE'
-                      ELSE 'ANONYMOUS_LAN'
+                      ELSE '$DEFAULT_ANONYMOUS_LAN'
                     END
                     """.trimIndent(),
                 )
             }
             // No deployed MVP version cryptographically verified report content. Preserve route
             // evidence in route_authentication, and conservatively migrate every legacy row.
-            statement.execute("UPDATE messages SET content_verification='UNVERIFIED', ingress_trust='UNVERIFIED'")
+            statement.execute("UPDATE messages SET content_verification='$DEFAULT_UNVERIFIED', ingress_trust='$DEFAULT_UNVERIFIED'")
             ensureColumn(statement, "messages", "status_event_created_at", "INTEGER NOT NULL DEFAULT -1")
             ensureColumn(statement, "messages", "status_event_id", "TEXT NOT NULL DEFAULT ''")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(priority, created_at, expires_at)")
@@ -376,6 +381,11 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                 .thenByDescending { it.value.createdAt },
         )
 
+    private companion object {
+        private const val STATUS_REJECTED = "REJECTED"
+        private const val REASON_INVALID_STATUS_CHANGE = "invalid_status_change"
+    }
+
     private fun priorityRank(priority: String): Int = when (priority) {
         "CRITICAL" -> 4
         "HIGH" -> 3
@@ -399,24 +409,24 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         // REPORT signature is retained as signed-but-unverified until an issuer registry exists.
         val contentVerification = if (message.reportSignature != null) CONTENT_SIGNED_UNVERIFIED else CONTENT_UNVERIFIED
         if (message.messageId.isBlank() || message.messageId.length > 64 || message.originDeviceId.length !in 1..64) {
-            return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_identifier")
+            return StoreOutcome(message.messageId, STATUS_REJECTED, reason = "invalid_identifier")
         }
         if (message.lifetimeMs !in 1..604_800_000L ||
             message.accumulatedAgeMs !in 0..message.lifetimeMs ||
             message.accumulatedAgeMs >= message.lifetimeMs
         ) {
-            return StoreOutcome(message.messageId, "REJECTED", reason = "expired_or_invalid_ttl")
+            return StoreOutcome(message.messageId, STATUS_REJECTED, reason = "expired_or_invalid_ttl")
         }
         if (message.hopLimit !in 1..32 || message.hopCount !in 0..message.hopLimit) {
-            return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_hop")
+            return StoreOutcome(message.messageId, STATUS_REJECTED, reason = "invalid_hop")
         }
         if (message.recordType == "STATUS_CHANGE") {
             val target = message.payload.jsonObject["targetMessageId"]?.jsonPrimitive?.content
-                ?: return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_status_change")
+                ?: return StoreOutcome(message.messageId, STATUS_REJECTED, reason = REASON_INVALID_STATUS_CHANGE)
             val newStatus = message.payload.jsonObject["newStatus"]?.jsonPrimitive?.content
-                ?: return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_status_change")
+                ?: return StoreOutcome(message.messageId, STATUS_REJECTED, reason = REASON_INVALID_STATUS_CHANGE)
             if (newStatus !in setOf("ACTIVE", "RESOLVED", "RETRACTED")) {
-                return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_status_change")
+                return StoreOutcome(message.messageId, STATUS_REJECTED, reason = REASON_INVALID_STATUS_CHANGE)
             }
             val exists = connection.prepareStatement(
                 "SELECT 1 FROM messages WHERE message_id=? AND record_type='REPORT'",
@@ -424,7 +434,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                 ps.setString(1, target)
                 ps.executeQuery().use { it.next() }
             }
-            if (!exists) return StoreOutcome(message.messageId, "REJECTED", reason = "target_report_not_found")
+            if (!exists) return StoreOutcome(message.messageId, STATUS_REJECTED, reason = "target_report_not_found")
         }
         val existing = connection.prepareStatement("SELECT canonical_json FROM messages WHERE message_id=?").use { ps ->
             ps.setString(1, message.messageId)

@@ -74,12 +74,16 @@ class RescueBleFrameCodecTest {
         assertNull(RescueBleFrameCodec.decode(byteArrayOf(1, 11, 0, 0, 0, 1, 1, 2, 3, 4)))
     }
 
+    companion object {
+        private const val DELIVERY_ID = "delivery-id"
+    }
+
     @Test
     fun stableCourierIdProducesStableSessionId() {
         assertArrayEquals(
-            RescueBleFrameCodec.sessionIdFor("delivery-id"),
-            RescueBleFrameCodec.sessionIdFor("delivery-id"),
+            RescueBleFrameCodec.sessionIdFor(DELIVERY_ID),
+            RescueBleFrameCodec.sessionIdFor(DELIVERY_ID),
         )
-        assertEquals(4, RescueBleFrameCodec.sessionIdFor("delivery-id").size)
+        assertEquals(4, RescueBleFrameCodec.sessionIdFor(DELIVERY_ID).size)
     }
 }

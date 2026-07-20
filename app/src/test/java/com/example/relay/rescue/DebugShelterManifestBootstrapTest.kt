@@ -9,8 +9,12 @@ import org.junit.Test
 
 class DebugShelterManifestBootstrapTest {
     @Test
+    companion object {
+        private const val DEBUG_SHELTER = "debug-shelter"
+    }
+
     fun `local test gateway manifest is saved with its computed fingerprint`() = runTest {
-        val manifest = manifest("debug-shelter")
+        val manifest = manifest(DEBUG_SHELTER)
         var saved: Pair<ShelterPublicKeyManifest, String>? = null
         val bootstrap = DebugShelterManifestBootstrap(
             discovery = discovery(),

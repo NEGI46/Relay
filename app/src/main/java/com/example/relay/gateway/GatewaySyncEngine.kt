@@ -210,13 +210,18 @@ interface GatewayDeliveryLedger {
 class SharedPreferencesGatewayDeliveryLedger(context: Context) : GatewayDeliveryLedger {
     private val preferences = context.getSharedPreferences("relay_gateway_pending", Context.MODE_PRIVATE)
 
+    companion object {
+        private const val COMPLETED_IDS_KEY = "completed_ids"
+        private const val TERMINAL_IDS_KEY = "terminal_ids"
+    }
+
     @Synchronized
     override fun pendingIds(existingMessageIds: Set<String>): Set<String> {
-        val completed = preferences.getStringSet("completed_ids", emptySet()).orEmpty().intersect(existingMessageIds)
-        val terminal = preferences.getStringSet("terminal_ids", emptySet()).orEmpty().intersect(existingMessageIds)
+        val completed = preferences.getStringSet(COMPLETED_IDS_KEY, emptySet()).orEmpty().intersect(existingMessageIds)
+        val terminal = preferences.getStringSet(TERMINAL_IDS_KEY, emptySet()).orEmpty().intersect(existingMessageIds)
         preferences.edit()
-            .putStringSet("completed_ids", completed)
-            .putStringSet("terminal_ids", terminal)
+            .putStringSet(COMPLETED_IDS_KEY, completed)
+            .putStringSet(TERMINAL_IDS_KEY, terminal)
             .apply()
         return existingMessageIds - completed - terminal
     }

@@ -27,11 +27,11 @@ class SqliteRescueDeliverySafetyTest {
         try {
             SqliteRescuePersistence(database.toString(), GatewayJson).use { persistence ->
                 val service = service(recipient.privateKey, signer.privateKey, persistence)
-                val accepted = service.ingest(envelope, "courier-one", "delivery-stable")
+                val accepted = service.ingest(envelope, COURIER_ONE, DELIVERY_STABLE)
                     as RescueIngestResult.Accepted
                 assertTrue(RescueCryptography.verifyReceipt(accepted.request.receipt, signer.publicKey))
 
-                val replay = service.ingest(envelope, "courier-one", "delivery-stable")
+                val replay = service.ingest(envelope, COURIER_ONE, DELIVERY_STABLE)
                     as RescueIngestResult.Duplicate
                 assertEquals(false, replay.carrierWasNew)
                 assertEquals(false, replay.deliveryWasNew)

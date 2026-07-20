@@ -23,7 +23,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AnonymousIngressTest {
-    private fun message(id: String = "anonymous-1") = GatewayMessage(
+    companion object {
+        private const val DEFAULT_ANONYMOUS_ID = "anonymous-1"
+        private const val ANONYMOUS_DEVICE_ID = "anonymous-device"
+    }
+    private fun message(id: String = DEFAULT_ANONYMOUS_ID) = GatewayMessage(
         messageId = id,
         messageType = "SAFETY",
         recordType = "REPORT",
@@ -35,7 +39,7 @@ class AnonymousIngressTest {
         accumulatedAgeMs = 0,
         hopCount = 1,
         hopLimit = 8,
-        originDeviceId = "anonymous-device",
+        originDeviceId = ANONYMOUS_DEVICE_ID,
         payload = JsonPrimitive("safe"),
         receivedAt = 1_000,
     )
@@ -53,6 +57,11 @@ class AnonymousIngressTest {
         },
     )
 
+    companion object {
+        private const val UNVERIFIED = "unverified"
+        private const val MESSAGE_ID = "anonymous-1"
+    }
+
     @Test fun `public ingress stores without token but returns only unverified receipt and admin remains protected`() = testApplication {
         val config = GatewayConfig(
             dbPath = Files.createTempFile("relay-anonymous", ".db").toString(),
@@ -67,15 +76,15 @@ class AnonymousIngressTest {
                 setBody(GatewayJson.encodeToString(SyncMessagesRequest(bridgeId = "unregistered", bridgeName = "phone", messages = listOf(message()))))
             }
             assertEquals(HttpStatusCode.OK, response.status)
-            assertEquals("unverified", response.headers["X-Relay-Receipt-Trust"])
+            assertEquals(UNVERIFIED, response.headers["X-Relay-Receipt-Trust"])
             assertEquals("anonymous_lan", response.headers["X-Relay-Route-Authentication"])
-            assertEquals("unverified", response.headers["X-Relay-Content-Verification"])
+            assertEquals(UNVERIFIED, response.headers["X-Relay-Content-Verification"])
             assertEquals("gateway_saved", response.headers["X-Relay-Receipt-Semantics"])
             val body = GatewayJson.decodeFromString(SyncMessagesResponse.serializer(), response.bodyAsText())
-            assertEquals(listOf("anonymous-1"), body.acceptedMessageIds)
+            assertEquals(listOf(MESSAGE_ID), body.acceptedMessageIds)
             assertEquals(UNVERIFIED_GATEWAY_RECEIPT_TYPE, body.receipts.single().receiptType)
-            assertEquals("ANONYMOUS_LAN", store.messageDetail("anonymous-1")?.routeAuthentication)
-            assertEquals("UNVERIFIED", store.messageDetail("anonymous-1")?.contentVerification)
+            assertEquals("ANONYMOUS_LAN", store.messageDetail(MESSAGE_ID)?.routeAuthentication)
+            assertEquals("UNVERIFIED", store.messageDetail(MESSAGE_ID)?.contentVerification)
             assertEquals(HttpStatusCode.Unauthorized, client.get("/api/messages").status)
         } finally {
             store.close()
@@ -132,6 +141,11 @@ class AnonymousIngressTest {
         }
     }
 
+    companion object {
+        private const val DUPLICATE_HIGH_MESSAGE_ID = "duplicate-high"
+        private const val COLLISION_NORMAL_MESSAGE_ID = "collision-normal"
+        private const val NEW_LOW_MESSAGE_ID = "new-low"
+    }
     @Test fun `public sync response keeps store outcomes matched to message IDs after priority sorting`() = testApplication {
         val config = GatewayConfig(
             dbPath = Files.createTempFile("relay-anonymous-outcome-ids", ".db").toString(),
@@ -139,10 +153,10 @@ class AnonymousIngressTest {
         )
         val store = GatewayStore(config)
         application { gatewayModule(config, store) }
-        val duplicate = message("duplicate-high").copy(priority = "CRITICAL")
-        val storedCollision = message("collision-normal").copy(priority = "NORMAL")
+        val duplicate = message(DUPLICATE_HIGH_MESSAGE_ID).copy(priority = "CRITICAL")
+        val storedCollision = message(COLLISION_NORMAL_MESSAGE_ID).copy(priority = "NORMAL")
         store.ingestUnregistered(listOf(duplicate, storedCollision), now = 2_000)
-        val newMessage = message("new-low").copy(priority = "LOW")
+        val newMessage = message(NEW_LOW_MESSAGE_ID).copy(priority = "LOW")
         val collidingMessage = storedCollision.copy(payload = JsonPrimitive("different"))
         val request = SyncMessagesRequest(
             bridgeId = "unregistered",
@@ -157,24 +171,26 @@ class AnonymousIngressTest {
             assertEquals(HttpStatusCode.OK, response.status)
             val decoded = GatewayJson.decodeFromString(SyncMessagesResponse.serializer(), response.bodyAsText())
 
-            assertEquals(listOf("new-low"), decoded.acceptedMessageIds)
-            assertEquals(listOf("duplicate-high"), decoded.duplicateMessageIds)
-            assertEquals(listOf("collision-normal"), decoded.rejected.map { it.messageId })
+            assertEquals(listOf(NEW_LOW_MESSAGE_ID), decoded.acceptedMessageIds)
+            assertEquals(listOf(DUPLICATE_HIGH_MESSAGE_ID), decoded.duplicateMessageIds)
+            assertEquals(listOf(COLLISION_NORMAL_MESSAGE_ID), decoded.rejected.map { it.messageId })
             assertEquals("messageId collision", decoded.rejected.single().reason)
-            assertEquals(setOf("new-low", "duplicate-high"), decoded.receipts.map { it.messageId }.toSet())
+            assertEquals(setOf(NEW_LOW_MESSAGE_ID, DUPLICATE_HIGH_MESSAGE_ID), decoded.receipts.map { it.messageId }.toSet())
         } finally {
             store.close()
         }
     }
 
+    private const val SOURCE = "source"
+
     @Test fun `limiter resets window and accounts for bytes and messages`() {
         var now = 1_000L
         val limiter = AnonymousIngressRateLimiter(2, 2, 10, windowMs = 1_000) { now }
-        assertTrue(limiter.allow("source", 1, 5))
-        assertFalse(limiter.allow("source", 2, 1))
+        assertTrue(limiter.allow(SOURCE, 1, 5))
+        assertFalse(limiter.allow(SOURCE, 2, 1))
         assertTrue(limiter.allow("other", 2, 10))
         now += 1_000
-        assertTrue(limiter.allow("source", 2, 10))
+        assertTrue(limiter.allow(SOURCE, 2, 10))
     }
 
     @Test fun `LAN announcement contains discovery data but no admin secret`() {

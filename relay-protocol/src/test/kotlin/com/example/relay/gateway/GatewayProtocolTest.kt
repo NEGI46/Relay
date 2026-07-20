@@ -27,15 +27,16 @@ import org.junit.Test
 class GatewayProtocolTest {
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
+    private const val TEST_PAYLOAD = "payload"
+
     @Test fun `REPORT DTO round trips with protocol version`() {
-        val message = GatewayMessage("m", "SAFETY", "REPORT", "HIGH", "RECEIVED", 1, 10, 9, 0, 0, 8, "origin", JsonPrimitive("payload"), 1)
+        val message = GatewayMessage("m", "SAFETY", "REPORT", "HIGH", "RECEIVED", 1, 10, 9, 0, 0, 8, "origin", JsonPrimitive(TEST_PAYLOAD), 1)
         val encoded = json.encodeToString(GatewayMessage.serializer(), message)
         val decoded = json.decodeFromString(GatewayMessage.serializer(), encoded)
         assertEquals(message, decoded)
         assertEquals(1, GATEWAY_PROTOCOL_VERSION)
         assertEquals(GATEWAY_PROTOCOL_V1, GATEWAY_PROTOCOL_VERSION)
     }
-
     @Test fun `Receipt keeps gateway semantics and actor`() {
         val receipt = GatewayReceipt("r", "m", "GATEWAY_RECEIVED", "gateway", 10)
         assertEquals(receipt, json.decodeFromString(GatewayReceipt.serializer(), json.encodeToString(GatewayReceipt.serializer(), receipt)))

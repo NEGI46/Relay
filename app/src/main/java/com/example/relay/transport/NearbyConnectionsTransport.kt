@@ -79,14 +79,18 @@ class NearbyConnectionsTransport(
         requestPeerConnection(peerId)
     }
 
+    companion object {
+        private const val ACCEPT_ACTION = "accept"
+    }
+
     override suspend fun acceptConnection(peerId: String) {
-        val endpointId = peerToEndpoint[peerId] ?: return fail("accept", "unknown peer")
-        if (peerId !in _state.value.pendingVerifications) return fail("accept", "verification is not pending")
+        val endpointId = peerToEndpoint[peerId] ?: return fail(ACCEPT_ACTION, "unknown peer")
+        if (peerId !in _state.value.pendingVerifications) return fail(ACCEPT_ACTION, "verification is not pending")
         try {
             platform.acceptConnection(endpointId)
         } catch (error: Exception) {
             clearPeerConnection(peerId)
-            fail("accept", error.safeReason())
+            fail(ACCEPT_ACTION, error.safeReason())
             _connectionEvents.emit(ConnectionEvent.Failed(peerId, error.safeReason()))
         }
     }
@@ -246,8 +250,12 @@ class NearbyConnectionsTransport(
         )
     }
 
+    companion object {
+        private const val OPERATION_CONNECT = "connect"
+    }
+
     private suspend fun requestPeerConnection(peerId: String) {
-        val endpointId = peerToEndpoint[peerId] ?: return fail("connect", "unknown peer")
+        val endpointId = peerToEndpoint[peerId] ?: return fail(OPERATION_CONNECT, "unknown peer")
         if (!_state.value.started || peerId in _state.value.connectedPeerIds || !connectingPeerIds.add(peerId)) return
         val timeoutJob = prepareConnectionAttemptTimeout(peerId)
         try {
@@ -256,7 +264,7 @@ class NearbyConnectionsTransport(
         } catch (error: Exception) {
             cancelConnectionAttemptTimeout(peerId)
             connectingPeerIds -= peerId
-            fail("connect", error.safeReason())
+            fail(OPERATION_CONNECT, error.safeReason())
             _connectionEvents.emit(ConnectionEvent.Failed(peerId, error.safeReason()))
             scheduleReconnect(peerId)
         }

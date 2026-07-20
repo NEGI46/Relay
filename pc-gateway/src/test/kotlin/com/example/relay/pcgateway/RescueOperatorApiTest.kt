@@ -24,10 +24,14 @@ import org.junit.Test
 
 class RescueOperatorApiTest {
     @Test
+    companion object {
+        private const val STAFF_PIN = "staff-pin"
+    }
+
     fun `staff can view exact rescue detail and claim the response`() = testApplication {
         val config = GatewayConfig(
             dbPath = Files.createTempFile("relay-rescue-api", ".db").toString(),
-            adminKey = "staff-pin",
+            adminKey = STAFF_PIN,
             shelterId = "fuchu-area",
         )
         val recipient = RescueCryptography.generateRecipientKeyPair()
@@ -57,13 +61,13 @@ class RescueOperatorApiTest {
             application { gatewayModule(config, store, rescueIntakeService = service) }
             assertEquals(HttpStatusCode.Unauthorized, client.get("/api/rescue/requests").status)
 
-            val list = client.get("/api/rescue/requests") { header("X-Admin-Key", "staff-pin") }
+            val list = client.get("/api/rescue/requests") { header("X-Admin-Key", STAFF_PIN) }
             assertEquals(HttpStatusCode.OK, list.status)
             assertTrue(list.bodyAsText().contains("動けません"))
             assertTrue(list.bodyAsText().contains("34.39"))
 
             val claimed = client.post("/api/rescue/requests/request-api-1/status") {
-                header("X-Admin-Key", "staff-pin")
+                header("X-Admin-Key", STAFF_PIN)
                 contentType(ContentType.Application.Json)
                 setBody("""{"status":"CONFIRMED","operatorNodeId":"shelter-pc-a"}""")
             }
