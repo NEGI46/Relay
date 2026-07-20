@@ -151,6 +151,12 @@ class RelayApplication : Application() {
     }
     val gatewaySettingsStore: GatewaySettingsStore by lazy { GatewaySettingsStore(this) }
     val gatewayCredentialStore: GatewayCredentialStore by lazy { GatewayCredentialStore(this) }
+    val gatewayDiscovery: UdpGatewayDiscovery by lazy {
+        UdpGatewayDiscovery(
+            context = this,
+            onDiagnostic = { diagnostic -> gatewaySettingsStore.recordDiscovery(diagnostic.gatewayIp, diagnostic.result) },
+        )
+    }
     val gatewaySyncEngine: GatewaySyncEngine by lazy {
         GatewaySyncEngine(
             messageRepository,
@@ -160,7 +166,7 @@ class RelayApplication : Application() {
             MessagePolicy(SystemClock),
             applicationScope,
             SharedPreferencesGatewayDeliveryLedger(this),
-            discovery = UdpGatewayDiscovery(),
+            discovery = gatewayDiscovery,
             localBridgeId = deviceId,
         )
     }
@@ -201,7 +207,7 @@ class RelayApplication : Application() {
         if (BuildConfig.DEBUG) {
             applicationScope.launch {
                 DebugShelterManifestBootstrap(
-                    discovery = UdpGatewayDiscovery(),
+                    discovery = gatewayDiscovery,
                     client = HttpShelterManifestClient(),
                     loadExisting = rescueShelterKeyStore::load,
                     saveManifest = rescueShelterKeyStore::saveVerifiedManifest,
