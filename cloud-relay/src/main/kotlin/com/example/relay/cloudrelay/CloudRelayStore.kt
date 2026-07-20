@@ -14,6 +14,7 @@ private val cloudJson = Json { ignoreUnknownKeys = false; encodeDefaults = true 
 interface CloudRelayStore {
     fun put(envelope: EncryptedRescueEnvelope, now: Long): CloudStoredReceipt
     fun pending(shelterId: String, now: Long, limit: Int): List<EncryptedRescueEnvelope>
+    fun saveReceipt(shelterId: String, receipt: SignedShelterReceipt): Boolean
     fun receipt(deviceId: String, envelopeId: String): SignedShelterReceipt?
 }
 class PostgresCloudRelayStore(private val jdbcUrl:String, private val user:String, private val password:String):CloudRelayStore {
@@ -26,11 +27,13 @@ class PostgresCloudRelayStore(private val jdbcUrl:String, private val user:Strin
         } }
     }
     override fun pending(shelterId:String,now:Long,limit:Int):List<EncryptedRescueEnvelope> = DriverManager.getConnection(jdbcUrl,user,password).use { c -> c.prepareStatement("SELECT envelope_json FROM relay_envelopes WHERE shelter_id=? AND expires_at>? ORDER BY stored_at LIMIT ?").use { s -> s.setString(1,shelterId); s.setLong(2,now); s.setInt(3,limit); s.executeQuery().use { rs -> buildList { while(rs.next()) add(cloudJson.decodeFromString(rs.getString(1))) } } } }
+    override fun saveReceipt(shelterId:String, receipt:SignedShelterReceipt):Boolean = DriverManager.getConnection(jdbcUrl,user,password).use { c -> c.prepareStatement("INSERT INTO relay_receipts(receipt_id,envelope_id,receipt_json) SELECT ?,envelope_id,? FROM relay_envelopes WHERE envelope_id=? AND shelter_id=? ON CONFLICT DO NOTHING").use { s -> s.setString(1,receipt.receipt.receiptId); s.setString(2,cloudJson.encodeToString(receipt)); s.setString(3,receipt.receipt.envelopeId); s.setString(4,shelterId); s.executeUpdate()==1 } }
     override fun receipt(deviceId:String,envelopeId:String):SignedShelterReceipt? = DriverManager.getConnection(jdbcUrl,user,password).use { c -> c.prepareStatement("SELECT r.receipt_json FROM relay_receipts r JOIN relay_envelopes e ON e.envelope_id=r.envelope_id WHERE e.sender_device_id=? AND e.envelope_id=?").use { s -> s.setString(1,deviceId); s.setString(2,envelopeId); s.executeQuery().use { rs -> if(rs.next()) cloudJson.decodeFromString(rs.getString(1)) else null } } }
 }
 class InMemoryCloudRelayStore:CloudRelayStore {
     private val envelopes=ConcurrentHashMap<String,EncryptedRescueEnvelope>()
     override fun put(e:EncryptedRescueEnvelope,now:Long)=CloudStoredReceipt(UUID.randomUUID().toString(),e.envelopeId,e.requestId,e.requestVersion,e.ciphertextSha256Hex,e.destinationShelterId,now).also { envelopes.putIfAbsent(e.envelopeId,e) }
     override fun pending(shelterId:String,now:Long,limit:Int)=envelopes.values.filter { it.destinationShelterId==shelterId && it.expiresAtEpochMillis>now }.take(limit)
+    override fun saveReceipt(shelterId:String, receipt:SignedShelterReceipt)=envelopes[receipt.receipt.envelopeId]?.destinationShelterId==shelterId
     override fun receipt(deviceId:String,envelopeId:String):SignedShelterReceipt?=null
 }
