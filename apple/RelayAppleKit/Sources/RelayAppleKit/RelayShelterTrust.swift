@@ -45,9 +45,9 @@ public struct RelayVerifiedShelterDirectory: Sendable {
     /// read the identity characteristic after connection and invoke this again
     /// before writing any encrypted parcel.
     public func resolves(_ advertised: RelayShelterBleIdentity) -> Bool {
-        shelters.filter {
-            $0.shelterIdHashPrefix == advertised.shelterIdHashPrefix &&
-            $0.signedManifestFingerprintPrefix == advertised.signedManifestFingerprintPrefix
+        shelters.filter { shelter in
+            shelter.shelterIdHashPrefix == advertised.shelterIdHashPrefix &&
+            shelter.signedManifestFingerprintPrefix == advertised.signedManifestFingerprintPrefix
         }.count == 1
     }
 }

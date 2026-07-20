@@ -44,8 +44,8 @@ public struct RelayOpaqueCourierParcel: Codable, Equatable, Sendable {
 
     private static func isIdentifier(_ value: String) -> Bool {
         let bytes = Array(value.utf8)
-        return !bytes.isEmpty && bytes.count <= 128 && bytes.allSatisfy {
-            ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) || $0 == 45 || $0 == 95 || $0 == 46 || $0 == 58
+        return !bytes.isEmpty && bytes.count <= 128 && bytes.allSatisfy { byte in
+            (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 45 || byte == 95 || byte == 46 || byte == 58
         }
     }
 }
