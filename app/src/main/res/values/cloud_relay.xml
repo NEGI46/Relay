@@ -1,0 +1,3 @@
+<resources>
+    <string name="cloud_relay_endpoint" translatable="false">https://relay.example.invalid</string>
+</resources>
