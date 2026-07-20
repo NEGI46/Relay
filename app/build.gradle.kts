@@ -59,6 +59,7 @@ dependencies {
     implementation(project(":relay-protocol"))
     implementation(project(":shared"))
     implementation(libs.androidx.core.ktx)
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime)
     implementation(libs.androidx.lifecycle.runtime.compose)
