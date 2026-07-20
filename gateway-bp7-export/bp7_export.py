@@ -36,7 +36,12 @@ def import_fixture(data: bytes) -> RelayEnvelope:
     raw = json.loads(data)
     if raw.get("bpVersion") != 7:
         raise ValueError("unsupported bundle version")
-    extension = next(block for block in raw["extensionBlocks"] if block["type"] == "relay-envelope")
+    extension = next(
+        (block for block in raw["extensionBlocks"] if block["type"] == "relay-envelope"),
+        None,
+    )
+    if extension is None:
+        raise ValueError("missing relay-envelope extension block")
     data = extension["data"]
     return RelayEnvelope(data["messageId"], int(data["ttl"]), data["payloadHash"], data["priority"])
 
