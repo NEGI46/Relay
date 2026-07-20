@@ -10,6 +10,10 @@ data class GatewaySettings(
     val automaticSync: Boolean = true,
     val lastConnectedAt: Long? = null,
     val lastSyncResult: String? = null,
+    /** Safe, operator-visible LAN diagnostics; never contains message contents or ciphertext. */
+    val lastDiscoveredGatewayIp: String? = null,
+    val lastDiscoveryResult: String? = null,
+    val lastDeliveryResult: String? = null,
 )
 
 sealed interface GatewaySyncResult {
