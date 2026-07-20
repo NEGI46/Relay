@@ -16,6 +16,7 @@ import com.example.relay.RelayApplication
 import com.example.relay.rescue.RescueSubmissionStatus
 import com.example.relay.rescue.SharedPreferencesRescueAutomationStore
 import com.example.relay.rescue.HttpShelterGatewayDelivery
+import com.example.relay.rescue.GatewayDeliveryResult
 import com.example.relay.rescue.ble.SharedPreferencesCourierDeliveryIdStore
 import com.example.relay.rescue.RescueRequestKey
 import com.example.relay.rescue.RescueUrgency
@@ -117,25 +118,34 @@ class RescueDeliveryService : Service() {
                     System.currentTimeMillis(),
                 )
                 if (candidate != null) {
-                    val receipt = delivery.deliver(
+                    when (val result = delivery.deliver(
                         candidate.envelope,
                         app.deviceId,
                         deliveryIds.idFor(RescueRequestKey(candidate.envelope.requestId, candidate.envelope.requestVersion)),
-                    )
-                    if (receipt != null) {
+                    )) {
+                    is GatewayDeliveryResult.Accepted -> {
                         val keys = app.rescueShelterKeyStore.load()
                         if (keys != null) {
                             app.rescueRepository.applyReceipt(
                                 RescueRequestKey(candidate.envelope.requestId, candidate.envelope.requestVersion),
-                                receipt,
+                                result.receipt,
                                 keys.receiptSigningKey,
                             )
                         }
                     }
+                    else -> recordDeliveryDiagnostic(result)
+                    }
                 }
-                delay(5_000)
+                delay(2_000)
             }
         }
+    }
+
+    private fun recordDeliveryDiagnostic(result: GatewayDeliveryResult) {
+        getSharedPreferences("relay_rescue_diagnostics", MODE_PRIVATE).edit()
+            .putString("last_delivery_result", result.javaClass.simpleName)
+            .putLong("last_delivery_at", System.currentTimeMillis())
+            .apply()
     }
 
     private fun notifyStatus(status: RescueSubmissionStatus) {

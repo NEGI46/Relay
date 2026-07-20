@@ -28,8 +28,14 @@ android {
     }
 
     defaultConfig {
-        buildConfigField("String", "GIT_COMMIT", "\"unknown\"")
+        val gitCommit = providers.exec { commandLine("git", "rev-parse", "HEAD") }.standardOutput.asText.get().trim()
+        buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
         buildConfigField("String", "BUILD_TIME", "\"${Instant.now()}\"")
+    }
+
+    buildTypes {
+        create("localDev") { initWith(getByName("debug")); matchingFallbacks += listOf("debug") }
+        create("pilotRelease") { initWith(getByName("release")); matchingFallbacks += listOf("release") }
     }
 
     packaging {

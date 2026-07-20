@@ -8,6 +8,9 @@ param(
     [string]$GatewayId = 'pc-gateway-local',
     [string]$AdminKey = '',
     [string]$DbPath = '',
+    [string]$RescueKeyFile = "$env:ProgramData\RelayPcGateway\rescue-keys.json",
+    [string]$SignedManifestFile = "$env:ProgramData\RelayPcGateway\rescue-manifest.json",
+    [string]$RegionalRootBundleFile = "$env:ProgramData\RelayPcGateway\regional-root.json",
     [string]$RunnerPath = "$env:ProgramData\RelayPcGateway\run-gateway.ps1"
 )
 
@@ -42,6 +45,14 @@ if (-not [Net.IPAddress]::TryParse($HostBind, [ref]$parsedAddress)) {
 
 $Executable = [IO.Path]::GetFullPath($Executable)
 $RunnerPath = [IO.Path]::GetFullPath($RunnerPath)
+$RescueKeyFile = [IO.Path]::GetFullPath($RescueKeyFile)
+$SignedManifestFile = [IO.Path]::GetFullPath($SignedManifestFile)
+$RegionalRootBundleFile = [IO.Path]::GetFullPath($RegionalRootBundleFile)
+$rescueDirectory = Split-Path -Parent $RescueKeyFile
+New-Item -ItemType Directory -Path $rescueDirectory -Force | Out-Null
+if (Test-Path -LiteralPath $RescueKeyFile -PathType Leaf) {
+    & icacls.exe $RescueKeyFile /inheritance:r /grant:r 'Administrators:F' 'SYSTEM:F' | Out-Null
+}
 $relayDir = Join-Path $env:USERPROFILE '.relay'
 New-Item -ItemType Directory -Path $relayDir -Force | Out-Null
 $adminKeyFile = Join-Path $relayDir 'admin.key'
@@ -72,6 +83,9 @@ $runnerLines = @(
     "`$env:RELAY_GATEWAY_ID = $(ConvertTo-SingleQuotedLiteral $GatewayId)"
     "`$env:RELAY_GATEWAY_DB = $(ConvertTo-SingleQuotedLiteral $DbPath)"
     "`$env:RELAY_GATEWAY_ADMIN_KEY_FILE = $(ConvertTo-SingleQuotedLiteral $adminKeyFile)"
+    "`$env:RELAY_RESCUE_KEY_FILE = $(ConvertTo-SingleQuotedLiteral $RescueKeyFile)"
+    "`$env:RELAY_RESCUE_SIGNED_MANIFEST_FILE = $(ConvertTo-SingleQuotedLiteral $SignedManifestFile)"
+    "`$env:RELAY_RESCUE_REGIONAL_ROOT_BUNDLE_FILE = $(ConvertTo-SingleQuotedLiteral $RegionalRootBundleFile)"
     "`$env:RELAY_GATEWAY_ANONYMOUS_INGRESS = 'true'"
     "`$env:RELAY_GATEWAY_LAN_DISCOVERY = 'true'"
     "Set-Location -LiteralPath $(ConvertTo-SingleQuotedLiteral $executableDirectory)"
@@ -123,3 +137,4 @@ Write-Output "  Runner: $RunnerPath"
 Write-Output "  Host: $HostBind  Port: $Port"
 Write-Output "  DB: $DbPath"
 Write-Output "  Admin key file: $adminKeyFile (key value not printed)"
+Write-Output "  Rescue key file: $RescueKeyFile (existing file preserved)"

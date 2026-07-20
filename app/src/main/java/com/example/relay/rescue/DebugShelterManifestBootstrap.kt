@@ -10,8 +10,6 @@ class DebugShelterManifestBootstrap(
     private val saveManifest: (ShelterPublicKeyManifest, String) -> Unit,
 ) {
     suspend fun enrollFromLocalTestGateway(): Boolean {
-        val gateway = discovery.discover() ?: return false
-        val manifest = runCatching { client.fetch(gateway.host, gateway.port) }.getOrNull() ?: return false
         val existing = loadExisting()
         val gateway = discovery.discover() ?: return existing != null
         val manifest = runCatching { client.fetch(gateway.host, gateway.port) }.getOrNull()
