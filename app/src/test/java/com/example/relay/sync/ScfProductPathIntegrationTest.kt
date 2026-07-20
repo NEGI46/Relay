@@ -77,14 +77,14 @@ class ScfProductPathIntegrationTest {
         withTimeout(8_000) {
             while (a.repository.let { b.repository.find("scf-product-1") } == null) yield()
         }
-        assertEquals(1, b.repository.find("scf-product-1")!!.hopCount)
+        assertEquals(1, b.repository.find("scf-product-1")?.hopCount ?: 0)
 
         a.transport.disconnect("device-B")
         b.transport.connect("device-C")
         withTimeout(8_000) {
             while (c.repository.find("scf-product-1") == null) yield()
         }
-        assertEquals(2, c.repository.find("scf-product-1")!!.hopCount)
+        assertEquals(2, c.repository.find("scf-product-1")?.hopCount ?: 0)
         withTimeout(8_000) {
             while (c.repository.receiptsFor("scf-product-1").none {
                     it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED
@@ -110,6 +110,9 @@ class ScfProductPathIntegrationTest {
             while (a.repository.receiptsFor("scf-product-1").none {
                     it.receiptType == ReceiptType.GATEWAY_RECEIVED_UNVERIFIED
                 }
+            ) {
+                yield()
+            }
             ) {
                 yield()
             }

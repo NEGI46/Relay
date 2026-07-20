@@ -98,7 +98,11 @@ class GatewaySyncEngine(
         }
         return@withLock try {
             val push = if (useAuthenticated) {
-                client.push(settings, token!!, messages)
+                token?.let { tok ->
+                    client.push(settings, tok, messages)
+                } ?: return@withLock GatewaySyncResult.Deferred("token_missing").also {
+                    settingsStore.record("token_missing")
+                }
             } else {
                 val gateway = discovery?.discover()
                     ?: return@withLock GatewaySyncResult.Deferred("gateway_not_found").also {
@@ -112,7 +116,11 @@ class GatewaySyncEngine(
                 client.pushPublic(gateway, localBridgeId, "Relay Bridge", messages)
             }
             val receipts = if (useAuthenticated) {
-                client.pullReceipts(settings, token!!)
+                token?.let { tok ->
+                    client.pullReceipts(settings, tok)
+                } ?: return@withLock GatewaySyncResult.Deferred("token_missing").also {
+                    settingsStore.record("token_missing")
+                }
             } else {
                 push.response.receipts.mapNotNull { receipt ->
                     when (receipt.receiptType) {

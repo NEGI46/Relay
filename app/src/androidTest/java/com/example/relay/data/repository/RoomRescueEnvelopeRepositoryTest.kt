@@ -77,8 +77,8 @@ class RoomRescueEnvelopeRepositoryTest {
 
         val restored = reopenedRepository.get(key)
         assertNotNull(restored)
-        assertEquals(created.record.envelope, restored!!.envelope)
-        assertEquals(created.record.state, restored.state)
+        assertEquals(created.record.envelope, restored?.envelope)
+        assertEquals(created.record.state, restored?.state)
         assertEquals(1, reopenedRepository.all().size)
         val decrypted = RescueCryptography.decrypt(restored.envelope, recipient.privateKey)
         assertEquals(PRIVATE_NOTE, decrypted.freeText)

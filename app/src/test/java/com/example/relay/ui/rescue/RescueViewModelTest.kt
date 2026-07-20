@@ -126,8 +126,8 @@ class RescueViewModelTest {
         assertEquals(0, payload.personCount)
         assertEquals(RescueUrgency.IMMEDIATE, payload.urgency)
         assertEquals(setOf(RescueCondition.LIFE_THREATENING), payload.conditions)
-        assertEquals(34.392, payload.location!!.latitude!!, 0.0)
-        assertEquals(TEST_NOW, payload.location!!.capturedAtEpochMillis)
+        assertEquals(34.392, payload.location?.latitude ?: 0.0, 0.0)
+        assertEquals(TEST_NOW, payload.location?.capturedAtEpochMillis ?: 0L)
     }
 
     @Test

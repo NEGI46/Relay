@@ -19,10 +19,12 @@ fun main() {
     val verifiedBleManifest = loadVerifiedBleManifest(config, rescueKeys)
     val bleBridgeEnvironment = verifiedBleManifest?.let { signed ->
         config.bleBridgeEnvironmentFor(signed).also { environment ->
-            BleBridgeEnvironmentStore.write(
-                Path.of(config.rescueSignedManifestPath!!).resolveSibling("ble-bridge.env"),
-                environment,
-            )
+            config.rescueSignedManifestPath?.let { manifestPath ->
+                BleBridgeEnvironmentStore.write(
+                    Path.of(manifestPath).resolveSibling("ble-bridge.env"),
+                    environment,
+                )
+            }
         }
     }
     // Do not bind the sidecar ingress unless the advertised shelter identity is root-signed,

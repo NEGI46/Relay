@@ -56,7 +56,7 @@ class MultiHopSyncTest {
         aRepo.insert(message(id = "message-late"))
 
         await { bRepo.find("message-late") != null }
-        assertEquals(1, bRepo.find("message-late")!!.hopCount)
+        assertEquals(1, bRepo.find("message-late")?.hopCount ?: 0)
         scope.cancel()
     }
 
@@ -291,7 +291,7 @@ class MultiHopSyncTest {
         a.transport.connect("device-B")
         await { b.repository.find("message-1") != null && a.repository.wasAcknowledged("message-1", "device-B") }
         assertEquals(1, b.repository.all().size)
-        assertEquals(1, b.repository.find("message-1")!!.hopCount)
+        assertEquals(1, b.repository.find("message-1")?.hopCount ?: 0)
         assertTrue(a.repository.wasAcknowledged("message-1", "device-B"))
         assertEquals(1, b.repository.receiptsFor("message-1").count { it.receiptType == ReceiptType.PEER_RECEIVED })
         assertEquals(0, b.repository.receiptsFor("message-1").count { it.receiptType == ReceiptType.GATEWAY_RECEIVED })
@@ -300,7 +300,7 @@ class MultiHopSyncTest {
         b.transport.connect("device-C")
         await { c.repository.find("message-1") != null && b.repository.wasAcknowledged("message-1", "device-C") }
         assertEquals(1, c.repository.all().size)
-        assertEquals(2, c.repository.find("message-1")!!.hopCount)
+        assertEquals(2, c.repository.find("message-1")?.hopCount ?: 0)
         assertTrue(b.repository.wasAcknowledged("message-1", "device-C"))
 
         b.transport.disconnect("device-C")

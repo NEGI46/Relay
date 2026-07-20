@@ -26,7 +26,7 @@ class MessagePolicyRepositoryTest {
         val repository = InMemoryMessageRepository()
         repository.insert(message(note = "first"))
         assertEquals(InsertResult.Collision, repository.insert(message(note = "forged")))
-        assertEquals("first", (repository.find("message-1")!!.payload as SafetyPayload).note)
+        assertEquals("first", (repository.find("message-1")?.payload as? SafetyPayload)?.note ?: "")
     }
 
     @Test
@@ -59,7 +59,7 @@ class MessagePolicyRepositoryTest {
     @Test
     fun `receiving increments hop and hop limit prevents forwarding`() {
         val inbound = message(hopCount = 1, maxHopCount = 2)
-        val received = policy.receive(inbound)!!
+        val received = policy.receive(inbound) ?: error("Expected non-null received")
         assertEquals(2, received.hopCount)
         assertFalse(policy.canForward(received))
         assertNull(policy.receive(received))

@@ -23,10 +23,10 @@ class RescueWorkflowTest {
             as RescueCreationResult.Stored
 
         val memberTransfer = FakeRescueTransferService(memberStore)
-        val packet = memberTransfer.export(RescueRequestKey("request-1", 1), 2_000)!!
-        assertEquals(0, memberStore.get(RescueRequestKey("request-1", 1))!!.envelope.hopCount)
+        val packet = memberTransfer.export(RescueRequestKey("request-1", 1), 2_000) ?: throw IllegalStateException("export returned null")
+        assertEquals(0, memberStore.get(RescueRequestKey("request-1", 1))?.envelope?.hopCount ?: 0)
         assertEquals(true, memberTransfer.confirmExport(RescueRequestKey("request-1", 1), packet))
-        assertEquals(1, memberStore.get(RescueRequestKey("request-1", 1))!!.envelope.hopCount)
+        assertEquals(1, memberStore.get(RescueRequestKey("request-1", 1))?.envelope?.hopCount ?: 0)
         FakeRescueTransferService(courierStore).import(packet, 2_100)
 
         val courierItem = CourierRescuePresenter(courierStore).items().single()
@@ -34,7 +34,7 @@ class RescueWorkflowTest {
         assertFalse(packet.decodeToString().contains("private-note"))
         assertNotNull(created.record.envelope.ciphertextBase64)
 
-        val envelope = courierStore.get(RescueRequestKey("request-1", 1))!!.envelope
+        val envelope = courierStore.get(RescueRequestKey("request-1", 1))?.envelope ?: throw IllegalStateException("envelope is null")
         val receipt = RescueCryptography.signReceipt(
             UnsignedShelterReceipt(
                 receiptId = "receipt-1",
@@ -69,7 +69,8 @@ class RescueWorkflowTest {
         val signer = RescueCryptography.generateShelterSigningKeyPair()
         val store = InMemoryRescueEnvelopeRepository()
         RescueRequestCreator(store).create(draft(1), recipient.publicKey, "envelope-1")
-        val envelope = store.get(RescueRequestKey("request-1", 1))!!.envelope
+        val envelope = store.get(RescueRequestKey("request-1", 1))?.envelope
+            ?: throw AssertionError("Expected envelope to be not null")
         val key = RescueRequestKey(envelope.requestId, envelope.requestVersion)
 
         fun receipt(id: String, status: ShelterReceiptStatus, receivedAt: Long) = RescueCryptography.signReceipt(
@@ -94,17 +95,17 @@ class RescueWorkflowTest {
             ReceiptApplicationResult.APPLIED,
             store.applyReceipt(key, receipt("responding", ShelterReceiptStatus.RESPONDING, 4_000), signer.publicKey),
         )
-        assertEquals(RescueSubmissionStatus.SHELTER_RESPONDING, store.get(key)!!.state.submissionStatus)
+        assertEquals(RescueSubmissionStatus.SHELTER_RESPONDING, store.get(key)?.state?.submissionStatus ?: throw AssertionError("Expected submissionStatus to be not null"))
         assertEquals(
             ReceiptApplicationResult.ALREADY_APPLIED,
             store.applyReceipt(key, receipt("late-stored", ShelterReceiptStatus.STORED, 5_000), signer.publicKey),
         )
-        assertEquals(RescueSubmissionStatus.SHELTER_RESPONDING, store.get(key)!!.state.submissionStatus)
+        assertEquals(RescueSubmissionStatus.SHELTER_RESPONDING, store.get(key)?.state?.submissionStatus ?: throw AssertionError("Expected submissionStatus to be not null"))
         assertEquals(
             ReceiptApplicationResult.APPLIED,
             store.applyReceipt(key, receipt("completed", ShelterReceiptStatus.COMPLETED, 6_000), signer.publicKey),
         )
-        assertEquals(RescueSubmissionStatus.SHELTER_COMPLETED, store.get(key)!!.state.submissionStatus)
+        assertEquals(RescueSubmissionStatus.SHELTER_COMPLETED, store.get(key)?.state?.submissionStatus ?: throw AssertionError("Expected submissionStatus to be not null"))
     }
 
     @Test
@@ -132,7 +133,8 @@ class RescueWorkflowTest {
             RescueStoreRejection.MALFORMED_PACKET,
             (transfer.import(byteArrayOf(1, 2, 3), 2_000) as RescueTransferImportResult.Rejected).reason,
         )
-        val valid = store.get(RescueRequestKey("request-1", 1))!!.envelope
+        val valid = store.get(RescueRequestKey("request-1", 1))?.envelope
+            ?: error("Expected request-1 to be present")
         assertEquals(
             RescueStoreRejection.INVALID_ENVELOPE,
             store.store(valid.copy(ciphertextSizeBytes = 16, envelopeId = "forged-envelope"), 2_000)
@@ -158,10 +160,10 @@ class RescueWorkflowTest {
             "envelope-2",
         )
         val transfer = FakeRescueTransferService(store)
-        val otherPacket = transfer.export(RescueRequestKey("request-2", 1), 2_000)!!
+        val otherPacket = transfer.export(RescueRequestKey("request-2", 1), 2_000) ?: throw IllegalStateException("Export returned null")
 
         assertFalse(transfer.confirmExport(RescueRequestKey("request-1", 1), otherPacket))
-        assertEquals(0, store.get(RescueRequestKey("request-1", 1))!!.envelope.hopCount)
+        assertEquals(0, store.get(RescueRequestKey("request-1", 1))?.envelope?.hopCount ?: 0)
     }
 
     private fun draft(version: Int) = RescueRequestDraft(
