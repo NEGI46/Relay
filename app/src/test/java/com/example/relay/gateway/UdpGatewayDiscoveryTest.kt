@@ -4,6 +4,8 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import kotlinx.coroutines.async
+import kotlin.concurrent.thread
+import org.junit.Assert.assertTrue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -51,6 +53,44 @@ class UdpGatewayDiscoveryTest {
             sender.send(DatagramPacket(bad, bad.size, InetAddress.getByName("127.0.0.1"), port))
         }
         assertNull(waiter.await())
+    }
+
+    @Test
+    fun `multicast lock is closed after successful discovery`() = runBlocking {
+        val port = freeUdpPort()
+        val lock = RecordingLock()
+        val diagnostics = mutableListOf<GatewayDiscoveryDiagnostic>()
+        val sender = thread(start = true) {
+            Thread.sleep(120)
+            val payload = """{"service":"relay-pc-gateway","discoveryVersion":1,"protocolVersion":1,"gatewayId":"gw-lock","apiPort":8080,"anonymousIngressPath":"/api/public/sync/messages","receiptTrust":"UNVERIFIED"}""".toByteArray()
+            DatagramSocket().use { socket ->
+                socket.send(DatagramPacket(payload, payload.size, InetAddress.getByName("127.0.0.1"), port))
+            }
+        }
+        val found = UdpGatewayDiscovery(
+            port = port,
+            multicastLockFactory = { lock },
+            onDiagnostic = diagnostics::add,
+        ).discover(2_000)
+        sender.join()
+        assertNotNull(found)
+        assertTrue(lock.closed)
+        assertEquals("beacon_received", diagnostics.single().result)
+    }
+
+    @Test
+    fun `multicast lock is closed after timeout`() = runBlocking {
+        val lock = RecordingLock()
+        UdpGatewayDiscovery(
+            port = freeUdpPort(),
+            multicastLockFactory = { lock },
+        ).discover(1_000)
+        assertTrue(lock.closed)
+    }
+
+    private class RecordingLock : AutoCloseable {
+        var closed = false
+        override fun close() { closed = true }
     }
 
     private fun freeUdpPort(): Int {
