@@ -70,11 +70,12 @@ class PacketCodecTest {
 
     @Test
     fun `receipt manifests and requests enforce identifier and entry bounds`() {
+        val duplicateReceiptId = "duplicate"
         val invalidBodies = listOf<PacketBody>(
             ManifestBody(emptyList(), listOf("")),
-            ManifestBody(emptyList(), listOf("duplicate", "duplicate")),
+            ManifestBody(emptyList(), listOf(duplicateReceiptId, duplicateReceiptId)),
             MessageRequestBody(emptyList(), List(129) { "receipt-$it" }),
-            MessageRequestBody(emptyList(), listOf("duplicate", "duplicate")),
+            MessageRequestBody(emptyList(), listOf(duplicateReceiptId, duplicateReceiptId)),
         )
 
         invalidBodies.forEach { body ->
