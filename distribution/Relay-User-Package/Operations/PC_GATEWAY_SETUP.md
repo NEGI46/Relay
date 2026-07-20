@@ -146,8 +146,10 @@ WiX はシステムインストール不要です。次を展開するとスク�
 ```
 
 ```powershell
-.\scripts\build-pc-gateway-exe.ps1
+.\scripts\build-pc-gateway-exe.ps1 -AppVersion 0.2.2
 ```
+
+`AppVersion` はReleaseタグから先頭の `v` を除いた値と一致させます。`RelayPcGateway` という名前とvendor `Relay` は既存インストールの更新識別子に使われるため変更しません。
 
 成果物:
 

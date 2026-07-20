@@ -1,3 +1,10 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    [string]$AppVersion
+)
+
 $ErrorActionPreference = 'Stop'
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -42,15 +49,17 @@ Get-ChildItem (Join-Path $root 'pc-gateway\build\install\pc-gateway\lib') -File 
 Get-Process -Name 'relay-pc-gateway','RelayPcGateway' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 
-$appVersion = '0.1.0'
-& $jpackage.Source --type exe --name RelayPcGateway --app-version $appVersion `
+# Keep the name and vendor stable: published installers derive their Windows upgrade identity
+# from this pair. The release version must change so Windows performs a major upgrade.
+& $jpackage.Source --type exe --name RelayPcGateway --app-version $AppVersion `
     --input $inputDir --main-jar pc-gateway.jar `
     --main-class com.example.relay.pcgateway.MainKt --dest $outputDir `
     --win-console --win-menu --vendor Relay `
     --description 'Relay offline PC Gateway' `
-    --java-options '-cp $APPDIR\*'
+    --java-options '-cp $APPDIR\*' `
+    --java-options "-Drelay.version=$AppVersion"
 
-$built = Join-Path $outputDir "RelayPcGateway-$appVersion.exe"
+$built = Join-Path $outputDir "RelayPcGateway-$AppVersion.exe"
 if (-not (Test-Path $built)) { throw "jpackage did not create $built" }
 
 try {
