@@ -13,6 +13,7 @@ import io.ktor.server.testing.testApplication
 import java.nio.file.Files
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -33,6 +34,16 @@ class DashboardUiTest {
         payload = JsonPrimitive("safe"),
         receivedAt = 1_000,
     )
+
+    @Test
+    fun `rescue list escapes user supplied location before inserting markup`() {
+        val script = requireNotNull(javaClass.classLoader.getResource("web/app.js")).readText()
+        val unsafeExpression = "$" + "{request.locationDescription || \"GPS位置あり\"}"
+        val escapedExpression = "$" + "{escapeHtml(request.locationDescription || \"GPS位置あり\")}"
+
+        assertFalse(script.contains(unsafeExpression))
+        assertTrue(script.contains(escapedExpression))
+    }
 
     @Test
     fun `dashboard and static console are available without admin key`() = testApplication {

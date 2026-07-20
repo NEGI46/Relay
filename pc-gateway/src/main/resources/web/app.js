@@ -93,7 +93,7 @@
       return `<button type="button" class="request-card ${selected ? "selected" : ""} ${critical ? "critical" : ""}" data-request="${escapeHtml(request.requestId)}">
         <span class="request-top"><span class="priority">${critical ? "命の危険・未確認" : statusLabel(request.responseStatus)}</span><time>${fmtTime(request.receivedAtEpochMillis)}</time></span>
         <strong>${request.personCount == null ? "人数不明" : `${request.personCount}人`} · ${request.conditions.map(conditionLabel).join(" / ") || "状態未記載"}</strong>
-        <span>${request.locationDescription || "GPS位置あり"}</span>
+        <span>${escapeHtml(request.locationDescription || "GPS位置あり")}</span>
         <span class="fine">${request.assignedNodeId ? `担当: ${escapeHtml(request.assignedNodeId)}` : "担当未確定"}</span>
       </button>`;
     }).join("");
