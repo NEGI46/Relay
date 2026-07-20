@@ -176,17 +176,20 @@ class GatewaySyncEngine(
                 push.response.acceptedMessageIds.size + push.response.duplicateMessageIds.size,
                 receipts.size,
             )
-        } catch (error: GatewayHttpException) {
-            settingsStore.recordDelivery("failed:http_${error.status}")
-            settingsStore.record("http_${error.status}")
-            GatewaySyncResult.Failed(
-                "http_${error.status}",
-                retryable = error.status >= 500 || error.status == 429,
-            )
         } catch (error: Exception) {
-            settingsStore.recordDelivery("failed:network_error")
-            settingsStore.record("network_error")
-            GatewaySyncResult.Failed("network_error")
+            val httpError = error as? GatewayHttpException
+            if (httpError != null) {
+                settingsStore.recordDelivery("failed:http_${httpError.status}")
+                settingsStore.record("http_${httpError.status}")
+                GatewaySyncResult.Failed(
+                    "http_${httpError.status}",
+                    retryable = httpError.status >= 500 || httpError.status == 429,
+                )
+            } else {
+                settingsStore.recordDelivery("failed:network_error")
+                settingsStore.record("network_error")
+                GatewaySyncResult.Failed("network_error")
+            }
         }
     }
 
