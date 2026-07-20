@@ -32,13 +32,12 @@ class HttpGatewayBridgeClientIntegrationTest {
     private val lastPath = AtomicReference("")
     private val lastBody = AtomicReference("")
     private val lastAuth = AtomicReference<String?>(null)
-    private lateinit var serverSocket: ServerSocket
+    private val serverSocket: ServerSocket by lazy { ServerSocket(0) }
     private var port: Int = 0
     private val executor = Executors.newCachedThreadPool()
 
     @Before
     fun startServer() {
-        serverSocket = ServerSocket(0)
         port = serverSocket.localPort
         executor.execute {
             while (running.get()) {

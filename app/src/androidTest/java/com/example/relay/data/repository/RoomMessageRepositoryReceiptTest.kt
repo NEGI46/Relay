@@ -1,4 +1,5 @@
 package com.example.relay.data.repository
+package com.example.relay.data.repository
 
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -24,14 +25,15 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class RoomMessageRepositoryReceiptTest {
-    private lateinit var database: RelayDatabase
-
-    @Before
-    fun setUp() {
-        database = Room.inMemoryDatabaseBuilder(
+    private val database: RelayDatabase by lazy {
+        Room.inMemoryDatabaseBuilder(
             ApplicationProvider.getApplicationContext(),
             RelayDatabase::class.java,
         ).build()
+    }
+
+    @Before
+    fun setUp() {
     }
 
     @After

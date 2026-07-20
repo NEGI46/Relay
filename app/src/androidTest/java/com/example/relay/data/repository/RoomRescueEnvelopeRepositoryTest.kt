@@ -25,12 +25,11 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class RoomRescueEnvelopeRepositoryTest {
-    private lateinit var context: Context
+    private val context: Context by lazy { ApplicationProvider.getApplicationContext() }
     private var database: RelayDatabase? = null
 
     @Before
     fun setUp() {
-        context = ApplicationProvider.getApplicationContext()
         context.deleteDatabase(DATABASE_NAME)
     }
 
