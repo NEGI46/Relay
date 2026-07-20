@@ -14,6 +14,7 @@ import java.nio.file.Files
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -43,6 +44,37 @@ class DashboardUiTest {
 
         assertFalse(script.contains(unsafeExpression))
         assertTrue(script.contains(escapedExpression))
+    }
+
+    @Test
+    fun `offline map supports zoom pan keyboard and touch without online map code`() {
+        val script = requireNotNull(javaClass.classLoader.getResource("web/app.js")).readText()
+        val markup = requireNotNull(javaClass.classLoader.getResource("web/index.html")).readText()
+        val styles = requireNotNull(javaClass.classLoader.getResource("web/app.css")).readText()
+
+        assertTrue(script.contains("data-map-action=\"zoom-in\""))
+        assertTrue(script.contains("addEventListener(\"wheel\""))
+        assertTrue(script.contains("addEventListener(\"dblclick\""))
+        assertTrue(script.contains("addEventListener(\"keydown\""))
+        assertTrue(script.contains("addEventListener(\"pointermove\""))
+        assertTrue(script.contains("Math.log2(distance / interaction.pinchDistance)"))
+        assertTrue(script.contains("mapLimits.maxNativeZoom"))
+        assertFalse(script.contains("https://cyberjapandata.gsi.go.jp"))
+        assertTrue(markup.contains("マウスホイール、ダブルクリック、ピンチ、ドラッグ、キーボード"))
+        assertTrue(styles.contains("touch-action: none"))
+    }
+
+    @Test
+    fun `offline map status publishes native and overzoom limits`() {
+        val root = Files.createTempDirectory("relay-map-status")
+        GsiTileCache(root).use { cache ->
+            val status = cache.status()
+            assertEquals(13, status.minZoom)
+            assertEquals(15, status.maxNativeZoom)
+            assertEquals(18, status.maxZoom)
+            assertEquals("not_ready", status.state)
+            assertNull(cache.tile(status.maxZoom, 0, 0))
+        }
     }
 
     @Test

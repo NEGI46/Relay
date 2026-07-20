@@ -1,8 +1,13 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const state = { requests: [], selectedId: null, filter: "active", timer: null, soundTimer: null, notifiedWarning: false };
-  const center = { latitude: 34.392, longitude: 132.504 };
-  const zoom = 15;
+  const initialMapView = { latitude: 34.392, longitude: 132.504, zoom: 15 };
+  const mapBounds = { south: 34.36, north: 34.43, west: 132.45, east: 132.55 };
+  const mapLimits = { minZoom: 13, maxNativeZoom: 15, maxZoom: 18 };
+  const mapViews = {
+    rescueMap: { ...initialMapView },
+    fullMap: { ...initialMapView },
+  };
 
   function pin() { return sessionStorage.getItem("relay_staff_pin") || ""; }
   function nodeId() { return sessionStorage.getItem("relay_node_id") || "fuchu-shelter-pc-1"; }
@@ -166,37 +171,157 @@
     const scale = 256 * 2 ** z; const sin = Math.sin(latitude * Math.PI / 180);
     return { x: (longitude + 180) / 360 * scale, y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale };
   }
+  function geographicalPoint(x, y, z) {
+    const scale = 256 * 2 ** z; const longitude = x / scale * 360 - 180;
+    const latitude = Math.atan(Math.sinh(Math.PI - 2 * Math.PI * y / scale)) * 180 / Math.PI;
+    return { latitude, longitude };
+  }
+  function clamp(value, minimum, maximum) { return Math.min(maximum, Math.max(minimum, value)); }
+  function mapView(element) { return mapViews[element.id] || (mapViews[element.id] = { ...initialMapView }); }
+  function requestsForMap(element) {
+    return element.id === "rescueMap" ? state.requests.filter((item) => !isTerminal(item)) : state.requests;
+  }
+  function updateMapCenter(element, centerPixel) {
+    const view = mapView(element); const point = geographicalPoint(centerPixel.x, centerPixel.y, view.zoom);
+    view.latitude = clamp(point.latitude, mapBounds.south, mapBounds.north);
+    view.longitude = clamp(point.longitude, mapBounds.west, mapBounds.east);
+  }
+  function panMap(element, deltaX, deltaY) {
+    const view = mapView(element); const centerPixel = globalPixel(view.latitude, view.longitude, view.zoom);
+    updateMapCenter(element, { x: centerPixel.x + deltaX, y: centerPixel.y + deltaY });
+    renderTileMap(element, requestsForMap(element));
+  }
+  function zoomMap(element, requestedZoom, clientX, clientY) {
+    const view = mapView(element); const nextZoom = clamp(requestedZoom, mapLimits.minZoom, mapLimits.maxZoom);
+    if (Math.abs(nextZoom - view.zoom) < 0.001) return;
+    const rectangle = element.getBoundingClientRect();
+    const offsetX = (clientX ?? rectangle.left + rectangle.width / 2) - rectangle.left - rectangle.width / 2;
+    const offsetY = (clientY ?? rectangle.top + rectangle.height / 2) - rectangle.top - rectangle.height / 2;
+    const currentCenter = globalPixel(view.latitude, view.longitude, view.zoom);
+    const focus = geographicalPoint(currentCenter.x + offsetX, currentCenter.y + offsetY, view.zoom);
+    view.zoom = nextZoom;
+    const nextFocus = globalPixel(focus.latitude, focus.longitude, nextZoom);
+    updateMapCenter(element, { x: nextFocus.x - offsetX, y: nextFocus.y - offsetY });
+    renderTileMap(element, requestsForMap(element));
+  }
+  function resetMap(element) {
+    Object.assign(mapView(element), initialMapView, { zoom: clamp(initialMapView.zoom, mapLimits.minZoom, mapLimits.maxZoom) });
+    renderTileMap(element, requestsForMap(element));
+  }
+  function bindMapInteractions(element) {
+    if (element.dataset.mapInteractions === "true") return;
+    element.dataset.mapInteractions = "true";
+    element.tabIndex = 0;
+    element.setAttribute("role", "application");
+    element.setAttribute("aria-roledescription", "操作可能なオフライン地図");
+    const interaction = { pointers: new Map(), pinchDistance: null };
+
+    element.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-map-action]")?.dataset.mapAction;
+      if (action === "zoom-in") zoomMap(element, Math.floor(mapView(element).zoom) + 1);
+      if (action === "zoom-out") zoomMap(element, Math.ceil(mapView(element).zoom) - 1);
+      if (action === "reset") resetMap(element);
+    });
+    element.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      zoomMap(element, mapView(element).zoom + (event.deltaY < 0 ? 0.25 : -0.25), event.clientX, event.clientY);
+    }, { passive: false });
+    element.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      zoomMap(element, Math.floor(mapView(element).zoom) + 1, event.clientX, event.clientY);
+    });
+    element.addEventListener("keydown", (event) => {
+      const key = event.key;
+      if (["+", "=", "Add"].includes(key)) zoomMap(element, Math.floor(mapView(element).zoom) + 1);
+      else if (["-", "_", "Subtract"].includes(key)) zoomMap(element, Math.ceil(mapView(element).zoom) - 1);
+      else if (key === "ArrowLeft") panMap(element, -80, 0);
+      else if (key === "ArrowRight") panMap(element, 80, 0);
+      else if (key === "ArrowUp") panMap(element, 0, -80);
+      else if (key === "ArrowDown") panMap(element, 0, 80);
+      else if (key === "Home" || key === "0") resetMap(element);
+      else return;
+      event.preventDefault();
+    });
+    element.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("button")) return;
+      interaction.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      element.setPointerCapture?.(event.pointerId);
+      if (interaction.pointers.size === 2) {
+        const [first, second] = [...interaction.pointers.values()];
+        interaction.pinchDistance = Math.hypot(second.x - first.x, second.y - first.y);
+      }
+    });
+    element.addEventListener("pointermove", (event) => {
+      const previous = interaction.pointers.get(event.pointerId);
+      if (!previous) return;
+      interaction.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (interaction.pointers.size === 1) {
+        panMap(element, previous.x - event.clientX, previous.y - event.clientY);
+      } else if (interaction.pointers.size === 2) {
+        const [first, second] = [...interaction.pointers.values()];
+        const distance = Math.hypot(second.x - first.x, second.y - first.y);
+        if (interaction.pinchDistance && distance > 0) {
+          zoomMap(
+            element,
+            mapView(element).zoom + Math.log2(distance / interaction.pinchDistance),
+            (first.x + second.x) / 2,
+            (first.y + second.y) / 2,
+          );
+        }
+        interaction.pinchDistance = distance;
+      }
+      event.preventDefault();
+    });
+    const finishPointer = (event) => {
+      interaction.pointers.delete(event.pointerId);
+      interaction.pinchDistance = null;
+    };
+    element.addEventListener("pointerup", finishPointer);
+    element.addEventListener("pointercancel", finishPointer);
+  }
   function renderTileMap(element, requests) {
+    bindMapInteractions(element);
+    const view = mapView(element);
     const viewportWidth = element.clientWidth || (element.classList.contains("large") ? 935 : 560);
     const viewportHeight = element.clientHeight || (element.classList.contains("large") ? 560 : 310);
-    const widthTiles = Math.ceil(viewportWidth / 256) + 1; const heightTiles = Math.ceil(viewportHeight / 256) + 1;
-    const centerPixel = globalPixel(center.latitude, center.longitude, zoom);
+    const tileZoom = clamp(Math.floor(view.zoom), mapLimits.minZoom, mapLimits.maxNativeZoom);
+    const tileSize = 256 * 2 ** (view.zoom - tileZoom);
+    const widthTiles = Math.ceil(viewportWidth / tileSize) + 2; const heightTiles = Math.ceil(viewportHeight / tileSize) + 2;
+    const centerPixel = globalPixel(view.latitude, view.longitude, view.zoom);
     const viewportLeft = centerPixel.x - viewportWidth / 2; const viewportTop = centerPixel.y - viewportHeight / 2;
-    const startX = Math.floor(viewportLeft / 256); const startY = Math.floor(viewportTop / 256);
+    const startX = Math.floor(viewportLeft / tileSize); const startY = Math.floor(viewportTop / tileSize);
     element.innerHTML = "";
     for (let row = 0; row < heightTiles; row += 1) for (let column = 0; column < widthTiles; column += 1) {
       const image = document.createElement("img"); image.className = "map-tile"; image.alt = "";
-      image.src = `/api/map/tiles/${zoom}/${startX + column}/${startY + row}.png`;
-      image.style.left = `${(startX + column) * 256 - viewportLeft}px`;
-      image.style.top = `${(startY + row) * 256 - viewportTop}px`; element.appendChild(image);
+      image.draggable = false;
+      image.src = `/api/map/tiles/${tileZoom}/${startX + column}/${startY + row}.png`;
+      image.style.width = `${tileSize + 0.5}px`; image.style.height = `${tileSize + 0.5}px`;
+      image.style.left = `${(startX + column) * tileSize - viewportLeft}px`;
+      image.style.top = `${(startY + row) * tileSize - viewportTop}px`; element.appendChild(image);
     }
     requests.filter((request) => request.latitude != null && request.longitude != null).forEach((request) => {
-      const point = globalPixel(request.latitude, request.longitude, zoom); const marker = document.createElement("button");
+      const point = globalPixel(request.latitude, request.longitude, view.zoom); const marker = document.createElement("button");
       marker.className = `map-marker ${isImmediate(request) ? "critical" : ""}`; marker.type = "button";
       marker.style.left = `${point.x - viewportLeft}px`; marker.style.top = `${point.y - viewportTop}px`;
       marker.title = `${request.personCount ?? "人数不明"} / ${statusLabel(request.responseStatus)}`;
       marker.addEventListener("click", () => { state.selectedId = request.requestId; activatePanel("rescue"); renderRequests(); renderMaps(); });
       element.appendChild(marker);
     });
+    const controls = document.createElement("div"); controls.className = "map-controls";
+    controls.innerHTML = `<button type="button" data-map-action="zoom-in" aria-label="地図を拡大" ${view.zoom >= mapLimits.maxZoom ? "disabled" : ""}>＋</button><span aria-live="polite">${view.zoom.toFixed(2).replace(/\\.00$/, "")}</span><button type="button" data-map-action="zoom-out" aria-label="地図を縮小" ${view.zoom <= mapLimits.minZoom ? "disabled" : ""}>−</button><button type="button" data-map-action="reset" aria-label="地図の表示位置と縮尺を戻す">戻す</button>`;
+    element.appendChild(controls);
   }
   function renderMaps() { renderTileMap($("rescueMap"), state.requests.filter((item) => !isTerminal(item))); renderTileMap($("fullMap"), state.requests); }
 
   async function loadMapStatus() {
     const map = await api("/api/map/status", { headers: authHeaders() });
+    mapLimits.minZoom = map.minZoom; mapLimits.maxNativeZoom = map.maxNativeZoom; mapLimits.maxZoom = map.maxZoom;
+    Object.values(mapViews).forEach((view) => { view.zoom = clamp(view.zoom, mapLimits.minZoom, mapLimits.maxZoom); });
     const ratio = map.expectedTiles ? map.cachedTiles / map.expectedTiles : 0;
-    $("mapProgress").value = ratio; $("mapProgressLabel").textContent = `${map.cachedTiles} / ${map.expectedTiles} タイル保存済み${map.lastError ? ` / ${map.lastError}` : ""}`;
+    $("mapProgress").value = ratio; $("mapProgressLabel").textContent = `${map.cachedTiles} / ${map.expectedTiles} タイル保存済み（詳細 ${map.minZoom}〜${map.maxNativeZoom}、拡大 ${map.maxZoom} まで）${map.lastError ? ` / ${map.lastError}` : ""}`;
     $("mapStatus").textContent = map.state === "ready" ? "オフライン準備済み" : map.state === "preparing" ? "地図保存中" : "地図未完了";
     $("prepareMap").disabled = map.state === "preparing" || map.state === "ready";
+    renderMaps();
   }
   async function prepareMap() { await api("/api/map/prepare", { method: "POST", headers: authHeaders() }); await loadMapStatus(); }
 
