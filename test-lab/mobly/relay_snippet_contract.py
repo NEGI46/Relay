@@ -49,7 +49,7 @@ class MockRelaySnippet:
         self._counter = 0
 
     def call(self, method: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        args = arguments or {}
+        args: Dict[str, Any] = arguments or {}
         if method == "contract":
             return {"ok": True, "protocolVersion": 1, "methods": ",".join(METHODS)}
         if method == "createReport":

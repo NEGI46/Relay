@@ -451,7 +451,7 @@ class FakeGattPeripheral:
         if frame.total == 0 or (self._chunk_total is not None and frame.total != self._chunk_total):
             raise MalformedFrameError("CHUNK total is invalid")
         if self._chunk_total is None:
-            self._chunk_total = frame.total
+            self._chunk_total = int(frame.total)
         if frame.sequence != self._chunk_next:
             if frame.sequence < self._chunk_next:
                 raise DuplicateFrameError("duplicate CHUNK frame")
@@ -459,7 +459,7 @@ class FakeGattPeripheral:
         if len(self._chunks) + 1 > self._chunk_total:
             raise MalformedFrameError("too many CHUNK frames")
         self._chunks.append(frame.payload)
-        self._chunk_next += 1
+        self._chunk_next = int(self._chunk_next) + 1
         if sum(len(chunk) for chunk in self._chunks) > self.max_payload:
             raise TransferError("envelope exceeds configured payload limit")
         return None
@@ -509,16 +509,16 @@ class FakeGattPeripheral:
             raise MalformedFrameError("session ID mismatch")
 
     def _reset_session(self) -> None:
-        self._session_id: bytes | None = None
+        self._session_id: bytes = b""
         self._started_at = 0.0
-        self._start_total: int | None = None
+        self._start_total: int = 0
         self._start_next = 0
         self._start_frames: list[GattFrame] = []
-        self._start_metadata: tuple[str, str] | None = None
-        self._chunk_total: int | None = None
+        self._start_metadata: tuple[str, str] = ("", "")
+        self._chunk_total: int = 0
         self._chunk_next = 0
         self._chunks: list[bytes] = []
-        self._commit_total: int | None = None
+        self._commit_total: int = 0
         self._commit_next = 0
         self._commit_frames: list[bytes] = []
 
