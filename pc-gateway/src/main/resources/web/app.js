@@ -18,13 +18,19 @@
     const response = await fetch(path, options);
     const text = await response.text();
     let body = text;
-    try { body = text ? JSON.parse(text) : null; } catch (_) { /* plain text */ }
-    if (!response.ok) {
-      const error = new Error(typeof body === "object" ? JSON.stringify(body) : body || response.statusText);
-      error.status = response.status;
-      throw error;
-    }
-    return body;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch (_) { /* plain text */ }
+    const outcomes = {
+      true: () => body,
+      false: () => {
+        const errorMsg = typeof body === 'object' ? JSON.stringify(body) : body || response.statusText;
+        const error = new Error(errorMsg);
+        error.status = response.status;
+        throw error;
+      }
+    };
+    return outcomes[response.ok]();
   }
   function fmtTime(value) { return value ? new Date(value).toLocaleString("ja-JP", { hour12: false }) : "不明"; }
   function statusLabel(value) {
@@ -50,12 +56,14 @@
       $("setup").classList.add("hidden");
       $("staffNodeLabel").textContent = nodeId();
       $("settingsNode").textContent = nodeId();
-      if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+      ("Notification" in window && Notification.permission === "default") && Notification.requestPermission();
       await refreshAll();
       armRefresh();
     } catch (error) {
       sessionStorage.removeItem("relay_staff_pin");
-      $("staffPin").setCustomValidity(error.status === 401 ? "PINが違います" : "接続できません");
+      const errorMessages = { 401: "PINが違います" };
+      const message = errorMessages[error.status] || "接続できません";
+      $("staffPin").setCustomValidity(message);
       $("staffPin").reportValidity();
       $("staffPin").setCustomValidity("");
     }
@@ -90,11 +98,18 @@
     $("requestList").innerHTML = visible.map((request) => {
       const selected = request.requestId === state.selectedId;
       const critical = isImmediate(request) && request.responseStatus === "UNCONFIRMED";
+      const labels = {
+        priority: critical ? "命の危険・未確認" : statusLabel(request.responseStatus),
+        personCount: request.personCount != null ? `${request.personCount}人` : "人数不明",
+        conditions: request.conditions.map(conditionLabel).join(" / ") || "状態未記載",
+        location: request.locationDescription || "GPS位置あり",
+        assigned: request.assignedNodeId ? `担当: ${escapeHtml(request.assignedNodeId)}` : "担当未確定"
+      };
       return `<button type="button" class="request-card ${selected ? "selected" : ""} ${critical ? "critical" : ""}" data-request="${escapeHtml(request.requestId)}">
-        <span class="request-top"><span class="priority">${critical ? "命の危険・未確認" : statusLabel(request.responseStatus)}</span><time>${fmtTime(request.receivedAtEpochMillis)}</time></span>
-        <strong>${request.personCount == null ? "人数不明" : `${request.personCount}人`} · ${request.conditions.map(conditionLabel).join(" / ") || "状態未記載"}</strong>
-        <span>${request.locationDescription || "GPS位置あり"}</span>
-        <span class="fine">${request.assignedNodeId ? `担当: ${escapeHtml(request.assignedNodeId)}` : "担当未確定"}</span>
+        <span class="request-top"><span class="priority">${labels.priority}</span><time>${fmtTime(request.receivedAtEpochMillis)}</time></span>
+        <strong>${labels.personCount} · ${labels.conditions}</strong>
+        <span>${labels.location}</span>
+        <span class="fine">${labels.assigned}</span>
       </button>`;
     }).join("");
     $("requestList").querySelectorAll("[data-request]").forEach((button) => button.addEventListener("click", () => {
@@ -105,16 +120,28 @@
   }
 
   function renderDetail(request) {
-    if (!request) { $("selectedDetail").innerHTML = '<p class="empty">依頼を選択してください。</p>'; return; }
+    if (!request) {
+      $("selectedDetail").innerHTML = '<p class="empty">依頼を選択してください。</p>';
+      return;
+    }
+    const tagMap = {
+      elderlyPresent: "高齢者",
+      childrenPresent: "子ども",
+      pregnantPresent: "妊娠中",
+      trapped: "閉じ込め",
+      fireOrCollapseRisk: "火災・倒壊危険"
+    };
     const tags = [
-      ...request.conditions.map(conditionLabel), ...request.supportNeeds.map(needLabel),
-      request.elderlyPresent ? "高齢者" : null, request.childrenPresent ? "子ども" : null,
-      request.pregnantPresent ? "妊娠中" : null, request.trapped ? "閉じ込め" : null,
-      request.fireOrCollapseRisk ? "火災・倒壊危険" : null,
+      ...request.conditions.map(conditionLabel),
+      ...request.supportNeeds.map(needLabel),
+      ...Object.entries(tagMap)
+        .filter(([key]) => request[key])
+        .map(([, label]) => label)
     ].filter(Boolean);
     const ownedElsewhere = request.assignedNodeId && request.assignedNodeId !== nodeId();
     const actions = nextActions(request).map(([status, label, danger]) =>
-      `<button class="button ${danger ? "danger-outline" : "primary"}" data-status="${status}" ${ownedElsewhere ? "disabled" : ""}>${label}</button>`).join("");
+      `<button class="button ${danger ? "danger-outline" : "primary"}" data-status="${status}" ${ownedElsewhere ? "disabled" : ""}>${label}</button>`
+    ).join("");
     $("selectedDetail").innerHTML = `
       <div class="detail-head"><div><p class="eyebrow">${isImmediate(request) ? "IMMEDIATE" : "RESCUE REQUEST"}</p><h3>${request.personCount == null ? "人数不明" : `${request.personCount}人`} / ${statusLabel(request.responseStatus)}</h3></div><span class="status-chip">v${request.requestVersion}</span></div>
       ${ownedElsewhere ? `<p class="assignment-note">${escapeHtml(request.assignedNodeId)} が担当中です。</p>` : ""}
@@ -194,17 +221,28 @@
   async function loadMapStatus() {
     const map = await api("/api/map/status", { headers: authHeaders() });
     const ratio = map.expectedTiles ? map.cachedTiles / map.expectedTiles : 0;
-    $("mapProgress").value = ratio; $("mapProgressLabel").textContent = `${map.cachedTiles} / ${map.expectedTiles} タイル保存済み${map.lastError ? ` / ${map.lastError}` : ""}`;
-    $("mapStatus").textContent = map.state === "ready" ? "オフライン準備済み" : map.state === "preparing" ? "地図保存中" : "地図未完了";
-    $("prepareMap").disabled = map.state === "preparing" || map.state === "ready";
+    $("mapProgress").value = ratio;
+    $("mapProgressLabel").textContent = `${map.cachedTiles} / ${map.expectedTiles} タイル保存済み${map.lastError ? ` / ${map.lastError}` : ""}`;
+    const stateTexts = {
+      ready: "オフライン準備済み",
+      preparing: "地図保存中"
+    };
+    $("mapStatus").textContent = stateTexts[map.state] || "地図未完了";
+    const disabledStates = new Set(["preparing", "ready"]);
+    $("prepareMap").disabled = disabledStates.has(map.state);
   }
   async function prepareMap() { await api("/api/map/prepare", { method: "POST", headers: authHeaders() }); await loadMapStatus(); }
 
   async function loadOfficial() {
     const info = await api("/api/official-info");
-    $("officialAlert").textContent = info.urgent ? `気象庁: ${info.warningHeadline}` : `公式情報: ${info.warningHeadline}`;
+    const alertMessages = {
+      true: `気象庁: ${info.warningHeadline}`,
+      false: `公式情報: ${info.warningHeadline}`
+    };
+    const detailList = info.warningStatuses.map((value) => `<li>${escapeHtml(value)}</li>`).join("") || "<li>府中町の発表状況なし</li>";
+    $("officialAlert").textContent = alertMessages[info.urgent];
     $("officialAlert").classList.toggle("urgent", info.urgent);
-    $("warningDetail").innerHTML = `<h3>気象庁 警報・注意報</h3><p>${escapeHtml(info.warningHeadline)}</p><ul>${info.warningStatuses.map((value) => `<li>${escapeHtml(value)}</li>`).join("") || "<li>府中町の発表状況なし</li>"}</ul><p class="fine">確認 ${fmtTime(info.checkedAtEpochMillis)}${info.usedCachedWarning ? "（保存済み情報）" : ""}</p>`;
+    $("warningDetail").innerHTML = `<h3>気象庁 警報・注意報</h3><p>${escapeHtml(info.warningHeadline)}</p><ul>${detailList}</ul><p class="fine">確認 ${fmtTime(info.checkedAtEpochMillis)}${info.usedCachedWarning ? "（保存済み情報）" : ""}</p>`;
     $("officialSources").innerHTML = info.sources.map((source) => `<a class="source-card" href="${escapeHtml(source.url)}" target="_blank" rel="noopener"><strong>${escapeHtml(source.title)}</strong><span>${escapeHtml(source.organization)} 公式サイト</span></a>`).join("");
     if (info.urgent && !state.notifiedWarning && "Notification" in window && Notification.permission === "granted") {
       new Notification("Relay 府中町 公式警報", { body: info.warningHeadline }); state.notifiedWarning = true;
