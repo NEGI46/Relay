@@ -65,21 +65,22 @@ class GatewayStoreTest {
 
     @Test fun `signed without issuer trust remains in unverified counts and filters`() {
         store().use { db ->
+            val signedUnverified = "SIGNED_UNVERIFIED"
             val signed = message("signed-unverified").copy(reportSignature = JsonPrimitive("signature-present"))
 
             db.ingestUnregistered(listOf(signed), now = 2_000)
 
-            assertEquals("SIGNED_UNVERIFIED", db.messageDetail(signed.messageId)?.contentVerification)
+            assertEquals(signedUnverified, db.messageDetail(signed.messageId)?.contentVerification)
             assertEquals(0 to 1, db.trustCounts())
             assertEquals(listOf(signed.messageId), db.messages(trust = "UNVERIFIED").map { it.messageId })
-            assertEquals(listOf(signed.messageId), db.messages(trust = "SIGNED_UNVERIFIED").map { it.messageId })
+            assertEquals(listOf(signed.messageId), db.messages(trust = signedUnverified).map { it.messageId })
 
             val code = db.createPairingCode(3_000)
             db.requestPair(code, "bridge", "Bridge", 3_001)
             db.approvePair("bridge", code, 3_002)
             db.ingest("bridge", listOf(signed), now = 4_000)
 
-            assertEquals("SIGNED_UNVERIFIED", db.messageDetail(signed.messageId)?.contentVerification)
+            assertEquals(signedUnverified, db.messageDetail(signed.messageId)?.contentVerification)
             assertEquals(0 to 1, db.trustCounts())
         }
     }
