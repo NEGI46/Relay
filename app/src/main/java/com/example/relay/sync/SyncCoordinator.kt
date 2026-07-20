@@ -184,15 +184,23 @@ class SyncCoordinator(
         }
     }
 
-    private suspend fun handle(peerId: String, bytes: ByteArray) {
+    private suspend fun handleRescuePayload(peerId: String, bytes: ByteArray): Boolean {
         if (rescueNearbyCoordinator?.isRescuePayload(bytes) == true) {
             rescueNearbyCoordinator.handlePayload(peerId, bytes)
-            return
+            return true
         }
+        return false
+    }
+
+    private fun rejectIfSizeOrPolicyExceeded(peerId: String, bytes: ByteArray): Boolean {
         if (bytes.size > resourcePolicy.maxPayloadBytes || !incomingPayloadPolicy.allow(peerId, bytes.size)) {
             reject(peerId, "payload limit")
-            return
+            return true
         }
+        return false
+    }
+
+    private suspend fun checkReceiveLimit(peerId: String): Boolean {
         val withinReceiveLimit = accountingMutex.withLock {
             val count = (receivedItems[peerId] ?: 0) + 1
             if (count > resourcePolicy.maxReceivedItemsPerConnection) false
@@ -201,15 +209,34 @@ class SyncCoordinator(
                 true
             }
         }
-        if (!withinReceiveLimit) { reject(peerId, "received item limit"); return }
+        if (!withinReceiveLimit) {
+            reject(peerId, "received item limit")
+            return false
+        }
+        return true
+    }
+
+    private fun decodeOrReject(peerId: String, bytes: ByteArray): DecodeResult.Success? {
         val decoded = codec.decode(bytes)
         if (decoded !is DecodeResult.Success) {
             val reason = (decoded as? DecodeResult.Failure)?.error?.name ?: "decode failure"
             reject(peerId, reason)
-            return
+            return null
         }
-        val packet = decoded.packet
-        if (packet.envelope.senderDeviceId != peerId) return
+        return decoded
+    }
+
+    private fun isSenderValid(peerId: String, packet: Packet): Boolean {
+        return packet.envelope.senderDeviceId == peerId
+    }
+
+    private suspend fun handle(peerId: String, bytes: ByteArray) {
+        if (handleRescuePayload(peerId, bytes)) return
+        if (rejectIfSizeOrPolicyExceeded(peerId, bytes)) return
+        if (!checkReceiveLimit(peerId)) return
+        val success = decodeOrReject(peerId, bytes) ?: return
+        val packet = success.packet
+        if (!isSenderValid(peerId, packet)) return
         val replayKey = "$peerId:${packet.envelope.packetId}"
         val isNewPacket = synchronized(replayCacheLock) { replayCache.put(replayKey, Unit) == null }
         if (!isNewPacket) return

@@ -358,12 +358,6 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                 results.map { requireNotNull(it) }
             } catch (error: Exception) {
                 connection.rollback()
-                throw error
-            } finally {
-                connection.autoCommit = true
-            }
-        }
-
     /**
      * Transmission keeps STATUS_CHANGE at higher priority. Only the atomic persistence pass is
      * dependency ordered so a newly received REPORT exists before its STATUS_CHANGE is checked.
@@ -383,6 +377,33 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         else -> 1
     }
 
+    private fun determineRouteAuthentication(receiptType: String): String =
+        if (receiptType == VERIFIED_GATEWAY_RECEIPT_TYPE) ROUTE_AUTHENTICATED_BRIDGE else ROUTE_ANONYMOUS_LAN
+
+    private fun determineContentVerification(message: GatewayMessage): String =
+        if (message.reportSignature != null) CONTENT_SIGNED_UNVERIFIED else CONTENT_UNVERIFIED
+
+    private fun validateIdentifier(message: GatewayMessage): StoreOutcome? {
+        return if (message.messageId.isBlank() || message.messageId.length > 64 || message.originDeviceId.length !in 1..64) {
+            StoreOutcome(message.messageId, "REJECTED", reason = "invalid_identifier")
+        } else null
+    }
+
+    private fun validateTimeToLive(message: GatewayMessage): StoreOutcome? {
+        return if (message.lifetimeMs !in 1..604_800_000L ||
+            message.accumulatedAgeMs !in 0..message.lifetimeMs ||
+            message.accumulatedAgeMs >= message.lifetimeMs
+        ) {
+            StoreOutcome(message.messageId, "REJECTED", reason = "expired_or_invalid_ttl")
+        } else null
+    }
+
+    private fun validateHop(message: GatewayMessage): StoreOutcome? {
+        return if (message.hopLimit !in 1..32 || message.hopCount !in 0..message.hopLimit) {
+            StoreOutcome(message.messageId, "REJECTED", reason = "invalid_hop")
+        } else null
+    }
+
     private fun ingestOne(
         message: GatewayMessage,
         now: Long,
@@ -390,25 +411,11 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         sourceBridgeId: String?,
         applyTargetStatus: Boolean,
     ): StoreOutcome {
-        val routeAuthentication = if (receiptType == VERIFIED_GATEWAY_RECEIPT_TYPE) {
-            ROUTE_AUTHENTICATED_BRIDGE
-        } else {
-            ROUTE_ANONYMOUS_LAN
-        }
-        // Bridge authentication proves only which paired transport submitted the bytes. A carried
-        // REPORT signature is retained as signed-but-unverified until an issuer registry exists.
-        val contentVerification = if (message.reportSignature != null) CONTENT_SIGNED_UNVERIFIED else CONTENT_UNVERIFIED
-        if (message.messageId.isBlank() || message.messageId.length > 64 || message.originDeviceId.length !in 1..64) {
-            return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_identifier")
-        }
-        if (message.lifetimeMs !in 1..604_800_000L ||
-            message.accumulatedAgeMs !in 0..message.lifetimeMs ||
-            message.accumulatedAgeMs >= message.lifetimeMs
-        ) {
-            return StoreOutcome(message.messageId, "REJECTED", reason = "expired_or_invalid_ttl")
-        }
-        if (message.hopLimit !in 1..32 || message.hopCount !in 0..message.hopLimit) {
-            return StoreOutcome(message.messageId, "REJECTED", reason = "invalid_hop")
+        val routeAuthentication = determineRouteAuthentication(receiptType)
+        val contentVerification = determineContentVerification(message)
+        validateIdentifier(message)?.let { return it }
+        validateTimeToLive(message)?.let { return it }
+        validateHop(message)?.let { return it }
         }
         if (message.recordType == "STATUS_CHANGE") {
             val target = message.payload.jsonObject["targetMessageId"]?.jsonPrimitive?.content

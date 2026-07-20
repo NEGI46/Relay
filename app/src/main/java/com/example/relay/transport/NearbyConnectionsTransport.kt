@@ -99,57 +99,63 @@ class NearbyConnectionsTransport(
             clearPeerConnection(peerId)
             _connectionEvents.emit(ConnectionEvent.Disconnected(peerId))
         }
-    }
-
-    override suspend fun disconnect(peerId: String) {
-        peerToEndpoint[peerId]?.let(platform::disconnect)
-        clearPeerConnection(peerId)
-        _connectionEvents.emit(ConnectionEvent.Disconnected(peerId))
-    }
-
-    override suspend fun send(peerId: String, payload: ByteArray): SendResult {
-        if (payload.size > maxPayloadBytes) return SendResult.Failed("payload exceeds Nearby BYTES limit")
-        if (peerId !in _state.value.connectedPeerIds) return SendResult.Failed("peer is not connected")
-        val endpointId = peerToEndpoint[peerId] ?: return SendResult.Failed("peer endpoint is unavailable")
-        return try {
-            val completion = CompletableDeferred<SendResult>()
-            val payloadId = platform.sendBytes(endpointId, payload.copyOf()) { createdId ->
-                pendingTransfers[createdId] = completion
-            }
-            _transportEvents.emit(TransportEvent.PayloadSendRequested(peerId, payloadId, payload.size))
-            withTimeoutOrNull(transferTimeoutMs) { completion.await() }
-                ?: SendResult.Failed("payload transfer timed out").also { pendingTransfers.remove(payloadId) }
-        } catch (error: Exception) {
-            SendResult.Failed(error.safeReason()).also { fail("send", error.safeReason()) }
-        }
-    }
-
     private suspend fun handlePlatformEvent(event: NearbyPlatformEvent) {
         when (event) {
             is NearbyPlatformEvent.EndpointFound -> addPeer(event.endpointId, event.endpointName)
             is NearbyPlatformEvent.EndpointLost -> removeDiscoveredEndpoint(event.endpointId)
             is NearbyPlatformEvent.ConnectionInitiated -> handleInitiated(event)
-            is NearbyPlatformEvent.ConnectionSucceeded -> endpointToPeer[event.endpointId]?.let { peerId ->
-                if (!connectingPeerIds.remove(peerId)) {
-                    platform.disconnect(event.endpointId)
-                    return@let
-                }
-                cancelConnectionAttemptTimeout(peerId)
-                cancelReconnect(peerId, resetAttempts = true)
-                _state.value = _state.value.copy(
-                    connectedPeerIds = _state.value.connectedPeerIds + peerId,
-                    pendingVerifications = _state.value.pendingVerifications - peerId,
-                )
-                _connectionEvents.emit(ConnectionEvent.Connected(Peer(peerId)))
+            is NearbyPlatformEvent.ConnectionSucceeded -> handleConnectionSucceeded(event)
+            is NearbyPlatformEvent.ConnectionFailed -> handleConnectionFailed(event)
+            is NearbyPlatformEvent.Disconnected -> handleDisconnected(event)
+            is NearbyPlatformEvent.PayloadReceived -> handlePayloadReceived(event)
+            is NearbyPlatformEvent.PayloadTransferUpdate -> handlePayloadTransferUpdate(event)
+        }
+    }
+
+    private suspend fun handleConnectionSucceeded(event: NearbyPlatformEvent.ConnectionSucceeded) {
+        endpointToPeer[event.endpointId]?.let { peerId ->
+            if (!connectingPeerIds.remove(peerId)) {
+                platform.disconnect(event.endpointId)
+                return@let
             }
-            is NearbyPlatformEvent.ConnectionFailed -> endpointToPeer[event.endpointId]?.let { peerId ->
-                val wasActive = peerId in connectingPeerIds || peerId in _state.value.connectedPeerIds
-                clearPeerConnection(peerId)
-                if (!wasActive) return@let
-                _connectionEvents.emit(ConnectionEvent.Failed(peerId, event.reason))
-                scheduleReconnect(peerId)
-            }
-            is NearbyPlatformEvent.Disconnected -> endpointToPeer[event.endpointId]?.let { peerId ->
+            cancelConnectionAttemptTimeout(peerId)
+            cancelReconnect(peerId, resetAttempts = true)
+            _state.value = _state.value.copy(
+                connectedPeerIds = _state.value.connectedPeerIds + peerId,
+                pendingVerifications = _state.value.pendingVerifications - peerId,
+            )
+            _connectionEvents.emit(ConnectionEvent.Connected(Peer(peerId)))
+        }
+    }
+
+    private suspend fun handleConnectionFailed(event: NearbyPlatformEvent.ConnectionFailed) {
+        endpointToPeer[event.endpointId]?.let { peerId ->
+            val wasActive = peerId in connectingPeerIds || peerId in _state.value.connectedPeerIds
+            clearPeerConnection(peerId)
+            if (!wasActive) return@let
+            _connectionEvents.emit(ConnectionEvent.Failed(peerId, event.reason))
+            scheduleReconnect(peerId)
+        }
+    }
+
+    private suspend fun handleDisconnected(event: NearbyPlatformEvent.Disconnected) {
+        endpointToPeer[event.endpointId]?.let { peerId ->
+            clearPeerConnection(peerId)
+            _connectionEvents.emit(ConnectionEvent.Disconnected(peerId))
+        }
+    }
+
+    private suspend fun handlePayloadReceived(event: NearbyPlatformEvent.PayloadReceived) {
+        endpointToPeer[event.endpointId]?.let { peerId ->
+            _transportEvents.emit(TransportEvent.PayloadReceived(peerId, event.payloadId, event.bytes))
+        }
+    }
+
+    private suspend fun handlePayloadTransferUpdate(event: NearbyPlatformEvent.PayloadTransferUpdate) {
+        endpointToPeer[event.endpointId]?.let { peerId ->
+            handleTransferUpdate(peerId, event)
+        }
+    }
                 val wasActive = peerId in connectingPeerIds || peerId in _state.value.connectedPeerIds
                 clearPeerConnection(peerId)
                 if (!wasActive) return@let

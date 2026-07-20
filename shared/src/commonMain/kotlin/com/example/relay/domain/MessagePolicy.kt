@@ -149,48 +149,57 @@ class MessagePolicy(
 
     private fun validatePayload(message: RelayMessage): MessageValidation {
         val p = message.payload
-        if (message.recordType == RelayRecordType.REPORT && message.messageType == MessageType.SAFETY && p !is SafetyPayload) {
-            return MessageValidation.Invalid("message type and payload disagree")
-        }
-        if (message.recordType == RelayRecordType.REPORT && message.messageType == MessageType.SUPPLY && p !is SupplyPayload) {
-            return MessageValidation.Invalid("message type and payload disagree")
-        }
+        validateTypeMismatch(message, p)?.let { return it }
         return when (p) {
-        is SafetyPayload -> {
-            if (p.companionCount !in 0..99) MessageValidation.Invalid("invalid companion count")
-            else if (p.approximateLocation.length > limits.maxLocationChars || p.note.length > limits.maxNoteChars) {
-                MessageValidation.Invalid("text too long")
-            } else {
-                MessageValidation.Valid
-            }
+            is SafetyPayload -> validateSafetyPayload(p)
+            is SupplyPayload -> validateSupplyPayload(p)
+            is StatusChangePayload -> validateStatusChangePayload(message, p)
         }
-        is SupplyPayload -> {
-            if (p.requiredCount !in 1..9999) MessageValidation.Invalid("invalid required count")
-            else if (p.approximateLocation.length > limits.maxLocationChars || p.note.length > limits.maxNoteChars) {
-                MessageValidation.Invalid("text too long")
-            } else if (p.otherLabel != null && p.otherLabel.length > limits.maxOtherLabelChars) {
-                MessageValidation.Invalid("other label too long")
-            } else if (p.kind == SupplyKind.OTHER && p.otherLabel.isNullOrBlank()) {
-                MessageValidation.Invalid("other label required")
-            } else {
-                MessageValidation.Valid
-            }
+    }
+
+    private fun validateTypeMismatch(message: RelayMessage, p: Any): MessageValidation? {
+        return when {
+            message.recordType == RelayRecordType.REPORT && message.messageType == MessageType.SAFETY && p !is SafetyPayload ->
+                MessageValidation.Invalid("message type and payload disagree")
+            message.recordType == RelayRecordType.REPORT && message.messageType == MessageType.SUPPLY && p !is SupplyPayload ->
+                MessageValidation.Invalid("message type and payload disagree")
+            else -> null
         }
-        is StatusChangePayload -> {
-            if (message.recordType != RelayRecordType.STATUS_CHANGE) {
-                MessageValidation.Invalid("status change record type required")
-            } else if (
-                p.eventId.length !in 1..64 ||
-                p.targetMessageId.length !in 1..64 ||
-                p.createdBy.length !in 1..64 ||
-                p.reason.length > limits.maxNoteChars ||
-                p.createdAt < 0
-            ) {
-                MessageValidation.Invalid("invalid status change")
-            } else {
-                MessageValidation.Valid
-            }
+    }
+
+    private fun validateSafetyPayload(p: SafetyPayload): MessageValidation {
+        if (p.companionCount !in 0..99) return MessageValidation.Invalid("invalid companion count")
+        validateTextLength(p.approximateLocation.length, p.note.length)?.let { return it }
+        return MessageValidation.Valid
+    }
+
+    private fun validateSupplyPayload(p: SupplyPayload): MessageValidation {
+        if (p.requiredCount !in 1..9999) return MessageValidation.Invalid("invalid required count")
+        validateTextLength(p.approximateLocation.length, p.note.length)?.let { return it }
+        if (p.otherLabel != null && p.otherLabel.length > limits.maxOtherLabelChars) return MessageValidation.Invalid("other label too long")
+        if (p.kind == SupplyKind.OTHER && p.otherLabel.isNullOrBlank()) return MessageValidation.Invalid("other label required")
+        return MessageValidation.Valid
+    }
+
+    private fun validateStatusChangePayload(message: RelayMessage, p: StatusChangePayload): MessageValidation {
+        if (message.recordType != RelayRecordType.STATUS_CHANGE) return MessageValidation.Invalid("status change record type required")
+        if (
+            p.eventId.length !in 1..64 ||
+            p.targetMessageId.length !in 1..64 ||
+            p.createdBy.length !in 1..64 ||
+            p.reason.length > limits.maxNoteChars ||
+            p.createdAt < 0
+        ) {
+            return MessageValidation.Invalid("invalid status change")
         }
+        return MessageValidation.Valid
+    }
+
+    private fun validateTextLength(locationLen: Int, noteLen: Int): MessageValidation? {
+        return if (locationLen > limits.maxLocationChars || noteLen > limits.maxNoteChars) {
+            MessageValidation.Invalid("text too long")
+        } else {
+            null
         }
     }
 }

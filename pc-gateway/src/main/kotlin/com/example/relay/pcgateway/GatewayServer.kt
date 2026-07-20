@@ -89,14 +89,23 @@ fun Application.gatewayModule(
 ) {
     install(ContentNegotiation) { json(GatewayJson) }
     routing {
-        get("/api/health") {
-            call.respond(
-                HealthResponse(
-                    status = "ok",
-                    gatewayId = config.gatewayId,
-                    database = "ready",
-                    anonymousIngress = config.anonymousIngressEnabled,
-                    lanDiscoveryPort = config.lanDiscoveryPort,
+        healthRoutes(config)
+    }
+}
+
+private fun Route.healthRoutes(config: GatewayConfig) {
+    get("/api/health") {
+        call.respond(
+            HealthResponse(
+                status = "ok",
+                gatewayId = config.gatewayId,
+                database = "ready",
+                anonymousIngress = config.anonymousIngressEnabled,
+                lanDiscoveryPort = config.lanDiscoveryPort,
+            )
+        )
+    }
+}
                     bleBridgeStatus = if (rescueBleReady) "awaiting_sidecar" else "not_ready",
                     version = config.version,
                     buildSha = config.buildSha,

@@ -39,35 +39,56 @@ class PacketCodec(
     }
 
     fun decode(bytes: ByteArray): DecodeResult {
-        if (bytes.size > limits.maxPacketBytes) return DecodeResult.Failure(DecodeError.PAYLOAD_TOO_LARGE)
-        val envelope = try {
+        checkPayloadSize(bytes)?.let { return it }
+        val envelope = parseEnvelope(bytes) ?: return DecodeResult.Failure(DecodeError.MALFORMED_JSON)
+        if (!isProtocolVersionValid(envelope)) return DecodeResult.Failure(DecodeError.UNKNOWN_PROTOCOL_VERSION)
+        if (!isEnvelopeValid(envelope)) return DecodeResult.Failure(DecodeError.INVALID_ENVELOPE)
+        val serializer = getSerializer(envelope.packetType) ?: return DecodeResult.Failure(DecodeError.UNKNOWN_PACKET_TYPE)
+        val body = parseBody(envelope, serializer) ?: return DecodeResult.Failure(DecodeError.INVALID_BODY)
+        val invalidReason = validateBody(body, envelope.senderDeviceId)
+        return if (invalidReason == null) DecodeResult.Success(DecodedPacket(envelope, body))
+        else DecodeResult.Failure(DecodeError.INVALID_BODY, invalidReason)
+    }
+
+    private fun checkPayloadSize(bytes: ByteArray): DecodeResult.Failure? {
+        return if (bytes.size > limits.maxPacketBytes) DecodeResult.Failure(DecodeError.PAYLOAD_TOO_LARGE) else null
+    }
+
+    private fun parseEnvelope(bytes: ByteArray): WireEnvelope? {
+        return try {
             json.decodeFromString(WireEnvelope.serializer(), bytes.decodeToString())
         } catch (_: Exception) {
-            return DecodeResult.Failure(DecodeError.MALFORMED_JSON)
+            null
         }
-        if (envelope.protocolVersion != CURRENT_PROTOCOL_VERSION) {
-            return DecodeResult.Failure(DecodeError.UNKNOWN_PROTOCOL_VERSION)
-        }
-        if (!validId(envelope.packetId) || !validId(envelope.senderDeviceId) || envelope.sentAt < 0) {
-            return DecodeResult.Failure(DecodeError.INVALID_ENVELOPE)
-        }
-        val body = try {
-            when (envelope.packetType) {
-                PacketTypes.HELLO -> json.decodeFromJsonElement(HelloBody.serializer(), envelope.body)
-                PacketTypes.MANIFEST -> json.decodeFromJsonElement(ManifestBody.serializer(), envelope.body)
-                PacketTypes.MESSAGE_REQUEST -> json.decodeFromJsonElement(MessageRequestBody.serializer(), envelope.body)
-                PacketTypes.MESSAGE_DATA -> json.decodeFromJsonElement(MessageDataBody.serializer(), envelope.body)
-                PacketTypes.RECEIPT_DATA -> json.decodeFromJsonElement(ReceiptDataBody.serializer(), envelope.body)
-                PacketTypes.ACK -> json.decodeFromJsonElement(AckBody.serializer(), envelope.body)
-                PacketTypes.ERROR -> json.decodeFromJsonElement(ErrorBody.serializer(), envelope.body)
-                else -> return DecodeResult.Failure(DecodeError.UNKNOWN_PACKET_TYPE)
-            }
+    }
+
+    private fun isProtocolVersionValid(envelope: WireEnvelope): Boolean {
+        return envelope.protocolVersion == CURRENT_PROTOCOL_VERSION
+    }
+
+    private fun isEnvelopeValid(envelope: WireEnvelope): Boolean {
+        return validId(envelope.packetId) && validId(envelope.senderDeviceId) && envelope.sentAt >= 0
+    }
+
+    private fun <T> parseBody(envelope: WireEnvelope, serializer: KSerializer<T>): T? {
+        return try {
+            json.decodeFromJsonElement(serializer, envelope.body)
         } catch (_: Exception) {
-            return DecodeResult.Failure(DecodeError.INVALID_BODY)
+            null
         }
-        val invalid = validateBody(body, envelope.senderDeviceId)
-        return if (invalid == null) DecodeResult.Success(DecodedPacket(envelope, body))
-        else DecodeResult.Failure(DecodeError.INVALID_BODY, invalid)
+    }
+
+    private fun getSerializer(packetType: PacketTypes): KSerializer<*>? {
+        return when (packetType) {
+            PacketTypes.HELLO -> HelloBody.serializer()
+            PacketTypes.MANIFEST -> ManifestBody.serializer()
+            PacketTypes.MESSAGE_REQUEST -> MessageRequestBody.serializer()
+            PacketTypes.MESSAGE_DATA -> MessageDataBody.serializer()
+            PacketTypes.RECEIPT_DATA -> ReceiptDataBody.serializer()
+            PacketTypes.ACK -> AckBody.serializer()
+            PacketTypes.ERROR -> ErrorBody.serializer()
+            else -> null
+        }
     }
 
     private fun validateBody(body: PacketBody, senderDeviceId: String): String? = when (body) {

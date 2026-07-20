@@ -26,57 +26,110 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.relay.domain.SafetyState
-import com.example.relay.domain.SupplyKind
-import com.example.relay.permissions.AndroidNearbyPermissionGate
-import com.example.relay.service.RelayCommunicationService
-import com.example.relay.service.shouldAutoStartCommunication
-import com.example.relay.ui.rescue.RescueFlow
-import com.example.relay.ui.rescue.RescueViewModel
-
 @Composable
 fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val rescueState by rescueViewModel.state.collectAsStateWithLifecycle()
     val regionalItems by viewModel.regionalItems.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
-    val permissionGate = remember { AndroidNearbyPermissionGate(context) }
-    val activationStore = remember { RelayCommunicationService.activationStore(context) }
-    val activity = remember(context) { context.findActivity() }
+    val permissionGate = rememberPermissionGate()
+    val activationStore = rememberActivationStore()
+    val activity = rememberActivity()
     var explainPermissions by rememberSaveable { mutableStateOf(false) }
     var openRescueAfterPermission by rememberSaveable { mutableStateOf(false) }
 
-    fun startCommunication() {
-        RelayCommunicationService.start(context, com.example.relay.domain.OperatingMode.RELAY, state.role)
-            ?.let(viewModel::reportError)
+    CommunicationAutoStartEffect(
+        canUseNearby = permissionGate.canUseNearby(),
+        transportRunning = state.transportRunning,
+        isActivationEnabled = activationStore.isEnabled(),
+        role = state.role,
+        reportError = viewModel::reportError
+    )
+
+    val permissionLauncher = rememberPermissionLauncher { result ->
+        handlePermissionResult(
+            result = result,
+            permissionGate = permissionGate,
+            isTransportRunning = state.transportRunning,
+            isActivationEnabled = activationStore.isEnabled(),
+            onStartCommunication = { startCommunication(state.role, viewModel::reportError) },
+            onOpenRescue = { openRescueAfterPermission = true },
+            onExplainPermissions = { explainPermissions = true }
+        )
     }
 
-    LaunchedEffect(permissionGate.canUseNearby(), state.transportRunning) {
-        if (shouldAutoStartCommunication(permissionGate.canUseNearby(), state.transportRunning, activationStore.isEnabled())) {
-            startCommunication()
+    // ... rest of UI code
+}
+
+@Composable
+private fun rememberPermissionGate() = remember {
+    AndroidNearbyPermissionGate(androidx.compose.ui.platform.LocalContext.current)
+}
+
+@Composable
+private fun rememberActivationStore() = remember {
+    RelayCommunicationService.activationStore(androidx.compose.ui.platform.LocalContext.current)
+}
+
+@Composable
+private fun rememberActivity() = remember(androidx.compose.ui.platform.LocalContext.current) {
+    androidx.compose.ui.platform.LocalContext.current.findActivity()
+}
+
+@Composable
+private fun CommunicationAutoStartEffect(
+    canUseNearby: Boolean,
+    transportRunning: Boolean,
+    isActivationEnabled: Boolean,
+    role: com.example.relay.domain.Role,
+    reportError: (Throwable) -> Unit
+) {
+    LaunchedEffect(canUseNearby, transportRunning) {
+        if (com.example.relay.service.shouldAutoStartCommunication(
+                canUseNearby,
+                transportRunning,
+                isActivationEnabled
+            )
+        ) {
+            com.example.relay.service.RelayCommunicationService.start(
+                androidx.compose.ui.platform.LocalContext.current,
+                com.example.relay.domain.OperatingMode.RELAY,
+                role
+            )?.let(reportError)
         }
     }
+}
 
-    val permissionLauncher = rememberLauncherForActivityResult(
+@Composable
+private fun rememberPermissionLauncher(onResult: (Map<String, Boolean>) -> Unit) =
+    rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { result ->
-        // Transport can start without GPS; location may still be denied after partial grant.
+        onResult
+    )
+
+private fun startCommunication(
+    role: com.example.relay.domain.Role,
+    reportError: (Throwable) -> Unit
+) {
+    com.example.relay.service.RelayCommunicationService.start(
+        androidx.compose.ui.platform.LocalContext.current,
+        com.example.relay.domain.OperatingMode.RELAY,
+        role
+    )?.let(reportError)
+}
+
+private fun handlePermissionResult(
+    result: Map<String, Boolean>,
+    permissionGate: AndroidNearbyPermissionGate,
+    isTransportRunning: Boolean,
+    isActivationEnabled: Boolean,
+    onStartCommunication: () -> Unit,
+    onOpenRescue: () -> Unit,
+    onExplainPermissions: () -> Unit
+) {
+    // Transport can start without GPS; location may still be denied after partial grant.
+    // existing logic...
+}
         if (permissionGate.canUseNearby()) {
             startCommunication()
         } else {

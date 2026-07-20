@@ -81,40 +81,100 @@ object QrTransferCodec {
         frames: Collection<QrTransferFrame>,
         nowEpochMillis: Long,
     ): QrTransferDecodeResult {
-        if (frames.isEmpty()) return QrTransferDecodeResult.Rejected(QrTransferRejection.MISSING_FRAME)
+        validateEmptyFrames(frames)?.let { return it }
         val first = frames.first()
-        if (first.schemaVersion != CURRENT_SCHEMA_VERSION) return QrTransferDecodeResult.Rejected(QrTransferRejection.UNSUPPORTED_VERSION)
-        if (first.transferId.isBlank() || first.totalFrames !in 1..MAX_FRAMES || first.expiresAtEpochMillis <= 0) {
-            return QrTransferDecodeResult.Rejected(QrTransferRejection.INVALID_METADATA)
-        }
-        if (nowEpochMillis >= first.expiresAtEpochMillis) return QrTransferDecodeResult.Rejected(QrTransferRejection.EXPIRED)
-        if (frames.size != first.totalFrames) return QrTransferDecodeResult.Rejected(QrTransferRejection.MISSING_FRAME)
-        if (frames.any { it.schemaVersion != first.schemaVersion || it.transferId != first.transferId || it.totalFrames != first.totalFrames || it.payloadHash != first.payloadHash || it.expiresAtEpochMillis != first.expiresAtEpochMillis }) {
-            return QrTransferDecodeResult.Rejected(QrTransferRejection.MIXED_TRANSFER)
-        }
-        if (frames.map { it.frameIndex }.toSet().size != frames.size) return QrTransferDecodeResult.Rejected(QrTransferRejection.DUPLICATE_FRAME)
-        if (frames.any { it.frameIndex !in 0 until first.totalFrames || it.payloadChunk.length > MAX_CHUNK_HEX_CHARS || !it.payloadChunk.isHex() }) {
-            return QrTransferDecodeResult.Rejected(QrTransferRejection.INVALID_METADATA)
-        }
+        validateSchemaVersion(first)?.let { return it }
+        validateMetadata(first)?.let { return it }
+        validateExpiry(nowEpochMillis, first)?.let { return it }
+        validateFrameCount(frames, first)?.let { return it }
+        validateHomogeneous(frames, first)?.let { return it }
+        validateDuplicateFrames(frames)?.let { return it }
+        validateFrameValidity(frames, first)?.let { return it }
         val ordered = frames.sortedBy { it.frameIndex }
-        if (ordered.map { it.frameIndex } != (0 until first.totalFrames).toList()) return QrTransferDecodeResult.Rejected(QrTransferRejection.MISSING_FRAME)
+        validateFrameOrdering(ordered, first)?.let { return it }
         val payload = ordered.flatMap { it.payloadChunk.fromHex().asList() }.toByteArray()
-        if (payload.isEmpty() || payload.size > MAX_PAYLOAD_BYTES || RescueCryptography.sha256Hex(payload) != first.payloadHash) {
-            return QrTransferDecodeResult.Rejected(QrTransferRejection.HASH_MISMATCH)
-        }
+        validatePayloadSizeAndHash(payload, first)?.let { return it }
         return QrTransferDecodeResult.Accepted(payload, first.transferId)
     }
 
-    private fun ByteArray.toHex(): String = buildString(size * 2) {
-        for (byte in this@toHex) {
-            val value = byte.toInt() and 0xff
-            append(HEX[value ushr 4])
-            append(HEX[value and 0x0f])
-        }
-    }
-    private fun String.isHex(): Boolean = length % 2 == 0 && all { it in "0123456789abcdefABCDEF" }
-    private fun String.fromHex(): ByteArray = ByteArray(length / 2) { substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+    private fun validateEmptyFrames(
+        frames: Collection<QrTransferFrame>
+    ): QrTransferDecodeResult.Rejected? =
+        if (frames.isEmpty()) QrTransferDecodeResult.Rejected(QrTransferRejection.MISSING_FRAME)
+        else null
 
-    private const val HEX = "0123456789abcdef"
+    private fun validateSchemaVersion(
+        frame: QrTransferFrame
+    ): QrTransferDecodeResult.Rejected? =
+        if (frame.schemaVersion != CURRENT_SCHEMA_VERSION) QrTransferDecodeResult.Rejected(QrTransferRejection.UNSUPPORTED_VERSION)
+        else null
 
-}
+    private fun validateMetadata(
+        frame: QrTransferFrame
+    ): QrTransferDecodeResult.Rejected? =
+        if (frame.transferId.isBlank() || frame.totalFrames !in 1..MAX_FRAMES || frame.expiresAtEpochMillis <= 0) {
+            QrTransferDecodeResult.Rejected(QrTransferRejection.INVALID_METADATA)
+        } else null
+
+    private fun validateExpiry(
+        nowEpochMillis: Long,
+        frame: QrTransferFrame
+    ): QrTransferDecodeResult.Rejected? =
+        if (nowEpochMillis >= frame.expiresAtEpochMillis) QrTransferDecodeResult.Rejected(QrTransferRejection.EXPIRED)
+        else null
+
+    private fun validateFrameCount(
+        frames: Collection<QrTransferFrame>,
+        frame: QrTransferFrame
+    ): QrTransferDecodeResult.Rejected? =
+        if (frames.size != frame.totalFrames) QrTransferDecodeResult.Rejected(QrTransferRejection.MISSING_FRAME)
+        else null
+
+    private fun validateHomogeneous(
+        frames: Collection<QrTransferFrame>,
+        frame: QrTransferFrame
+    ): QrTransferDecodeResult.Rejected? =
+        if (frames.any {
+                it.schemaVersion != frame.schemaVersion ||
+                it.transferId != frame.transferId ||
+                it.totalFrames != frame.totalFrames ||
+                it.payloadHash != frame.payloadHash ||
+                it.expiresAtEpochMillis != frame.expiresAtEpochMillis
+            }) {
+            QrTransferDecodeResult.Rejected(QrTransferRejection.MIXED_TRANSFER)
+        } else null
+
+    private fun validateDuplicateFrames(
+        frames: Collection<QrTransferFrame>
+    ): QrTransferDecodeResult.Rejected? =
+        if (frames.map { it.frameIndex }.toSet().size != frames.size) {
+            QrTransferDecodeResult.Rejected(QrTransferRejection.DUPLICATE_FRAME)
+        } else null
+
+    private fun validateFrameValidity(
+        frames: Collection<QrTransferFrame>,
+        frame: QrTransferFrame
+    ): QrTransferDecodeResult.Rejected? =
+        if (frames.any {
+                it.frameIndex !in 0 until frame.totalFrames ||
+                it.payloadChunk.length > MAX_CHUNK_HEX_CHARS ||
+                !it.payloadChunk.isHex()
+            }) {
+            QrTransferDecodeResult.Rejected(QrTransferRejection.INVALID_METADATA)
+        } else null
+
+    private fun validateFrameOrdering(
+        ordered: List<QrTransferFrame>,
+        frame: QrTransferFrame
+    ): QrTransferDecodeResult.Rejected? =
+        if (ordered.map { it.frameIndex } != (0 until frame.totalFrames).toList()) {
+            QrTransferDecodeResult.Rejected(QrTransferRejection.MISSING_FRAME)
+        } else null
+
+    private fun validatePayloadSizeAndHash(
+        payload: ByteArray,
+        frame: QrTransferFrame
+    ): QrTransferDecodeResult.Rejected? =
+        if (payload.isEmpty() || payload.size > MAX_PAYLOAD_BYTES || RescueCryptography.sha256Hex(payload) != frame.payloadHash) {
+            QrTransferDecodeResult.Rejected(QrTransferRejection.HASH_MISMATCH)
+        } else null

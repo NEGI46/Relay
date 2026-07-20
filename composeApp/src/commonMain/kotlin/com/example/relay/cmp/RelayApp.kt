@@ -71,16 +71,25 @@ fun RelaySharedApp(
     var status by remember { mutableStateOf<String?>(null) }
     var lastGateway by remember { mutableStateOf<String?>(null) }
 
+    fun preparePendingMessages() = run {
+        store.pruneExpired(policy)
+        store.all().mapNotNull { policy.prepareForGatewayUpload(it) }
+    }
+
+    fun handleIdleState() {
+        lastGateway = "idle"
+        status = null
+    }
+
     fun syncGateway() {
         scope.launch {
             status = "中継拠点へ同期中…"
             try {
-                store.pruneExpired(policy)
-                val pending = store.all().mapNotNull { policy.prepareForGatewayUpload(it) }
+                val pending = preparePendingMessages()
                 if (pending.isEmpty()) {
-                    lastGateway = "idle"
-                    status = null
+                    handleIdleState()
                     return@launch
+                }
                 }
                 val host = gatewayHostOverride
                 val gateway = if (!host.isNullOrBlank()) {
