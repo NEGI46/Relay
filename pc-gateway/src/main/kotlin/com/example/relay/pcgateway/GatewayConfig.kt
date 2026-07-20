@@ -8,7 +8,7 @@ import java.util.Base64
 import java.util.UUID
 
 data class GatewayConfig(
-    val version: String = System.getenv("RELAY_VERSION") ?: "1.0.0",
+    val version: String = System.getProperty("relay.version") ?: System.getenv("RELAY_VERSION") ?: "dev",
     val buildSha: String = System.getenv("GIT_COMMIT") ?: "unknown",
     /**
      * Bind on LAN by default. Operators must restrict exposure with the OS firewall
@@ -143,3 +143,4 @@ fun resolveBleBridgeSharedSecret(): String {
     file.writeText(value, Charsets.UTF_8)
     return value
 }
+
