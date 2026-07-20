@@ -2,9 +2,14 @@ package com.example.relay.cloudrelay
 
 import com.example.relay.rescue.EncryptedRescueEnvelope
 import com.example.relay.rescue.SignedShelterReceipt
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import java.sql.DriverManager
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+
+private val cloudJson = Json { ignoreUnknownKeys = false; encodeDefaults = true }
 
 interface CloudRelayStore {
     fun put(envelope: EncryptedRescueEnvelope, now: Long): CloudStoredReceipt
@@ -17,11 +22,11 @@ class PostgresCloudRelayStore(private val jdbcUrl:String, private val user:Strin
     ) } } }
     override fun put(e:EncryptedRescueEnvelope,now:Long)=CloudStoredReceipt(UUID.randomUUID().toString(),e.envelopeId,e.requestId,e.requestVersion,e.ciphertextSha256Hex,e.destinationShelterId,now).also { r ->
         DriverManager.getConnection(jdbcUrl,user,password).use { c -> c.prepareStatement("INSERT INTO relay_envelopes VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING").use {
-            it.setString(1,e.envelopeId);it.setString(2,e.requestId);it.setInt(3,e.requestVersion);it.setString(4,e.senderDeviceId);it.setString(5,e.destinationShelterId);it.setLong(6,e.expiresAtEpochMillis);it.setString(7,e.ciphertextSha256Hex);it.setString(8,e.toString());it.setLong(9,now);it.executeUpdate()
+            it.setString(1,e.envelopeId);it.setString(2,e.requestId);it.setInt(3,e.requestVersion);it.setString(4,e.senderDeviceId);it.setString(5,e.destinationShelterId);it.setLong(6,e.expiresAtEpochMillis);it.setString(7,e.ciphertextSha256Hex);it.setString(8,cloudJson.encodeToString(e));it.setLong(9,now);it.executeUpdate()
         } }
     }
-    override fun pending(shelterId:String,now:Long,limit:Int)=emptyList<EncryptedRescueEnvelope>()
-    override fun receipt(deviceId:String,envelopeId:String):SignedShelterReceipt?=null
+    override fun pending(shelterId:String,now:Long,limit:Int):List<EncryptedRescueEnvelope> = DriverManager.getConnection(jdbcUrl,user,password).use { c -> c.prepareStatement("SELECT envelope_json FROM relay_envelopes WHERE shelter_id=? AND expires_at>? ORDER BY stored_at LIMIT ?").use { s -> s.setString(1,shelterId); s.setLong(2,now); s.setInt(3,limit); s.executeQuery().use { rs -> buildList { while(rs.next()) add(cloudJson.decodeFromString(rs.getString(1))) } } } }
+    override fun receipt(deviceId:String,envelopeId:String):SignedShelterReceipt? = DriverManager.getConnection(jdbcUrl,user,password).use { c -> c.prepareStatement("SELECT r.receipt_json FROM relay_receipts r JOIN relay_envelopes e ON e.envelope_id=r.envelope_id WHERE e.sender_device_id=? AND e.envelope_id=?").use { s -> s.setString(1,deviceId); s.setString(2,envelopeId); s.executeQuery().use { rs -> if(rs.next()) cloudJson.decodeFromString(rs.getString(1)) else null } } }
 }
 class InMemoryCloudRelayStore:CloudRelayStore {
     private val envelopes=ConcurrentHashMap<String,EncryptedRescueEnvelope>()
