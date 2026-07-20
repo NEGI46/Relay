@@ -72,13 +72,11 @@ data class GatewayConfig(
 
 /** Exact non-secret environment consumed by the Windows BLE bridge launcher. */
 data class BleBridgeEnvironment(
-    val shelterId: String,
     val signedManifestFingerprintBase64: String,
     val ingressPort: Int,
     val sharedSecretFile: String,
 ) {
     fun asEnvironmentValues(): Map<String, String> = linkedMapOf(
-        "RELAY_SHELTER_ID" to shelterId,
         "RELAY_BLE_SIGNED_MANIFEST_FINGERPRINT_BASE64" to signedManifestFingerprintBase64,
         "RELAY_BLE_BRIDGE_PORT" to ingressPort.toString(),
         "RELAY_BLE_BRIDGE_SECRET_FILE" to sharedSecretFile,
@@ -88,7 +86,6 @@ data class BleBridgeEnvironment(
 /** Builds the bridge identity only from a verified signed manifest, never its legacy fingerprint. */
 fun GatewayConfig.bleBridgeEnvironmentFor(manifest: SignedShelterManifest): BleBridgeEnvironment =
     BleBridgeEnvironment(
-        shelterId = manifest.manifest.shelterId,
         signedManifestFingerprintBase64 = Base64.getEncoder().encodeToString(manifest.beaconFingerprintBytes()),
         ingressPort = bleBridgeIngressPort,
         sharedSecretFile = defaultBleBridgeSecretFile().absolutePath,

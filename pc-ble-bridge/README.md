@@ -8,9 +8,10 @@ bytes to a local, authenticated loopback ingress.
 
 ## Security and privacy boundaries
 
-- The BLE advertisement contains only a protocol version, shelter ID hash,
-  signed-manifest fingerprint, and a rotating session hint.  It never contains
-  rescue content, a public key, names, or location.
+- The BLE advertisement contains only protocol v2 and a nine-byte
+  signed-manifest fingerprint prefix. The ten-byte identity fits the legacy
+  31-byte advertisement budget and never contains rescue content, a public
+  key, names, or location.
 - The bridge treats an envelope as opaque bytes.  It does not decrypt, parse,
   persist, or log plaintext rescue content.
 - Each transfer has one session, a 16 KiB ciphertext limit, a SHA-256 digest,
@@ -62,8 +63,7 @@ advertisement fail closed and never create a rescue request.
 The host will not start unless all of the following are supplied by the signed
 shelter provisioning/launcher layer:
 
-- `RELAY_SHELTER_ID`
-- `RELAY_BLE_SIGNED_MANIFEST_FINGERPRINT_BASE64` (at least 16 bytes)
+- `RELAY_BLE_SIGNED_MANIFEST_FINGERPRINT_BASE64` (at least 9 bytes)
 - either `RELAY_BLE_BRIDGE_SECRET` or `RELAY_BLE_BRIDGE_SECRET_FILE`
 - optional `RELAY_BLE_BRIDGE_PORT` (default `18081`)
 

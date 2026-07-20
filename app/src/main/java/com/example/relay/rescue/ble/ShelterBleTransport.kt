@@ -19,39 +19,28 @@ interface ShelterBleClient {
  */
 data class ShelterBleIdentity(
     val protocolVersion: Int,
-    val shelterIdHash: ByteArray,
     val signedManifestFingerprint: ByteArray,
-    val sessionHint: ByteArray,
 ) {
     init {
         require(protocolVersion == PROTOCOL_VERSION)
-        require(shelterIdHash.size == SHELTER_ID_HASH_BYTES)
         require(signedManifestFingerprint.size == MANIFEST_FINGERPRINT_BYTES)
-        require(sessionHint.size == SESSION_HINT_BYTES)
     }
 
-    fun encoded(): ByteArray = byteArrayOf(protocolVersion.toByte()) + shelterIdHash + signedManifestFingerprint + sessionHint
+    fun encoded(): ByteArray = byteArrayOf(protocolVersion.toByte()) + signedManifestFingerprint
 
     fun sameWireIdentity(other: ShelterBleIdentity): Boolean = encoded().contentEquals(other.encoded())
 
     companion object {
-        const val PROTOCOL_VERSION = 1
-        const val SHELTER_ID_HASH_BYTES = 8
-        const val MANIFEST_FINGERPRINT_BYTES = 16
-        const val SESSION_HINT_BYTES = 8
-        const val ENCODED_BYTES = 1 + SHELTER_ID_HASH_BYTES + MANIFEST_FINGERPRINT_BYTES + SESSION_HINT_BYTES
+        const val PROTOCOL_VERSION = 2
+        const val MANIFEST_FINGERPRINT_BYTES = 9
+        const val ENCODED_BYTES = 1 + MANIFEST_FINGERPRINT_BYTES
 
         fun decode(bytes: ByteArray): ShelterBleIdentity? {
             if (bytes.size != ENCODED_BYTES || bytes[0].toInt() != PROTOCOL_VERSION) return null
             return runCatching {
                 ShelterBleIdentity(
                     protocolVersion = bytes[0].toInt(),
-                    shelterIdHash = bytes.copyOfRange(1, 1 + SHELTER_ID_HASH_BYTES),
-                    signedManifestFingerprint = bytes.copyOfRange(
-                        1 + SHELTER_ID_HASH_BYTES,
-                        1 + SHELTER_ID_HASH_BYTES + MANIFEST_FINGERPRINT_BYTES,
-                    ),
-                    sessionHint = bytes.copyOfRange(1 + SHELTER_ID_HASH_BYTES + MANIFEST_FINGERPRINT_BYTES, ENCODED_BYTES),
+                    signedManifestFingerprint = bytes.copyOfRange(1, ENCODED_BYTES),
                 )
             }.getOrNull()
         }

@@ -7,6 +7,7 @@ import com.example.relay.rescue.RegionalShelterDirectoryResolver
 import com.example.relay.rescue.RescueEnvelopeRepository
 import com.example.relay.rescue.RescueRequestKey
 import com.example.relay.rescue.RescueSubmissionStatus
+import com.example.relay.rescue.ShelterReceiptStatus
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -42,6 +43,7 @@ class ShelterDeliveryCoordinator(
     private val json: Json = Json { encodeDefaults = true },
     private val sessionDeadlineMillis: Long = 30_000,
     private val maxEnvelopeBytes: Int = MAX_ENVELOPE_BYTES,
+    private val onRepositoryChanged: suspend () -> Unit = {},
 ) {
     private val mutex = Mutex()
     private var job: Job? = null
@@ -71,7 +73,6 @@ class ShelterDeliveryCoordinator(
                     // the already verified, locally provisioned directory.
                     val identity = session.readIdentity()
                     val manifest = directoryResolver.resolveBeaconIdentity(
-                        identity.shelterIdHash,
                         identity.signedManifestFingerprint,
                         clock(),
                     ) ?: run {
@@ -110,8 +111,13 @@ class ShelterDeliveryCoordinator(
                         }
                     }
                     when (repository.applyReceipt(candidate.key, receipt, keys.receiptSigningPublicKey)) {
-                        ReceiptApplicationResult.APPLIED, ReceiptApplicationResult.ALREADY_APPLIED -> {
-                            deliveryIds.remove(candidate.key)
+                        ReceiptApplicationResult.APPLIED -> {
+                            onRepositoryChanged()
+                            if (receipt.receipt.status.isTerminalDeliveryReceipt()) deliveryIds.remove(candidate.key)
+                            _state.value = ShelterDeliveryState.Scanning
+                        }
+                        ReceiptApplicationResult.ALREADY_APPLIED -> {
+                            if (receipt.receipt.status.isTerminalDeliveryReceipt()) deliveryIds.remove(candidate.key)
                             _state.value = ShelterDeliveryState.Scanning
                         }
                         else -> _state.value = ShelterDeliveryState.WaitingToRetry("invalid shelter receipt")
@@ -137,6 +143,12 @@ class ShelterDeliveryCoordinator(
         )
     }
 }
+
+internal fun ShelterReceiptStatus.isTerminalDeliveryReceipt(): Boolean = this in setOf(
+    ShelterReceiptStatus.COMPLETED,
+    ShelterReceiptStatus.CANCELLED,
+    ShelterReceiptStatus.REJECTED,
+)
 
 /** Durable per-request idempotency key, replayed after a disconnect or process restart. */
 interface CourierDeliveryIdStore {

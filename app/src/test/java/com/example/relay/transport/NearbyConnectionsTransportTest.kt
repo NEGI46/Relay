@@ -323,6 +323,38 @@ class NearbyConnectionsTransportTest {
     }
 
     @Test
+    fun `bytes from an endpoint are ignored until its connection succeeds`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val transport = NearbyConnectionsTransport("local", platform, AllowedNearbyPermissionGate, backgroundScope)
+        val received = mutableListOf<ReceivedPayload>()
+        backgroundScope.launch { transport.receivedPayloads.collect(received::add) }
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.EndpointFound("endpoint-1", "device-B"))
+        platform.events.emit(NearbyPlatformEvent.BytesReceived("endpoint-1", byteArrayOf(1, 2, 3)))
+        runCurrent()
+
+        assertTrue(received.isEmpty())
+    }
+
+    @Test
+    fun `send setup failure removes its pending completion`() = runTest {
+        val platform = FakeNearbyPlatform(failSendAfterPayloadCreated = true)
+        val transport = NearbyConnectionsTransport("local", platform, AllowedNearbyPermissionGate, backgroundScope)
+        val observed = mutableListOf<TransportEvent>()
+        backgroundScope.launch { transport.transportEvents.collect(observed::add) }
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("endpoint-1", "device-B", "1234", true))
+        platform.events.emit(NearbyPlatformEvent.ConnectionSucceeded("endpoint-1"))
+        runCurrent()
+
+        assertTrue(transport.send("device-B", byteArrayOf(1)) is SendResult.Failed)
+        platform.events.emit(NearbyPlatformEvent.PayloadTransferSucceeded("endpoint-1", 100L))
+        runCurrent()
+
+        assertFalse(observed.any { it is TransportEvent.PayloadTransferCompleted })
+    }
+
+    @Test
     fun `double start is idempotent and missing permission never invokes platform`() = runTest {
         val platform = FakeNearbyPlatform()
         val transport = NearbyConnectionsTransport("local", platform, DeniedNearbyPermissionGate, backgroundScope)
@@ -341,6 +373,7 @@ class NearbyConnectionsTransportTest {
 
 private class FakeNearbyPlatform(
     private val completeDuringSend: Boolean = false,
+    private val failSendAfterPayloadCreated: Boolean = false,
 ) : NearbyPlatform {
     override val events = MutableSharedFlow<NearbyPlatformEvent>(extraBufferCapacity = 32)
     var advertisingStarts = 0
@@ -360,6 +393,7 @@ private class FakeNearbyPlatform(
     override suspend fun sendBytes(endpointId: String, bytes: ByteArray, onPayloadCreated: (Long) -> Unit): Long {
         sent += endpointId to bytes
         onPayloadCreated(100L)
+        if (failSendAfterPayloadCreated) error("send setup failed")
         if (completeDuringSend) events.emit(NearbyPlatformEvent.PayloadTransferSucceeded(endpointId, 100L))
         return 100L
     }

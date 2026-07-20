@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import struct
 import time
+import uuid
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
@@ -147,44 +148,34 @@ class GattFrame:
 
 @dataclass(frozen=True)
 class BleIdentity:
-    """The 33-byte identity read/advertised by the bridge."""
+    """The ten-byte v2 identity that fits a legacy BLE advertisement."""
 
     protocol_version: int
-    shelter_id_hash: bytes
     signed_manifest_fingerprint: bytes
-    session_hint: bytes
 
     def __post_init__(self) -> None:
-        if self.protocol_version != 1:
+        if self.protocol_version != 2:
             raise TransferError("unsupported BLE identity protocol version")
-        if len(self.shelter_id_hash) != 8:
-            raise TransferError("shelter ID hash must be eight bytes")
-        if len(self.signed_manifest_fingerprint) != 16:
-            raise TransferError("manifest fingerprint must be sixteen bytes")
-        if len(self.session_hint) != 8:
-            raise TransferError("session hint must be eight bytes")
+        if len(self.signed_manifest_fingerprint) != 9:
+            raise TransferError("manifest fingerprint must be nine bytes")
 
     @classmethod
-    def create(cls, shelter_id: str, manifest_fingerprint: bytes, session_hint: bytes) -> "BleIdentity":
-        if not shelter_id or len(manifest_fingerprint) < 16:
+    def create(cls, manifest_fingerprint: bytes) -> "BleIdentity":
+        if len(manifest_fingerprint) < 9:
             raise TransferError("invalid BLE identity inputs")
-        if len(session_hint) != 8:
-            raise TransferError("session hint must be eight bytes")
-        return cls(
-            1,
-            hashlib.sha256(shelter_id.encode("utf-8")).digest()[:8],
-            bytes(manifest_fingerprint[:16]),
-            bytes(session_hint),
-        )
+        return cls(2, bytes(manifest_fingerprint[:9]))
 
     def encode(self) -> bytes:
-        return bytes((self.protocol_version,)) + self.shelter_id_hash + self.signed_manifest_fingerprint + self.session_hint
+        return bytes((self.protocol_version,)) + self.signed_manifest_fingerprint
+
+    def encode_service_data(self, service_uuid: uuid.UUID) -> bytes:
+        return service_uuid.bytes[::-1] + self.encode()
 
     @classmethod
     def decode(cls, raw: bytes) -> "BleIdentity":
-        if len(raw) != 33:
+        if len(raw) != 10:
             raise TransferError("BLE identity length is invalid")
-        return cls(raw[0], raw[1:9], raw[9:25], raw[25:33])
+        return cls(raw[0], raw[1:10])
 
 
 def _identifier_bytes(value: str, maximum: int, field: str) -> bytes:

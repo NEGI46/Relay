@@ -3,6 +3,7 @@ package com.example.relay.rescue.nearby
 import com.example.relay.rescue.EncryptedRescueEnvelope
 import com.example.relay.rescue.RescueEnvelopeRepository
 import com.example.relay.rescue.RescueRequestKey
+import com.example.relay.rescue.ReceiptApplicationResult
 import com.example.relay.rescue.RescueStoreResult
 import com.example.relay.rescue.RescueValidationResult
 import com.example.relay.rescue.ShelterPublicKeyProvider
@@ -48,6 +49,11 @@ class RescueNearbyCoordinator(
         sendInventory(peerId)
     }
 
+    /** Re-advertises durable local changes to peers that are already connected. */
+    suspend fun onLocalStoreChanged() {
+        refreshConnectedPeers()
+    }
+
     /**
      * Handles a payload already identified by [isRescuePayload]. Invalid or oversized packets are
      * dropped without touching the encrypted store and never produce an acknowledgement.
@@ -60,7 +66,7 @@ class RescueNearbyCoordinator(
             is RescueNearbyPacket.Envelope -> handleEnvelope(peerId, packet)
             is RescueNearbyPacket.Ack -> handleAck(peerId, packet)
             is RescueNearbyPacket.ReceiptRequest -> handleReceiptRequest(peerId, packet)
-            is RescueNearbyPacket.Receipt -> handleReceipt(packet)
+            is RescueNearbyPacket.Receipt -> handleReceipt(peerId, packet)
         }
     }
 
@@ -132,7 +138,8 @@ class RescueNearbyCoordinator(
         val envelope = packet.envelope
         if (envelope.validate() != RescueValidationResult.Valid) return
         val key = RescueRequestKey(envelope.requestId, envelope.requestVersion)
-        when (repository.store(envelope, nowEpochMillis())) {
+        val storeResult = repository.store(envelope, nowEpochMillis())
+        when (storeResult) {
             is RescueStoreResult.Stored,
             is RescueStoreResult.Rejected -> {
                 // Only a duplicate proves that the exact immutable ciphertext is already durable.
@@ -144,6 +151,7 @@ class RescueNearbyCoordinator(
                 }
             }
         }
+        if (storeResult is RescueStoreResult.Stored) refreshConnectedPeers(excludingPeerId = peerId)
     }
 
     private fun handleAck(peerId: String, packet: RescueNearbyPacket.Ack) {
@@ -165,15 +173,25 @@ class RescueNearbyCoordinator(
         }
     }
 
-    private fun handleReceipt(packet: RescueNearbyPacket.Receipt) {
+    private suspend fun handleReceipt(peerId: String, packet: RescueNearbyPacket.Receipt) {
         val keys = shelterKeyProvider?.load() ?: return
         val receipt = packet.receipt
         if (receipt.receipt.shelterId != keys.shelterId) return
-        repository.applyReceipt(
+        if (repository.applyReceipt(
             RescueRequestKey(receipt.receipt.requestId, receipt.receipt.requestVersion),
             receipt,
             keys.receiptSigningKey,
-        )
+        ) == ReceiptApplicationResult.APPLIED) {
+            refreshConnectedPeers(excludingPeerId = peerId)
+        }
+    }
+
+    private suspend fun refreshConnectedPeers(excludingPeerId: String? = null) {
+        transport.state.value.connectedPeerIds
+            .asSequence()
+            .filter { it != excludingPeerId }
+            .sorted()
+            .forEach { sendInventory(it) }
     }
 
     private suspend fun send(peerId: String, packet: RescueNearbyPacket): SendResult =

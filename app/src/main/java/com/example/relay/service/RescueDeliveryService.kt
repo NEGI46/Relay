@@ -126,11 +126,14 @@ class RescueDeliveryService : Service() {
                     is GatewayDeliveryResult.Accepted -> {
                         val keys = app.rescueShelterKeyStore.load()
                         if (keys != null) {
-                            app.rescueRepository.applyReceipt(
+                            val applied = app.rescueRepository.applyReceipt(
                                 RescueRequestKey(candidate.envelope.requestId, candidate.envelope.requestVersion),
                                 result.receipt,
                                 keys.receiptSigningKey,
                             )
+                            if (applied == com.example.relay.rescue.ReceiptApplicationResult.APPLIED) {
+                                app.rescueNearbyCoordinator?.onLocalStoreChanged()
+                            }
                         }
                     }
                     else -> recordDeliveryDiagnostic(result)
@@ -201,6 +204,8 @@ internal fun selectLocalGatewayCandidate(
             RescueSubmissionStatus.PENDING,
             RescueSubmissionStatus.IN_TRANSIT,
             RescueSubmissionStatus.SHELTER_STORED,
+            RescueSubmissionStatus.SHELTER_ACCEPTED,
+            RescueSubmissionStatus.SHELTER_RESPONDING,
         )
     }
     .sortedWith(

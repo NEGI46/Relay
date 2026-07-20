@@ -1,6 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
-
 namespace Relay.PcBleBridge.Protocol;
 
 /// <summary>
@@ -9,40 +6,37 @@ namespace Relay.PcBleBridge.Protocol;
 /// </summary>
 public sealed record BleIdentityAdvertisement(
     byte ProtocolVersion,
-    byte[] ShelterIdHash,
-    byte[] SignedManifestFingerprint,
-    byte[] SessionHint)
+    byte[] SignedManifestFingerprint)
 {
-    public const int ShelterIdHashBytes = 8;
-    public const int ManifestFingerprintBytes = 16;
-    public const int SessionHintBytes = 8;
+    // A legacy BLE advertisement has 31 bytes total. Windows contributes a
+    // three-byte Flags field and service data contributes a two-byte AD header
+    // plus the 16-byte service UUID, leaving exactly ten bytes for identity.
+    public const int ProtocolVersionValue = 2;
+    public const int ManifestFingerprintBytes = 9;
+    public const int EncodedBytes = 1 + ManifestFingerprintBytes;
 
-    public static BleIdentityAdvertisement Create(
-        string shelterId,
-        ReadOnlySpan<byte> signedManifestFingerprint,
-        ReadOnlySpan<byte> sessionHint)
+    public static BleIdentityAdvertisement Create(ReadOnlySpan<byte> signedManifestFingerprint)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(shelterId);
         if (signedManifestFingerprint.Length < ManifestFingerprintBytes)
             throw new ArgumentException("Manifest fingerprint is too short.", nameof(signedManifestFingerprint));
-        if (sessionHint.Length != SessionHintBytes)
-            throw new ArgumentException("Session hint must be eight bytes.", nameof(sessionHint));
-
-        var shelterHash = SHA256.HashData(Encoding.UTF8.GetBytes(shelterId));
         return new BleIdentityAdvertisement(
-            ProtocolVersion: 1,
-            ShelterIdHash: shelterHash[..ShelterIdHashBytes],
-            SignedManifestFingerprint: signedManifestFingerprint[..ManifestFingerprintBytes].ToArray(),
-            SessionHint: sessionHint.ToArray());
+            ProtocolVersion: ProtocolVersionValue,
+            SignedManifestFingerprint: signedManifestFingerprint[..ManifestFingerprintBytes].ToArray());
     }
 
     public byte[] Encode()
     {
-        if (ShelterIdHash.Length != ShelterIdHashBytes ||
-            SignedManifestFingerprint.Length != ManifestFingerprintBytes ||
-            SessionHint.Length != SessionHintBytes)
+        if (ProtocolVersion != ProtocolVersionValue || SignedManifestFingerprint.Length != ManifestFingerprintBytes)
             throw new InvalidOperationException("Invalid advertisement identity lengths.");
 
-        return [ProtocolVersion, .. ShelterIdHash, .. SignedManifestFingerprint, .. SessionHint];
+        return [ProtocolVersion, .. SignedManifestFingerprint];
+    }
+
+    /** 128-bit Service Data UUIDs use full little-endian byte order on the BLE wire. */
+    public byte[] EncodeServiceData(Guid serviceUuid)
+    {
+        var uuidBytes = serviceUuid.ToByteArray(bigEndian: true);
+        Array.Reverse(uuidBytes);
+        return [.. uuidBytes, .. Encode()];
     }
 }

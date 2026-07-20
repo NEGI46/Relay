@@ -83,6 +83,43 @@ class RescueNearbyCoordinatorTest {
     }
 
     @Test
+    fun `incoming envelope is advertised to peers that are already connected`() = runTest {
+        val source = InMemoryRescueEnvelopeRepository()
+        val transferredEnvelope = requireNotNull(forwardRescueEnvelope(createAndStore(source, "confidential")))
+        val target = InMemoryRescueEnvelopeRepository()
+        val transport = RecordingTransport().also {
+            it.state.value = OfflineTransportState(connectedPeerIds = setOf("source", "next-hop"))
+        }
+        val coordinator = RescueNearbyCoordinator(target, transport, nowEpochMillis = { NOW })
+
+        coordinator.handlePayload(
+            "source",
+            RescueNearbyPacketCodec().encode(RescueNearbyPacket.Envelope(transferredEnvelope)),
+        )
+
+        val nextHopPackets = transport.sent
+            .filter { it.first == "next-hop" }
+            .map { RescueNearbyPacketCodec().decode(it.second) }
+        assertEquals(1, nextHopPackets.size)
+        assertTrue(nextHopPackets.single() is RescueNearbyPacket.Inventory)
+    }
+
+    @Test
+    fun `external receipt changes are advertised without reconnecting peers`() = runTest {
+        val store = InMemoryRescueEnvelopeRepository()
+        createAndStore(store, "confidential")
+        val transport = RecordingTransport().also {
+            it.state.value = OfflineTransportState(connectedPeerIds = setOf("peer-b", "peer-c"))
+        }
+        val coordinator = RescueNearbyCoordinator(store, transport, nowEpochMillis = { NOW })
+
+        coordinator.onLocalStoreChanged()
+
+        assertEquals(listOf("peer-b", "peer-c"), transport.sent.map { it.first })
+        assertTrue(transport.sent.all { RescueNearbyPacketCodec().decode(it.second) is RescueNearbyPacket.Inventory })
+    }
+
+    @Test
     fun `mesh hop advances only after matching durable peer acknowledgement`() = runTest {
         val store = InMemoryRescueEnvelopeRepository()
         val envelope = createAndStore(store, freeText = "confidential")

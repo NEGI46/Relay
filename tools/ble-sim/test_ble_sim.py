@@ -1,11 +1,13 @@
 import os
 import sys
 import unittest
+import uuid
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 from ble_sim import (  # noqa: E402
     ATT_PAYLOAD_BYTES,
+    BleIdentity,
     CHUNK_BYTES,
     FakeGattCentral,
     FakeGattPeripheral,
@@ -40,6 +42,18 @@ class BleSimulationTests(unittest.TestCase):
         self.assertEqual(bytes((2, 2, 0x12, 0x34, 0, 2, 1, 2, 3, 4, 9, 8)), encoded)
         self.assertEqual(frame, GattFrame.decode(encoded))
         self.assertLessEqual(len(encoded), ATT_PAYLOAD_BYTES)
+
+    def test_v2_identity_fits_legacy_advertising_budget(self):
+        identity = BleIdentity.create(bytes(range(32)))
+        encoded = identity.encode()
+        self.assertEqual(10, len(encoded))
+        self.assertEqual(identity, BleIdentity.decode(encoded))
+        # Flags(3) + AD header(2) + 128-bit service UUID(16) + identity(10).
+        self.assertEqual(31, 3 + 2 + 16 + len(encoded))
+        service_uuid = uuid.UUID("1f7f7e90-4e0a-4b0b-8fad-1e3c5e3f4a01")
+        service_data = identity.encode_service_data(service_uuid)
+        self.assertEqual(service_uuid.bytes[::-1], service_data[:16])
+        self.assertEqual(encoded, service_data[16:])
 
     def test_start_metadata_and_commit_fragmentation_match_wire_contract(self):
         self.assertEqual(("delivery-123", "carrier-456"), decode_start_metadata(self.transfer.start))

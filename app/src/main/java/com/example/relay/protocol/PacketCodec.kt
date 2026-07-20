@@ -75,12 +75,16 @@ class PacketCodec(
         is ManifestBody -> when {
             body.entries.size > limits.maxManifestEntries -> "manifest too large"
             body.receiptIds.size > limits.maxManifestEntries -> "receipt manifest too large"
+            body.receiptIds.distinct().size != body.receiptIds.size -> "duplicate receipt manifest id"
+            body.receiptIds.any { !validId(it) } -> "invalid receipt manifest id"
             body.entries.any { !validId(it.messageId) || it.hopCount < 0 || it.maxHopCount < 1 || it.hopCount > it.maxHopCount } -> "invalid manifest entry"
             else -> null
         }
         is MessageRequestBody -> when {
             body.messageIds.size > limits.maxRequestEntries -> "request too large"
+            body.receiptIds.size > limits.maxRequestEntries -> "receipt request too large"
             body.messageIds.distinct().size != body.messageIds.size -> "duplicate request id"
+            body.receiptIds.distinct().size != body.receiptIds.size -> "duplicate receipt request id"
             body.messageIds.any { !validId(it) } -> "invalid request id"
             body.receiptIds.any { !validId(it) } -> "invalid receipt request id"
             else -> null

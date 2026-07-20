@@ -37,7 +37,10 @@ class MainActivity : ComponentActivity() {
                     RescueViewModel(
                         repository = app.rescueRepository,
                         shelterKeyProvider = app.rescueShelterKeyStore,
-                        onRescueAutomationRequired = { RescueDeliveryService.enableAndStart(app) },
+                        onRescueAutomationRequired = {
+                            RescueDeliveryService.enableAndStart(app)
+                            app.notifyRescueStoreChanged()
+                        },
                         locationProvider = app.locationProvider,
                         senderDeviceId = app.deviceId,
                         shelterKeyWaitMillis = if (BuildConfig.DEBUG) 8_000 else 0,

@@ -1,5 +1,6 @@
 package com.example.relay.rescue.ble
 
+import com.example.relay.rescue.ShelterReceiptStatus
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -81,5 +82,25 @@ class RescueBleFrameCodecTest {
             RescueBleFrameCodec.sessionIdFor("delivery-id"),
         )
         assertEquals(4, RescueBleFrameCodec.sessionIdFor("delivery-id").size)
+    }
+
+    @Test
+    fun v2ShelterIdentityFitsLegacyAdvertisementBudget() {
+        val encoded = byteArrayOf(2) + ByteArray(9) { it.toByte() }
+        val identity = requireNotNull(ShelterBleIdentity.decode(encoded))
+
+        assertArrayEquals(encoded, identity.encoded())
+        assertEquals(31, 3 + 2 + 16 + identity.encoded().size)
+        assertNull(ShelterBleIdentity.decode(byteArrayOf(1) + ByteArray(9)))
+    }
+
+    @Test
+    fun courierDeliveryIdIsRetainedUntilShelterStatusIsTerminal() {
+        assertEquals(false, ShelterReceiptStatus.STORED.isTerminalDeliveryReceipt())
+        assertEquals(false, ShelterReceiptStatus.ACCEPTED.isTerminalDeliveryReceipt())
+        assertEquals(false, ShelterReceiptStatus.RESPONDING.isTerminalDeliveryReceipt())
+        assertEquals(true, ShelterReceiptStatus.COMPLETED.isTerminalDeliveryReceipt())
+        assertEquals(true, ShelterReceiptStatus.CANCELLED.isTerminalDeliveryReceipt())
+        assertEquals(true, ShelterReceiptStatus.REJECTED.isTerminalDeliveryReceipt())
     }
 }
