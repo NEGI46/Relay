@@ -203,6 +203,7 @@ internal fun selectLocalGatewayCandidate(
         it.state.submissionStatus in setOf(
             RescueSubmissionStatus.PENDING,
             RescueSubmissionStatus.IN_TRANSIT,
+            RescueSubmissionStatus.CLOUD_STORED,
             RescueSubmissionStatus.SHELTER_STORED,
             RescueSubmissionStatus.SHELTER_ACCEPTED,
             RescueSubmissionStatus.SHELTER_RESPONDING,
@@ -218,7 +219,8 @@ internal fun selectLocalGatewayCandidate(
 private fun RescueSubmissionStatus.deliveryPriority(): Int = when (this) {
     RescueSubmissionStatus.PENDING -> 3
     RescueSubmissionStatus.IN_TRANSIT -> 2
-    RescueSubmissionStatus.SHELTER_STORED -> 1
+    RescueSubmissionStatus.CLOUD_STORED -> 1
+    RescueSubmissionStatus.SHELTER_STORED -> 2
     else -> 0
 }
 
