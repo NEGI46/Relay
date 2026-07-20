@@ -41,7 +41,8 @@ enum class QrTransferRejection {
 object QrTransferCodec {
     private const val MAX_FRAMES = 256
     private const val MAX_PAYLOAD_BYTES = 512 * 1024
-    private const val MAX_CHUNK_HEX_CHARS = 4 * 1024
+    private const val MAX_CHUNK_BYTES = 4 * 1024
+    private const val MAX_CHUNK_HEX_CHARS = MAX_CHUNK_BYTES * 2
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = false }
 
     fun encode(
@@ -52,7 +53,7 @@ object QrTransferCodec {
     ): List<QrTransferFrame> {
         require(transferId.isNotBlank() && transferId.length <= 128)
         require(encryptedPayload.isNotEmpty() && encryptedPayload.size <= MAX_PAYLOAD_BYTES)
-        require(maxChunkBytes in 128..4_096)
+        require(maxChunkBytes in 128..MAX_CHUNK_BYTES)
         require(expiresAtEpochMillis > 0)
         val hash = RescueCryptography.sha256Hex(encryptedPayload)
         val chunks = encryptedPayload.asList().chunked(maxChunkBytes)
