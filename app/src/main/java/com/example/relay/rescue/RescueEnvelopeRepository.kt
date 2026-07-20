@@ -14,6 +14,7 @@ data class RescueRequestKey(val requestId: String, val requestVersion: Int)
 enum class RescueSubmissionStatus {
     PENDING,
     IN_TRANSIT,
+    CLOUD_STORED,
     SHELTER_STORED,
     SHELTER_ACCEPTED,
     SHELTER_RESPONDING,
@@ -255,7 +256,8 @@ internal fun ShelterReceiptStatus.toSubmissionStatus(): RescueSubmissionStatus =
 internal fun RescueSubmissionStatus.rank(): Int = when (this) {
     RescueSubmissionStatus.PENDING -> 0
     RescueSubmissionStatus.IN_TRANSIT -> 1
-    RescueSubmissionStatus.SHELTER_STORED -> 2
+    RescueSubmissionStatus.CLOUD_STORED -> 2
+    RescueSubmissionStatus.SHELTER_STORED -> 3
     RescueSubmissionStatus.SHELTER_ACCEPTED -> 3
     RescueSubmissionStatus.SHELTER_RESPONDING -> 4
     RescueSubmissionStatus.SHELTER_COMPLETED,
