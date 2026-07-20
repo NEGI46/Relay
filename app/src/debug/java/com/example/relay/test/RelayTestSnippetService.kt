@@ -127,14 +127,14 @@ class RelayTestSnippetService : Service() {
     private fun startBle(): Bundle = ok().apply {
         val coordinator = app.rescueDeliveryCoordinator
         putBoolean("started", coordinator != null)
-        coordinator?.start(serviceScope)
-        putString("state", coordinator?.state?.value?.javaClass?.simpleName ?: "Unavailable")
+        coordinator.start(serviceScope)
+        putString("state", coordinator.state.value.javaClass.simpleName ?: "Unavailable")
     }
 
     private fun stopBle(): Bundle = ok().apply {
-        app.rescueDeliveryCoordinator?.stop()
+        app.rescueDeliveryCoordinator.stop()
         putBoolean("stopped", true)
-        putString("state", app.rescueDeliveryCoordinator?.state?.value?.javaClass?.simpleName ?: "Unavailable")
+        putString("state", app.rescueDeliveryCoordinator.state.value.javaClass.simpleName ?: "Unavailable")
     }
 
     private fun state(): Bundle = ok().apply {
@@ -144,7 +144,7 @@ class RelayTestSnippetService : Service() {
         putInt("nearbyPeerCount", communication.peers.size)
         putBoolean("gatewayEnabled", app.gatewaySettingsStore.load().enabled)
         putString("gatewayLastSyncResult", app.gatewaySettingsStore.load().lastSyncResult)
-        putString("bleState", app.rescueDeliveryCoordinator?.state?.value?.javaClass?.simpleName ?: "Unavailable")
+        putString("bleState", app.rescueDeliveryCoordinator.state.value.javaClass.simpleName ?: "Unavailable")
     }
 
     private fun runtimeSettings(arguments: Bundle): RelayRuntimeSettings = RelayRuntimeSettings(
@@ -163,7 +163,7 @@ class RelayTestSnippetService : Service() {
     }
 
     override fun onDestroy() {
-        runCatching { app.rescueDeliveryCoordinator?.stop() }
+        runCatching { app.rescueDeliveryCoordinator.stop() }
         runCatching { runBlocking(Dispatchers.IO) { app.gatewaySyncEngine.stop(); app.communicationRuntime.stop() } }
         serviceScope.cancel()
         super.onDestroy()
