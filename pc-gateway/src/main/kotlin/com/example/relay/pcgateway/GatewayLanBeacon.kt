@@ -3,7 +3,9 @@ package com.example.relay.pcgateway
 import com.example.relay.gateway.protocol.GATEWAY_PROTOCOL_VERSION
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.NetworkInterface
 import kotlin.concurrent.thread
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -19,10 +21,7 @@ data class GatewayLanAnnouncement(
     val receiptTrust: String = "UNVERIFIED",
 )
 
-/**
- * Dependency-free LAN hint. Clients use the UDP source address as the host and still validate
- * every HTTP response. This is discovery only, not authentication and not mDNS.
- */
+/** Sends on the limited broadcast and every usable IPv4 interface broadcast. */
 class GatewayLanBeacon(
     private val config: GatewayConfig,
     private val broadcastAddress: String = "255.255.255.255",
@@ -34,6 +33,21 @@ class GatewayLanBeacon(
         GatewayLanAnnouncement(gatewayId = config.gatewayId, apiPort = config.port),
     ).encodeToByteArray()
 
+    internal fun broadcastTargets(): Set<InetAddress> {
+        val targets = linkedMapOf<String, InetAddress>()
+        runCatching { InetAddress.getByName(broadcastAddress) }.getOrNull()?.let { targets[it.hostAddress] = it }
+        runCatching {
+            NetworkInterface.getNetworkInterfaces()?.toList().orEmpty().forEach { network ->
+                if (!network.isUp || network.isLoopback || network.isVirtual) return@forEach
+                network.interfaceAddresses.forEach { address ->
+                    val broadcast = address.broadcast
+                    if (address.address is Inet4Address && broadcast != null) targets[broadcast.hostAddress] = broadcast
+                }
+            }
+        }
+        return targets.values.toSet()
+    }
+
     fun start() {
         if (running || !config.lanDiscoveryEnabled) return
         running = true
@@ -41,19 +55,17 @@ class GatewayLanBeacon(
             runCatching {
                 DatagramSocket().use { socket ->
                     socket.broadcast = true
-                    val target = InetAddress.getByName(broadcastAddress)
                     while (running) {
                         val bytes = announcementBytes()
-                        socket.send(DatagramPacket(bytes, bytes.size, target, config.lanDiscoveryPort))
-                        try {
-                            Thread.sleep(config.lanDiscoveryIntervalMs.coerceAtLeast(1_000))
-                        } catch (_: InterruptedException) {
-                            break
+                        broadcastTargets().forEach { target ->
+                            socket.send(DatagramPacket(bytes, bytes.size, target, config.lanDiscoveryPort))
                         }
+                        try { Thread.sleep(config.lanDiscoveryIntervalMs.coerceAtLeast(1_000)) }
+                        catch (_: InterruptedException) { break }
                     }
                 }
             }.onFailure { error ->
-                if (running) System.err.println("Relay LAN discovery stopped: ${error.message ?: error.javaClass.simpleName}")
+                if (running) System.err.println("Relay LAN discovery stopped: " + error.javaClass.simpleName)
             }
             running = false
         }
