@@ -92,12 +92,14 @@ class GatewaySyncEngine(
             )
             .take(128)
             .toList()
-        if (messages.isEmpty()) {
+        if (messages.isEmpty() && !useAuthenticated) {
             settingsStore.record("idle")
             return@withLock GatewaySyncResult.Completed(0, 0)
         }
         return@withLock try {
-            val push = if (useAuthenticated) {
+            val push = if (useAuthenticated && messages.isEmpty()) {
+                GatewayPushResult(com.example.relay.gateway.protocol.SyncMessagesResponse())
+            } else if (useAuthenticated) {
                 client.push(settings, token!!, messages)
             } else {
                 val gateway = discovery?.discover()

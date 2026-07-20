@@ -69,6 +69,24 @@ class PacketCodecTest {
     }
 
     @Test
+    fun `receipt manifests and requests enforce identifier and entry bounds`() {
+        val duplicateReceiptId = "duplicate"
+        val invalidBodies = listOf<PacketBody>(
+            ManifestBody(emptyList(), listOf("")),
+            ManifestBody(emptyList(), listOf(duplicateReceiptId, duplicateReceiptId)),
+            MessageRequestBody(emptyList(), List(129) { "receipt-$it" }),
+            MessageRequestBody(emptyList(), listOf(duplicateReceiptId, duplicateReceiptId)),
+        )
+
+        invalidBodies.forEach { body ->
+            assertEquals(
+                DecodeError.INVALID_BODY,
+                (codec.decode(codec.encode("device-A", NOW, body)) as DecodeResult.Failure).error,
+            )
+        }
+    }
+
+    @Test
     fun `peer acknowledgement requires a matching peer received receipt from envelope sender`() {
         val receipt = DeliveryReceipt(
             "receipt-peer",

@@ -9,6 +9,8 @@ import com.example.relay.gateway.protocol.SyncMessagesRequest
 import com.example.relay.gateway.protocol.SyncMessagesResponse
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.Json
@@ -54,19 +56,24 @@ class HttpGatewayBridgeClient(
         val response = executePublic(gateway, json.encodeToString(request))
         return GatewayPushResult(json.decodeFromString(response))
     }
-    private fun execute(settings: GatewaySettings, token: String, method: String, path: String, body: String?): String {
-        val connection = (URL("http://${settings.host}:${settings.port}$path").openConnection() as HttpURLConnection).apply {
-            requestMethod = method; connectTimeout = 5_000; readTimeout = 10_000; setRequestProperty("Authorization", "Bearer $token"); setRequestProperty("X-Bridge-Id", settings.bridgeId)
-            if (body != null) { doOutput = true; setRequestProperty("Content-Type", "application/json") }
+    private suspend fun execute(settings: GatewaySettings, token: String, method: String, path: String, body: String?): String =
+        withContext(Dispatchers.IO) {
+            val connection = (URL("http://${settings.host}:${settings.port}$path").openConnection() as HttpURLConnection).apply {
+                requestMethod = method; connectTimeout = 5_000; readTimeout = 10_000; setRequestProperty("Authorization", "Bearer $token"); setRequestProperty("X-Bridge-Id", settings.bridgeId)
+                if (body != null) { doOutput = true; setRequestProperty("Content-Type", "application/json") }
+            }
+            try {
+                body?.let { connection.outputStream.use { output -> output.write(it.toByteArray(Charsets.UTF_8)) } }
+                val status = connection.responseCode
+                val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+                val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (status !in 200..299) throw GatewayHttpException(status, text.take(160))
+                text
+            } finally {
+                connection.disconnect()
+            }
         }
-        body?.let { connection.outputStream.use { output -> output.write(it.toByteArray(Charsets.UTF_8)) } }
-        val status = connection.responseCode
-        val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-        val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        if (status !in 200..299) throw GatewayHttpException(status, text.take(160))
-        return text
-    }
-    private fun executePublic(gateway: DiscoveredGateway, body: String): String {
+    private suspend fun executePublic(gateway: DiscoveredGateway, body: String): String = withContext(Dispatchers.IO) {
         val connection = (URL("http://${gateway.host}:${gateway.port}/api/public/sync/messages").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 5_000
@@ -74,12 +81,16 @@ class HttpGatewayBridgeClient(
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
         }
-        connection.outputStream.use { output -> output.write(body.toByteArray(Charsets.UTF_8)) }
-        val status = connection.responseCode
-        val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-        val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        if (status !in 200..299) throw GatewayHttpException(status, text.take(160))
-        return text
+        try {
+            connection.outputStream.use { output -> output.write(body.toByteArray(Charsets.UTF_8)) }
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) throw GatewayHttpException(status, text.take(160))
+            text
+        } finally {
+            connection.disconnect()
+        }
     }
     private fun toGatewayMessage(message: RelayMessage): GatewayMessage = GatewayMessage(
         messageId = message.messageId, messageType = message.messageType.name, recordType = message.recordType.name,

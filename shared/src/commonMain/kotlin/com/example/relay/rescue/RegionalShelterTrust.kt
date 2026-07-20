@@ -86,23 +86,11 @@ fun SignedShelterManifest.signedManifestFingerprint(): String =
  * Raw SHA-256 fingerprint bytes used by the BLE bridge's
  * `RELAY_BLE_SIGNED_MANIFEST_FINGERPRINT_BASE64` provisioning value.
  *
- * The bridge advertises the first 16 bytes; keeping this conversion here ensures Android and the
+ * The bridge advertises the first nine bytes; keeping this conversion here ensures Android and the
  * PC derive the BLE value from exactly the same canonical signed-manifest identity.
  */
 fun SignedShelterManifest.beaconFingerprintBytes(): ByteArray =
     signedManifestFingerprint().hexToBytes()
-
-/**
- * Privacy-preserving, non-secret identity for the shelter portion of a BLE advertisement.
- * The raw shelter id is never required in the advertisement; Android compares only a prefix of
- * this SHA-256 value against the signed directory it has already accepted.
- */
-fun SignedShelterManifest.shelterIdentityHash(): String =
-    RescueCryptography.sha256Hex(manifest.shelterId.encodeToByteArray())
-
-/** Raw SHA-256 bytes whose first eight bytes are the BLE shelter identity. */
-fun SignedShelterManifest.shelterIdentityHashBytes(): ByteArray =
-    shelterIdentityHash().hexToBytes()
 
 @Serializable
 data class UnsignedRegionalShelterDirectory(
@@ -265,36 +253,24 @@ class RegionalShelterDirectoryResolver(rootBundles: Collection<RegionalRootBundl
         return trusted.any { it == signed }
     }
 
-    /**
-     * Resolves the compact BLE identity without trusting data received over BLE.
-     *
-     * The fixed-size values are raw SHA-256 prefixes from [ShelterBleIdentity]: eight shelter-id
-     * bytes and sixteen signed-manifest bytes. The resolver searches only directories whose root
-     * signature was already accepted and whose directory and leaf are current. A collision or
-     * any malformed identity returns null rather than choosing an arbitrary shelter.
-     */
+    /** Resolves the legacy-advertisement-safe signed-manifest fingerprint prefix. */
     fun resolveBeaconIdentity(
-        shelterIdHashPrefix: ByteArray,
         signedManifestFingerprintPrefix: ByteArray,
         nowEpochMillis: Long,
     ): SignedShelterManifest? {
-        if (shelterIdHashPrefix.size != BLE_SHELTER_ID_HASH_PREFIX_BYTES ||
-            signedManifestFingerprintPrefix.size != BLE_SIGNED_MANIFEST_FINGERPRINT_PREFIX_BYTES
-        ) return null
+        if (signedManifestFingerprintPrefix.size != BLE_SIGNED_MANIFEST_FINGERPRINT_PREFIX_BYTES) return null
         val matches = accepted.values
             .asSequence()
             .filter { it.directory.validate(nowEpochMillis) == RescueValidationResult.Valid }
             .flatMap { it.directory.shelters.asSequence() }
             .filter { it.validate(nowEpochMillis) == RescueValidationResult.Valid }
-            .filter { it.shelterIdentityHashBytes().copyOf(BLE_SHELTER_ID_HASH_PREFIX_BYTES).contentEquals(shelterIdHashPrefix) }
             .filter { it.beaconFingerprintBytes().copyOf(BLE_SIGNED_MANIFEST_FINGERPRINT_PREFIX_BYTES).contentEquals(signedManifestFingerprintPrefix) }
             .toList()
         return matches.singleOrNull()
     }
 
     private companion object {
-        const val BLE_SHELTER_ID_HASH_PREFIX_BYTES = 8
-        const val BLE_SIGNED_MANIFEST_FINGERPRINT_PREFIX_BYTES = 16
+        const val BLE_SIGNED_MANIFEST_FINGERPRINT_PREFIX_BYTES = 9
     }
 }
 

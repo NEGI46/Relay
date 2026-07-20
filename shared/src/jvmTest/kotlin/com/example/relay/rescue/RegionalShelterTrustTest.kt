@@ -66,6 +66,23 @@ class RegionalShelterTrustTest {
         assertEquals(2L, resolver.resolveForNewRequest("region-1", "shelter-1", 1_500)?.let { newer.directory.generation })
     }
 
+    @Test
+    fun legacySafeBeaconPrefixResolvesOnlyAnAcceptedManifest() {
+        val rootPair = RescueCryptography.generateShelterSigningKeyPair()
+        val root = RegionalRootBundle(regionId = "region-1", rootSigningPublicKey = rootPair.publicKey)
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val receipt = RescueCryptography.generateShelterSigningKeyPair()
+        val manifest = signedManifest(root.regionId, "shelter-1", recipient, receipt, 1, rootPair.privateKey)
+        val signedDirectory = signRegionalShelterDirectory(directory(root.regionId, 1, manifest), rootPair.privateKey)
+        val resolver = RegionalShelterDirectoryResolver(listOf(root))
+        assertIs<DirectoryAcceptance.Accepted>(resolver.accept(signedDirectory, 1_500))
+
+        val prefix = manifest.beaconFingerprintBytes().copyOf(9)
+        assertEquals(manifest, resolver.resolveBeaconIdentity(prefix, 1_500))
+        assertEquals(null, resolver.resolveBeaconIdentity(prefix.copyOf(8), 1_500))
+        assertEquals(null, resolver.resolveBeaconIdentity(prefix.apply { this[0] = (this[0].toInt() xor 1).toByte() }, 1_500))
+    }
+
     private fun signedManifest(
         regionId: String,
         shelterId: String,

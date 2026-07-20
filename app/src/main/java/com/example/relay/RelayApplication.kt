@@ -94,6 +94,7 @@ class RelayApplication : Application() {
             directoryResolver = regionalShelterDirectoryResolver,
             carrierId = deviceId,
             deliveryIds = SharedPreferencesCourierDeliveryIdStore(this),
+            onRepositoryChanged = { rescueNearbyCoordinator?.onLocalStoreChanged() },
         )
     }
 
@@ -183,6 +184,10 @@ class RelayApplication : Application() {
             gateway = internetPrioritySync,
             scope = applicationScope,
         )
+    }
+
+    fun notifyRescueStoreChanged() {
+        applicationScope.launch { rescueNearbyCoordinator?.onLocalStoreChanged() }
     }
 
     override fun onCreate() {

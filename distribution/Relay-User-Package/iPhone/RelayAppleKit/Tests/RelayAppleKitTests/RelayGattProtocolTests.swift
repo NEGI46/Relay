@@ -22,12 +22,10 @@ final class RelayGattProtocolTests: XCTestCase {
     }
 
     func testUnknownOrAmbiguousShelterIsRejected() throws {
-        var bytes = Data([1])
-        bytes.append(Data(repeating: 2, count: 8))
-        bytes.append(Data(repeating: 3, count: 16))
-        bytes.append(Data(repeating: 4, count: 8))
+        var bytes = Data([2])
+        bytes.append(Data(repeating: 3, count: 9))
         let identity = try RelayShelterBleIdentity(encoded: bytes)
-        let known = try RelayVerifiedShelter(shelterIdHashPrefix: Data(repeating: 2, count: 8), signedManifestFingerprintPrefix: Data(repeating: 3, count: 16))
+        let known = try RelayVerifiedShelter(signedManifestFingerprintPrefix: Data(repeating: 3, count: 9))
         XCTAssertTrue(RelayVerifiedShelterDirectory(verifiedShelters: [known]).resolves(identity))
         XCTAssertFalse(RelayVerifiedShelterDirectory(verifiedShelters: [known, known]).resolves(identity))
     }

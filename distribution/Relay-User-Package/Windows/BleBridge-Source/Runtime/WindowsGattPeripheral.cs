@@ -16,6 +16,10 @@ namespace Relay.PcBleBridge.Runtime;
 /// </summary>
 public sealed class WindowsGattPeripheral : IBleGattPeripheral
 {
+    private const int LegacyAdvertisementBytes = 31;
+    private const int FlagsAdStructureBytes = 3;
+    private const int ServiceDataAdHeaderBytes = 2;
+    private const int ServiceUuidBytes = 16;
     // These UUIDs are a wire contract: change only with an Android client protocol version bump.
     public static readonly Guid ServiceUuid = Guid.Parse("1f7f7e90-4e0a-4b0b-8fad-1e3c5e3f4a01");
     public static readonly Guid IdentityCharacteristicUuid = Guid.Parse("1f7f7e91-4e0a-4b0b-8fad-1e3c5e3f4a01");
@@ -91,7 +95,7 @@ public sealed class WindowsGattPeripheral : IBleGattPeripheral
             _identityCharacteristic.ReadRequested += OnIdentityReadRequested;
             _uplinkCharacteristic.WriteRequested += OnUplinkWriteRequested;
 
-            StartIdentityAdvertisement(identityBytes);
+            StartIdentityAdvertisement(identity, identityBytes);
             _serviceProvider.StartAdvertising(new GattServiceProviderAdvertisingParameters
             {
                 IsConnectable = true,
@@ -211,14 +215,13 @@ public sealed class WindowsGattPeripheral : IBleGattPeripheral
         }
     }
 
-    private void StartIdentityAdvertisement(byte[] identityBytes)
+    private void StartIdentityAdvertisement(BleIdentityAdvertisement identity, byte[] identityBytes)
     {
+        if (FlagsAdStructureBytes + ServiceDataAdHeaderBytes + ServiceUuidBytes + identityBytes.Length > LegacyAdvertisementBytes)
+            throw new InvalidOperationException("Relay BLE identity does not fit a legacy advertisement.");
         var advertisement = new BluetoothLEAdvertisement();
-        advertisement.ServiceUuids.Add(ServiceUuid);
-        // AD type 0x16: Service Data - 128-bit UUID. The UUID is little-endian on the wire.
-        var serviceData = new byte[16 + identityBytes.Length];
-        ServiceUuid.ToByteArray().CopyTo(serviceData, 0);
-        identityBytes.CopyTo(serviceData, 16);
+        // AD type 0x21: Service Data - 128-bit UUID. The UUID is little-endian on the wire.
+        var serviceData = identity.EncodeServiceData(ServiceUuid);
         advertisement.DataSections.Add(new BluetoothLEAdvertisementDataSection(0x21, serviceData.AsBuffer()));
 
         _identityPublisher = new BluetoothLEAdvertisementPublisher(advertisement);

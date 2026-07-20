@@ -24,6 +24,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private const val TEST_GATEWAY_TOKEN = "token"
+
 class GatewaySyncEngineTest {
     @Test fun `successful PC save response creates local Gateway Receipt and suppresses future uploads`() = runTest {
         val repository = InMemoryMessageRepository()
@@ -32,7 +34,7 @@ class GatewaySyncEngineTest {
         val settings = FakeSettings(GatewaySettings("127.0.0.1", 8080, "gateway", "bridge", enabled = true, automaticSync = true))
         val pending = FakePending()
         val client = FakeClient()
-        val engine = GatewaySyncEngine(repository, settings, FakeCredentials("token"), client, MessagePolicy(clock), backgroundScope, pending)
+        val engine = GatewaySyncEngine(repository, settings, FakeCredentials(TEST_GATEWAY_TOKEN), client, MessagePolicy(clock), backgroundScope, pending)
 
         assertTrue(engine.start(RelayRuntimeSettings(OperatingMode.DRILL, DeviceRole.GATEWAY)))
         assertEquals(GatewaySyncResult.Completed(1, 1), engine.syncOnce())
@@ -152,6 +154,26 @@ class GatewaySyncEngineTest {
         assertEquals(1, client.publicPushes)
     }
 
+    @Test fun `authenticated receipt polling continues when there are no pending uploads`() = runTest {
+        val repository = InMemoryMessageRepository().also { it.insert(com.example.relay.message()) }
+        val pending = FakePending().also { it.markCompleted(setOf("message-1")) }
+        val client = FakeClient()
+        val engine = GatewaySyncEngine(
+            repository,
+            FakeSettings(GatewaySettings("127.0.0.1", 8080, "gateway", "bridge", enabled = true)),
+            FakeCredentials(TEST_GATEWAY_TOKEN),
+            client,
+            MessagePolicy(MutableClock(NOW)),
+            backgroundScope,
+            pending,
+        )
+
+        assertEquals(GatewaySyncResult.Completed(0, 1), engine.syncOnce())
+        assertEquals(0, client.pushes)
+        assertEquals(1, client.pulls)
+        assertEquals(ReceiptType.GATEWAY_RECEIVED, repository.allReceipts().single().receiptType)
+    }
+
     @Test fun `status change and its target report are both uploaded with status change first`() = runTest {
         val repository = InMemoryMessageRepository().also {
             it.insert(com.example.relay.message(id = "message-1"))
@@ -257,7 +279,7 @@ class GatewaySyncEngineTest {
         val engine = GatewaySyncEngine(
             repository,
             FakeSettings(GatewaySettings("127.0.0.1", 8080, "gateway", "bridge", enabled = true, automaticSync = true)),
-            FakeCredentials("token"),
+            FakeCredentials(TEST_GATEWAY_TOKEN),
             client,
             MessagePolicy(MutableClock(NOW)),
             backgroundScope,
@@ -303,6 +325,7 @@ private class FakeClient(
     private val publicResponse: SyncMessagesResponse? = null,
 ) : GatewayBridgeClient {
     var pushes = 0
+    var pulls = 0
     var publicPushes = 0
     var lastPublicMessages: List<RelayMessage> = emptyList()
     override suspend fun requestPair(settings: GatewaySettings, code: String) = true
@@ -312,7 +335,7 @@ private class FakeClient(
     }
     override suspend fun pullReceipts(settings: GatewaySettings, token: String) = listOf(
         com.example.relay.domain.DeliveryReceipt("receipt-1", "message-1", ReceiptType.GATEWAY_RECEIVED, "gateway", NOW),
-    )
+    ).also { pulls++ }
     override suspend fun pushPublic(
         gateway: DiscoveredGateway,
         bridgeId: String,

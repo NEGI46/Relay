@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Relay.PcBleBridge.Protocol;
 
 namespace Relay.PcBleBridge.Runtime;
@@ -8,7 +7,6 @@ internal sealed record BridgeHostConfiguration(BleIdentityAdvertisement Identity
 {
     public static BridgeHostConfiguration Load()
     {
-        var shelterId = Required("RELAY_SHELTER_ID");
         var encodedFingerprint = Required("RELAY_BLE_SIGNED_MANIFEST_FINGERPRINT_BASE64");
         var fingerprint = Convert.FromBase64String(encodedFingerprint);
         if (fingerprint.Length < BleIdentityAdvertisement.ManifestFingerprintBytes)
@@ -18,7 +16,7 @@ internal sealed record BridgeHostConfiguration(BleIdentityAdvertisement Identity
             ? configuredPort : 18081;
         if (port is < 1 or > 65535) throw new InvalidOperationException("BLE bridge port is invalid.");
         return new BridgeHostConfiguration(
-            BleIdentityAdvertisement.Create(shelterId, fingerprint, RandomNumberGenerator.GetBytes(BleIdentityAdvertisement.SessionHintBytes)),
+            BleIdentityAdvertisement.Create(fingerprint),
             secret,
             port);
     }
