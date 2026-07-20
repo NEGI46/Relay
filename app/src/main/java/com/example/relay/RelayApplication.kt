@@ -58,6 +58,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 class RelayApplication : Application() {
+    val cloudRelayEndpoint: String by lazy { getString(com.example.relay.R.string.cloud_relay_endpoint).also { require(it.startsWith("https://")) } }
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val deviceId: String by lazy {
         getSharedPreferences("relay_identity", MODE_PRIVATE).let { preferences ->
