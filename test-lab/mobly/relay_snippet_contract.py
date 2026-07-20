@@ -54,7 +54,7 @@ class MockRelaySnippet:
             return {"ok": True, "protocolVersion": 1, "methods": ",".join(METHODS)}
         if method == "createReport":
             self._counter += 1
-            message_id = "{}-report-{:04d}".format(self.device_id, self._counter)
+            message_id = f"{self.device_id}-report-{self._counter:04d}"
             message = {
                 "messageId": message_id,
                 "messageType": "SAFETY",
@@ -75,7 +75,7 @@ class MockRelaySnippet:
             message_id = str(args.get("messageId", ""))
             message = self.messages.get(message_id)
             if message is None:
-                return {"ok": False, "error": "message not found: {}".format(message_id)}
+                return {"ok": False, "error": f"message not found: {message_id}"}
             return {"ok": True, "messageJson": json.dumps(message, sort_keys=True)}
         if method == "deliveryLedger":
             return {
@@ -104,7 +104,7 @@ class MockRelaySnippet:
                 "gatewayEnabled": self.started["gateway"],
                 "bleState": self.ble_state,
             }
-        return {"ok": False, "error": "unknown method: {}".format(method)}
+        return {"ok": False, "error": f"unknown method: {method}"}
 
     def inject_message(self, message_json: str) -> None:
         """Test-only forwarding primitive; production API uses Nearby transport."""
@@ -180,9 +180,9 @@ class RelayScenarioTest(MoblyTestBase):
         devices = list(getattr(self, "android_devices", []) or [])
         if devices:
             if len(devices) < count:
-                raise RelaySnippetError("config needs {} Android devices".format(count))
+                raise RelaySnippetError(f"config needs {count} Android devices")
             return [RelaySnippetContract(AndroidRelaySnippetClient(device)) for device in devices[:count]]
-        return [RelaySnippetContract(MockRelaySnippet("mock-{}".format(index))) for index in range(count)]
+        return [RelaySnippetContract(MockRelaySnippet(f"mock-{index}")) for index in range(count)]
 
     @staticmethod
     def decode_json(result: Dict[str, Any], key: str) -> Any:
