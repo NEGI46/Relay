@@ -40,6 +40,10 @@ interface BrokerLedgerDao {
     @Query("UPDATE broker_ledger SET brokerStatus = 'RETRYING', retryCount = retryCount + 1 WHERE requestId = :requestId AND requestVersion = :requestVersion")
     fun markRetrying(requestId: String, requestVersion: Int): Int
 
+    /** Stops automatic retries for a deterministic client-side failure (for example a collision). */
+    @Query("UPDATE broker_ledger SET brokerStatus = 'FAILED', retryCount = retryCount + 1 WHERE requestId = :requestId AND requestVersion = :requestVersion")
+    fun markFailed(requestId: String, requestVersion: Int): Int
+
     @Query("DELETE FROM broker_ledger WHERE requestId = :requestId AND requestVersion = :requestVersion")
     fun delete(requestId: String, requestVersion: Int): Int
 

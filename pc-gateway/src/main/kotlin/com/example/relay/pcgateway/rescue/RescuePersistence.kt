@@ -63,10 +63,17 @@ class SqliteRescuePersistence(
     private val connection: Connection
 
     /**
-     * Exposes the raw JDBC connection for co-located tables (e.g., receipt_outbox)
-     * that must participate in the same transaction as rescue state changes.
+     * Runs a database operation under the same lock that protects rescue transactions.
+     *
+     * ReceiptOutbox uses this instead of a raw connection so its background flusher cannot
+     * interleave statements with an active rescue-state transaction on the shared JDBC connection.
+     * Java monitors are re-entrant, so enqueueing a receipt from inside [transaction] remains part
+     * of that transaction.
      */
-    val rawConnection: Connection get() = connection
+    fun <T> withConnection(block: (Connection) -> T): T = synchronized(lock) {
+        check(!connection.isClosed) { "rescue persistence is closed" }
+        block(connection)
+    }
 
     init {
         File(dbPath).parentFile?.mkdirs()
@@ -121,19 +128,18 @@ class SqliteRescuePersistence(
         }
     }
 
-    override fun <T> transaction(block: RescuePersistence.() -> T): T = synchronized(lock) {
-        check(!connection.isClosed) { "rescue persistence is closed" }
-        val originalAutoCommit = connection.autoCommit
-        connection.autoCommit = false
+    override fun <T> transaction(block: RescuePersistence.() -> T): T = withConnection { database ->
+        val originalAutoCommit = database.autoCommit
+        database.autoCommit = false
         try {
-            val result = block(this)
-            connection.commit()
+            val result = block(this@SqliteRescuePersistence)
+            database.commit()
             result
         } catch (error: Throwable) {
-            runCatching { connection.rollback() }
+            runCatching { database.rollback() }
             throw error
         } finally {
-            connection.autoCommit = originalAutoCommit
+            database.autoCommit = originalAutoCommit
         }
     }
 

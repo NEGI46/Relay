@@ -20,18 +20,19 @@ class UploadSigningKeyStore(context: Context) {
     private val keyStore: KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
     private val prefs: SharedPreferences =
         context.getSharedPreferences("relay_device_identity", Context.MODE_PRIVATE)
+    private val identityLock = Any()
 
     /**
      * Per-device unique key identifier. Generated once on first launch and persisted.
      * This is NOT the Keystore alias (which is constant) — it's a random UUID.
      */
-    val keyId: String by lazy {
-        prefs.getString(KEY_DEVICE_ID, null) ?: run {
-            val id = UUID.randomUUID().toString()
-            prefs.edit().putString(KEY_DEVICE_ID, id).apply()
-            id
+    val keyId: String
+        get() = synchronized(identityLock) {
+            ensureKeyExists()
+            prefs.getString(KEY_DEVICE_ID, null) ?: newDeviceKeyId().also { id ->
+                prefs.edit().putString(KEY_DEVICE_ID, id).commit()
+            }
         }
-    }
 
     /**
      * Capability token issued by the Broker on device registration.
@@ -39,35 +40,56 @@ class UploadSigningKeyStore(context: Context) {
      * Persisted across restarts.
      */
     var capabilityToken: String?
-        get() = prefs.getString(KEY_CAPABILITY_TOKEN, null)
-        set(value) = prefs.edit().putString(KEY_CAPABILITY_TOKEN, value).apply()
+        get() = synchronized(identityLock) {
+            // A backup restore or Keystore reset can retain preferences but lose the private key.
+            // Ensure the identity is rotated before a stale capability is used.
+            ensureKeyExists()
+            prefs.getString(KEY_CAPABILITY_TOKEN, null)
+        }
+        set(value) {
+            synchronized(identityLock) {
+                prefs.edit().putString(KEY_CAPABILITY_TOKEN, value).apply()
+            }
+        }
 
     /** Returns the public key for registration with the Broker. */
-    fun publicKeyBase64(): String {
+    fun publicKeyBase64(): String = synchronized(identityLock) {
         ensureKeyExists()
         val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry
-            ?: return ""
+            ?: return@synchronized ""
         val publicKey = entry.certificate.publicKey
-        return Base64.getEncoder().encodeToString(publicKey.encoded)
+        Base64.getEncoder().encodeToString(publicKey.encoded)
     }
 
     /**
      * Signs the canonical upload bytes: authenticatedHeaderBytes + ciphertextSha256Hex.
      * Returns Base64-encoded ECDSA signature.
      */
-    fun sign(envelope: EncryptedRescueEnvelope): String {
+    fun sign(envelope: EncryptedRescueEnvelope): String = synchronized(identityLock) {
+        ensureKeyExists()
         val privateKey = getOrCreatePrivateKey()
         val dataToSign = envelope.authenticatedHeaderBytes() + envelope.ciphertextSha256Hex.encodeToByteArray()
         val signature = Signature.getInstance(SIGNATURE_ALGORITHM)
         signature.initSign(privateKey)
         signature.update(dataToSign)
-        return Base64.getEncoder().encodeToString(signature.sign())
+        Base64.getEncoder().encodeToString(signature.sign())
     }
 
     private fun ensureKeyExists() {
         if (keyStore.containsAlias(KEY_ALIAS)) return
+        val hadPersistedIdentity = prefs.contains(KEY_DEVICE_ID)
         getOrCreatePrivateKey()
+        val edit = prefs.edit().remove(KEY_CAPABILITY_TOKEN)
+        if (hadPersistedIdentity) {
+            // The key changed, so the Broker's registered public key and capability token are no
+            // longer usable.  Give the replacement key a new opaque device identity instead of
+            // trying to overwrite the old registration.
+            edit.putString(KEY_DEVICE_ID, newDeviceKeyId())
+        }
+        edit.commit()
     }
+
+    private fun newDeviceKeyId(): String = UUID.randomUUID().toString()
 
     private fun getOrCreatePrivateKey(): PrivateKey {
         val existing = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry

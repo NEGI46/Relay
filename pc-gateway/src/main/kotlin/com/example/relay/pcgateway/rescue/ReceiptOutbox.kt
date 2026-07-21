@@ -9,9 +9,9 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
 import io.ktor.http.ContentType.Application.Json
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
-import java.sql.Connection
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CoroutineScope
@@ -35,11 +35,12 @@ data class BrokerReceiptUpload(
  * reliably delivered to the Broker via at-least-once semantics.
  * Broker deduplicates by receipt_id (idempotent).
  *
- * The flusher only marks SENT after receiving 2xx from Broker.
- * Non-2xx (including 422 unknown_envelope) keeps the entry PENDING for retry.
+ * The flusher only marks SENT after receiving 2xx from Broker. A 422 means the Broker has no
+ * matching envelope (for example, a receipt from a LAN-only delivery), so it is terminal and is
+ * not retried forever. Other failures remain pending for at-least-once retry.
  */
 class ReceiptOutbox(
-    private val dbConnection: Connection,
+    private val persistence: SqliteRescuePersistence,
     private val brokerUrl: String,
     private val shelterId: String,
     private val gatewayId: String,
@@ -53,19 +54,21 @@ class ReceiptOutbox(
     }
 
     private fun createTable() {
-        dbConnection.createStatement().use { stmt ->
-            stmt.executeUpdate(
-                """CREATE TABLE IF NOT EXISTS receipt_outbox (
-                    receipt_id TEXT NOT NULL PRIMARY KEY,
-                    envelope_id TEXT NOT NULL,
-                    shelter_id TEXT NOT NULL,
-                    receipt_json TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'PENDING',
-                    created_at INTEGER NOT NULL,
-                    sent_at INTEGER,
-                    retry_count INTEGER NOT NULL DEFAULT 0
-                )""",
-            )
+        persistence.withConnection { connection ->
+            connection.createStatement().use { stmt ->
+                stmt.executeUpdate(
+                    """CREATE TABLE IF NOT EXISTS receipt_outbox (
+                        receipt_id TEXT NOT NULL PRIMARY KEY,
+                        envelope_id TEXT NOT NULL,
+                        shelter_id TEXT NOT NULL,
+                        receipt_json TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'PENDING',
+                        created_at INTEGER NOT NULL,
+                        sent_at INTEGER,
+                        retry_count INTEGER NOT NULL DEFAULT 0
+                    )""",
+                )
+            }
         }
     }
 
@@ -75,15 +78,17 @@ class ReceiptOutbox(
      * inside persistence.transaction{}), ensuring atomicity.
      */
     fun enqueue(receipt: SignedShelterReceipt) {
-        dbConnection.prepareStatement(
-            "INSERT OR IGNORE INTO receipt_outbox (receipt_id, envelope_id, shelter_id, receipt_json, status, created_at) VALUES (?, ?, ?, ?, 'PENDING', ?)",
-        ).use { stmt ->
-            stmt.setString(1, receipt.receipt.receiptId)
-            stmt.setString(2, receipt.receipt.envelopeId)
-            stmt.setString(3, receipt.receipt.shelterId)
-            stmt.setString(4, json.encodeToString(receipt))
-            stmt.setLong(5, System.currentTimeMillis())
-            stmt.executeUpdate()
+        persistence.withConnection { connection ->
+            connection.prepareStatement(
+                "INSERT OR IGNORE INTO receipt_outbox (receipt_id, envelope_id, shelter_id, receipt_json, status, created_at) VALUES (?, ?, ?, ?, 'PENDING', ?)",
+            ).use { stmt ->
+                stmt.setString(1, receipt.receipt.receiptId)
+                stmt.setString(2, receipt.receipt.envelopeId)
+                stmt.setString(3, receipt.receipt.shelterId)
+                stmt.setString(4, json.encodeToString(receipt))
+                stmt.setLong(5, System.currentTimeMillis())
+                stmt.executeUpdate()
+            }
         }
     }
 
@@ -128,6 +133,8 @@ class ReceiptOutbox(
                 if (response.status.isSuccess()) {
                     markSent(receiptId)
                     sent++
+                } else if (response.status == HttpStatusCode.UnprocessableEntity) {
+                    markRejected(receiptId)
                 } else {
                     incrementRetry(receiptId)
                 }
@@ -139,35 +146,52 @@ class ReceiptOutbox(
     }
 
     private fun loadPending(): List<Pair<String, String>> {
-        val results = mutableListOf<Pair<String, String>>()
-        dbConnection.prepareStatement(
-            "SELECT receipt_id, receipt_json FROM receipt_outbox WHERE status = 'PENDING' ORDER BY created_at ASC LIMIT 20",
-        ).use { stmt ->
-            stmt.executeQuery().use { rs ->
-                while (rs.next()) {
-                    results.add(rs.getString("receipt_id") to rs.getString("receipt_json"))
+        return persistence.withConnection { connection ->
+            val results = mutableListOf<Pair<String, String>>()
+            connection.prepareStatement(
+                "SELECT receipt_id, receipt_json FROM receipt_outbox WHERE status = 'PENDING' ORDER BY created_at ASC LIMIT 20",
+            ).use { stmt ->
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        results.add(rs.getString("receipt_id") to rs.getString("receipt_json"))
+                    }
                 }
             }
+            results
         }
-        return results
     }
 
     private fun markSent(receiptId: String) {
-        dbConnection.prepareStatement(
-            "UPDATE receipt_outbox SET status = 'SENT', sent_at = ? WHERE receipt_id = ?",
-        ).use { stmt ->
-            stmt.setLong(1, System.currentTimeMillis())
-            stmt.setString(2, receiptId)
-            stmt.executeUpdate()
+        persistence.withConnection { connection ->
+            connection.prepareStatement(
+                "UPDATE receipt_outbox SET status = 'SENT', sent_at = ? WHERE receipt_id = ?",
+            ).use { stmt ->
+                stmt.setLong(1, System.currentTimeMillis())
+                stmt.setString(2, receiptId)
+                stmt.executeUpdate()
+            }
         }
     }
 
     private fun incrementRetry(receiptId: String) {
-        dbConnection.prepareStatement(
-            "UPDATE receipt_outbox SET retry_count = retry_count + 1 WHERE receipt_id = ?",
-        ).use { stmt ->
-            stmt.setString(1, receiptId)
-            stmt.executeUpdate()
+        persistence.withConnection { connection ->
+            connection.prepareStatement(
+                "UPDATE receipt_outbox SET retry_count = retry_count + 1 WHERE receipt_id = ?",
+            ).use { stmt ->
+                stmt.setString(1, receiptId)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    private fun markRejected(receiptId: String) {
+        persistence.withConnection { connection ->
+            connection.prepareStatement(
+                "UPDATE receipt_outbox SET status = 'REJECTED' WHERE receipt_id = ?",
+            ).use { stmt ->
+                stmt.setString(1, receiptId)
+                stmt.executeUpdate()
+            }
         }
     }
 }

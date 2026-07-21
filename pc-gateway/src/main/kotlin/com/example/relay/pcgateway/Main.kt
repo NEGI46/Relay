@@ -85,7 +85,7 @@ fun main() {
         // 1. Create ReceiptOutbox FIRST using the same DB connection as rescue persistence
         val rescuePersistence = store.rescuePersistence() as SqliteRescuePersistence
         val outbox = ReceiptOutbox(
-            dbConnection = rescuePersistence.rawConnection,
+            persistence = rescuePersistence,
             brokerUrl = config.brokerUrl,
             shelterId = config.shelterId,
             gatewayId = config.gatewayId,
