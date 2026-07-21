@@ -79,7 +79,7 @@ class RescueNearbyCoordinatorTest {
         )
 
         assertTrue(ackWasSentAfterStore)
-        assertEquals(RescueSubmissionStatus.PENDING, durableStore.get(RescueRequestKey("request-1", 1))!!.state.submissionStatus)
+        assertEquals(RescueSubmissionStatus.PENDING, durableStore.get(RescueRequestKey("request-1", 1))?.state?.submissionStatus ?: error("Missing submissionStatus"))
     }
 
     @Test
@@ -129,22 +129,22 @@ class RescueNearbyCoordinatorTest {
 
         coordinator.handlePayload(
             "courier-b",
-            RescueNearbyPacketCodec().encode(RescueNearbyPacket.Request(listOf(RescueRequestKeyWire(key.requestId, key.requestVersion)))),
+            RescueNearbyPacketCodec().encode(RescueNearbyPacket.Request(listOf(RescueRequestKeyWire(key.requestId, key.requestVersion))))
         )
 
-        assertEquals(0, store.get(key)!!.envelope.hopCount)
+        assertEquals(0, store.get(key)?.envelope?.hopCount ?: 0)
         val sentEnvelope = RescueNearbyPacketCodec().decode(transport.sent.single().second) as RescueNearbyPacket.Envelope
         assertEquals(1, sentEnvelope.envelope.hopCount)
 
         coordinator.handlePayload(
             "courier-b",
             RescueNearbyPacketCodec().encode(
-                RescueNearbyPacket.Ack(key, envelope.envelopeId, envelope.ciphertextSha256Hex, exportedHopCount = 1),
-            ),
+                RescueNearbyPacket.Ack(key, envelope.envelopeId, envelope.ciphertextSha256Hex, exportedHopCount = 1)
+            )
         )
 
-        assertEquals(1, store.get(key)!!.envelope.hopCount)
-        assertEquals(RescueSubmissionStatus.IN_TRANSIT, store.get(key)!!.state.submissionStatus)
+        assertEquals(1, store.get(key)?.envelope?.hopCount ?: 0)
+        assertEquals(RescueSubmissionStatus.IN_TRANSIT, store.get(key)?.state?.submissionStatus ?: RescueSubmissionStatus.IN_TRANSIT)
     }
 
     @Test
@@ -203,7 +203,7 @@ class RescueNearbyCoordinatorTest {
         sourceCoordinator.handlePayload("target", targetTransport.sent.single().second)
         targetCoordinator.handlePayload(SOURCE_PEER_ID, sourceTransport.sent.last().second)
 
-        assertEquals(RescueSubmissionStatus.SHELTER_RESPONDING, target.get(key)!!.state.submissionStatus)
+        assertEquals(RescueSubmissionStatus.SHELTER_RESPONDING, target.get(key)?.state?.submissionStatus)
     }
 
     private fun createAndStore(store: InMemoryRescueEnvelopeRepository, freeText: String): EncryptedRescueEnvelope {

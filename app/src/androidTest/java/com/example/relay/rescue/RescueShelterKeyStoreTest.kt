@@ -39,7 +39,7 @@ class RescueShelterKeyStoreTest {
 
         val loaded = store.load()
         assertNotNull(loaded)
-        assertEquals(manifest.shelterId, loaded!!.shelterId)
+        assertEquals(manifest.shelterId, loaded?.shelterId ?: "")
         assertEquals(manifest.fingerprint(), loaded.manifestFingerprint)
     }
 

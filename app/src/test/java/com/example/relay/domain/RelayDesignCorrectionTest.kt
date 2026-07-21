@@ -30,7 +30,7 @@ class RelayDesignCorrectionTest {
         )
         clock.currentElapsedRealtimeMillis = NOW + 400
         clock.currentMillis = NOW + 400
-        assertEquals(400, policy.prepareForTransfer(local)!!.accumulatedAgeMs)
+        assertEquals(400, policy.prepareForTransfer(local)?.accumulatedAgeMs ?: 0)
 
         val rebooted = local.copy(receivedElapsedRealtimeMs = NOW + 9_999, persistedAtWallClockMs = NOW + 500)
         clock.currentElapsedRealtimeMillis = NOW + 20_000 // a later reboot may still exceed an old elapsed baseline

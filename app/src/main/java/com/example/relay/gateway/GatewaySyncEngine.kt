@@ -100,7 +100,7 @@ class GatewaySyncEngine(
             val push = if (useAuthenticated && messages.isEmpty()) {
                 GatewayPushResult(com.example.relay.gateway.protocol.SyncMessagesResponse())
             } else if (useAuthenticated) {
-                client.push(settings, token!!, messages)
+                client.push(settings, token ?: "", messages)
             } else {
                 val gateway = discovery?.discover()
                     ?: settings.host.trim().takeIf(::isValidLanIpv4)?.let { host ->
@@ -121,7 +121,7 @@ class GatewaySyncEngine(
                 client.pushPublic(gateway, localBridgeId, "Relay Bridge", messages)
             }
             val receipts = if (useAuthenticated) {
-                client.pullReceipts(settings, token!!)
+                client.pullReceipts(settings, token ?: "")
             } else {
                 push.response.receipts.mapNotNull { receipt ->
                     when (receipt.receiptType) {
