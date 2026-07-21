@@ -40,6 +40,7 @@ import com.example.relay.service.CommunicationSupervisor
 import com.example.relay.service.RescueDeliveryService
 import com.example.relay.rescue.RescueShelterKeyStore
 import com.example.relay.rescue.ReportSigningKeyStore
+import com.example.relay.rescue.UploadSigningKeyStore
 import com.example.relay.rescue.DebugShelterManifestBootstrap
 import com.example.relay.rescue.BundledShelterManifestBootstrap
 import com.example.relay.rescue.HttpShelterManifestClient
@@ -73,13 +74,19 @@ class RelayApplication : Application() {
         PlaintextDatabaseMigration.migrateIfNeeded(this, DATABASE_NAME, passphrase)
         Room.databaseBuilder(this, RelayDatabase::class.java, DATABASE_NAME)
             .openHelperFactory(SupportOpenHelperFactory(passphrase))
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
     }
     val messageRepository: RoomMessageRepository by lazy { RoomMessageRepository(database) }
     val rescueRepository: RoomRescueEnvelopeRepository by lazy { RoomRescueEnvelopeRepository(database) }
     val rescueShelterKeyStore: RescueShelterKeyStore by lazy { RescueShelterKeyStore(this) }
     val reportSigningKeyStore: ReportSigningKeyStore by lazy { ReportSigningKeyStore() }
+    val uploadSigningKeyStore: UploadSigningKeyStore by lazy { UploadSigningKeyStore() }
+
+    /** Broker endpoint from SharedPreferences. Empty = Broker delivery disabled. */
+    val cloudBrokerEndpoint: String
+        get() = getSharedPreferences("relay_broker_config", MODE_PRIVATE)
+            .getString("broker_endpoint", "").orEmpty()
     val shelterManifestEnrollment: ShelterManifestEnrollment by lazy {
         ShelterManifestEnrollment(HttpShelterManifestClient(), rescueShelterKeyStore)
     }
@@ -277,5 +284,21 @@ private val MIGRATION_3_4 = object : Migration(3, 4) {
 private val MIGRATION_4_5 = object : Migration(4, 5) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE messages ADD COLUMN reportSignatureJson TEXT")
+    }
+}
+
+private val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS broker_ledger (
+                requestId TEXT NOT NULL,
+                requestVersion INTEGER NOT NULL,
+                brokerReceiptId TEXT,
+                brokerStatus TEXT NOT NULL DEFAULT 'PENDING',
+                uploadedAtEpochMillis INTEGER,
+                retryCount INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(requestId, requestVersion)
+            )""",
+        )
     }
 }

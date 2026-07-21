@@ -91,6 +91,20 @@ Nearby / BLEでStore–Carry–Forward
 依頼者のAndroidへ受領・対応中・完了を通知
 ```
 
+### Broker経路（任意・モバイル通信）
+
+インターネットが使える場合、AndroidはNearby/BLE/LANと並行してHTTPS Brokerへも救助Envelopeを送信します。Brokerは暗号文を復号せず、一時保存・重複排除・期限管理のみ行い、PC Gatewayが外向き通信で取得します。
+
+```text
+Android ──HTTPS──> Broker <──HTTPS poll── PC Gateway
+Android <──HTTPS── Broker <──HTTPS POST── PC Gateway (Receipt Outbox)
+```
+
+- Broker送信は`hopCount`を増やさない（SCF中継ではない）
+- Broker障害時もNearby/BLE/LANは独立動作
+- 設定: Androidは`broker_endpoint`、Gatewayは`RELAY_BROKER_URL`環境変数
+- 詳細: [Brokerアーキテクチャ](docs/BROKER_ARCHITECTURE.md)
+
 中継端末には救助要請の本文・正確な位置・人数を表示しません。PC Gatewayだけが、宛先鍵で復号した詳細を扱います。完了・取消の依頼は全バージョンを30日後に削除します。
 
 ## 公式情報と地図
@@ -133,13 +147,15 @@ adb emu geo fix 132.504 34.392
 | 場所 | 役割 |
 |---|---|
 | `shared/` | 救助契約、暗号化、署名Receipt、共通モデル |
-| `app/` | Android UI、GPS、Nearby/BLE、暗号化Room DB |
-| `pc-gateway/` | PCの復号、担当、状態遷移、保持期間、地図、公式情報 |
+| `app/` | Android UI、GPS、Nearby/BLE、暗号化Room DB、Broker配送 |
+| `pc-gateway/` | PCの復号、担当、状態遷移、保持期間、地図、公式情報、Broker Pull/Outbox |
+| `broker/` | HTTPS Broker（Ktor+SQLite）、暗号文の一時保存・重複排除・期限管理 |
 | `docs/` | v1仕様、運用、セキュリティ、テスト、リリース手順 |
 | `.github/workflows/` | CIとGitHub Release作成 |
 
 ## 主要ドキュメント
 
+- [Brokerアーキテクチャ](docs/BROKER_ARCHITECTURE.md)
 - [府中町v1パイロット仕様](docs/V1_FUCHU_PILOT.md)
 - [PC Gatewayセットアップ](docs/PC_GATEWAY_SETUP.md)
 - [PC Gatewayアーキテクチャ](docs/PC_GATEWAY_ARCHITECTURE.md)

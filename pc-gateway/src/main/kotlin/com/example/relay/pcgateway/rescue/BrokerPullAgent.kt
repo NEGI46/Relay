@@ -1,0 +1,102 @@
+package com.example.relay.pcgateway.rescue
+
+import com.example.relay.rescue.EncryptedRescueEnvelope
+import io.ktor.client.HttpClient
+import io.ktor.client.request.get
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+
+/** Wire model matching Broker's BrokerEnvelopeBatch. */
+@Serializable
+data class BrokerEnvelopeBatch(
+    val envelopes: List<EncryptedRescueEnvelope>,
+    val cursor: String?,
+)
+
+/**
+ * Pulls encrypted rescue envelopes from the Broker via outbound HTTPS GET.
+ * v1: 1 shelterId = 1 active Gateway. No multi-Gateway failover.
+ * On Broker unreachable: logs and retries with backoff. LAN/BLE ingress unaffected.
+ */
+class BrokerPullAgent(
+    private val brokerUrl: String,
+    private val shelterId: String,
+    private val gatewayId: String,
+    private val intakeService: RescueIntakeService,
+    private val httpClient: HttpClient,
+    private val pollIntervalMs: Long = 10_000L,
+    private val json: Json = Json { ignoreUnknownKeys = true },
+) {
+    private var cursor: String? = null
+    private var consecutiveFailures = 0
+
+    /**
+     * Starts the pull loop. Call from a coroutine scope.
+     * Runs independently of LAN/BLE ingress.
+     */
+    suspend fun start(scope: CoroutineScope) {
+        while (scope.isActive) {
+            try {
+                val pulled = pullOnce()
+                consecutiveFailures = 0
+                if (pulled > 0) {
+                    // Immediately poll again if we got data (catch up)
+                    continue
+                }
+            } catch (e: Exception) {
+                consecutiveFailures++
+                val backoff = minOf(pollIntervalMs * consecutiveFailures, 60_000L)
+                System.err.println("[BrokerPullAgent] pull failed (attempt $consecutiveFailures): ${e.message}")
+                delay(backoff)
+                continue
+            }
+            delay(pollIntervalMs)
+        }
+    }
+
+    /**
+     * Single pull iteration. Returns number of envelopes ingested.
+     * Exposed for testing.
+     */
+    suspend fun pullOnce(): Int {
+        val url = buildString {
+            append("$brokerUrl/v1/gateways/$shelterId/pull")
+            append("?limit=50")
+            cursor?.let { append("&cursor=$it") }
+        }
+
+        val response: HttpResponse = httpClient.get(url)
+        if (!response.status.isSuccess()) {
+            throw RuntimeException("Broker pull returned ${response.status}")
+        }
+
+        val batch = json.decodeFromString<BrokerEnvelopeBatch>(response.bodyAsText())
+        cursor = batch.cursor
+
+        var ingested = 0
+        for (envelope in batch.envelopes) {
+            val result = intakeService.ingest(
+                envelope = envelope,
+                carrierId = "broker",
+                courierDeliveryId = "broker:${envelope.envelopeId}",
+            )
+            when (result) {
+                is RescueIngestResult.Accepted -> ingested++
+                is RescueIngestResult.Duplicate -> { /* already have it */ }
+                is RescueIngestResult.Quarantined -> {
+                    System.err.println("[BrokerPullAgent] quarantined envelope: ${envelope.envelopeId}")
+                }
+                is RescueIngestResult.Rejected -> {
+                    System.err.println("[BrokerPullAgent] rejected envelope: ${envelope.envelopeId} (${result.code})")
+                }
+            }
+        }
+        return ingested
+    }
+}

@@ -29,12 +29,14 @@ class RelayConverters {
         MessageDeliveryEntity::class,
         DeliveryReceiptEntity::class,
         RescueEntity::class,
+        BrokerLedgerEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(RelayConverters::class)
 abstract class RelayDatabase : RoomDatabase() {
     abstract fun relayDao(): RelayDao
     abstract fun rescueDao(): RescueDao
+    abstract fun brokerLedgerDao(): BrokerLedgerDao
 }

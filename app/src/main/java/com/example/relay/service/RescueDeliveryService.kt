@@ -15,6 +15,10 @@ import com.example.relay.MainActivity
 import com.example.relay.RelayApplication
 import com.example.relay.rescue.RescueSubmissionStatus
 import com.example.relay.rescue.SharedPreferencesRescueAutomationStore
+import com.example.relay.rescue.BrokerDeliveryResult
+import com.example.relay.rescue.BrokerReceiptPoller
+import com.example.relay.rescue.BrokerRescueDelivery
+import com.example.relay.rescue.BrokerRetryWorker
 import com.example.relay.rescue.HttpShelterGatewayDelivery
 import com.example.relay.rescue.GatewayDeliveryResult
 import com.example.relay.rescue.ble.SharedPreferencesCourierDeliveryIdStore
@@ -22,6 +26,7 @@ import com.example.relay.rescue.RescueRequestKey
 import com.example.relay.rescue.RescueUrgency
 import com.example.relay.rescue.StoredRescueRecord
 import com.example.relay.rescue.rank
+import com.example.relay.data.local.BrokerLedgerEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,6 +41,8 @@ class RescueDeliveryService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var statusMonitorJob: Job? = null
     private var localGatewayDeliveryJob: Job? = null
+    private var brokerDeliveryJob: Job? = null
+    private var brokerReceiptPollJob: Job? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!SharedPreferencesRescueAutomationStore(this).isEnabled()) {
@@ -56,6 +63,8 @@ class RescueDeliveryService : Service() {
         (application as? RelayApplication)?.let { app ->
             app.rescueDeliveryCoordinator.start(serviceScope)
             startLocalGatewayDelivery(app)
+            startBrokerDelivery(app)
+            startBrokerReceiptPolling(app)
             monitorOwnRequestStatus(app)
         }
         return START_STICKY
@@ -64,6 +73,8 @@ class RescueDeliveryService : Service() {
     override fun onDestroy() {
         (application as? RelayApplication)?.rescueDeliveryCoordinator?.stop()
         localGatewayDeliveryJob?.cancel()
+        brokerDeliveryJob?.cancel()
+        brokerReceiptPollJob?.cancel()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -141,6 +152,88 @@ class RescueDeliveryService : Service() {
                 }
                 delay(2_000)
             }
+        }
+    }
+
+    /**
+     * Broker delivery runs independently of LAN/Nearby/BLE.
+     * On failure, enqueues a unique OneTime WorkManager retry.
+     * Does NOT increment hopCount.
+     */
+    private fun startBrokerDelivery(app: RelayApplication) {
+        if (brokerDeliveryJob?.isActive == true) return
+        val endpoint = app.cloudBrokerEndpoint
+        if (endpoint.isBlank()) return
+
+        brokerDeliveryJob = serviceScope.launch {
+            val delivery = BrokerRescueDelivery(
+                context = this@RescueDeliveryService,
+                endpoint = endpoint,
+                signingKeyStore = app.uploadSigningKeyStore,
+            )
+            val dao = app.database.brokerLedgerDao()
+            while (isActive) {
+                val candidates = app.rescueRepository.all()
+                    .filter { it.envelope.expiresAtEpochMillis > System.currentTimeMillis() }
+                    .filter {
+                        it.state.submissionStatus in setOf(
+                            RescueSubmissionStatus.PENDING,
+                            RescueSubmissionStatus.IN_TRANSIT,
+                        )
+                    }
+                for (record in candidates) {
+                    val ledger = dao.find(record.envelope.requestId, record.envelope.requestVersion)
+                    if (ledger?.brokerStatus == "UPLOADED") continue
+
+                    // Ensure ledger entry exists
+                    if (ledger == null) {
+                        dao.upsert(BrokerLedgerEntity(
+                            requestId = record.envelope.requestId,
+                            requestVersion = record.envelope.requestVersion,
+                            brokerReceiptId = null,
+                            brokerStatus = "PENDING",
+                            uploadedAtEpochMillis = null,
+                        ))
+                    }
+
+                    when (val result = delivery.deliver(record.envelope)) {
+                        is BrokerDeliveryResult.Stored -> {
+                            dao.markUploaded(
+                                requestId = record.envelope.requestId,
+                                requestVersion = record.envelope.requestVersion,
+                                receiptId = result.response.brokerReceiptId,
+                                uploadedAt = result.response.storedAtEpochMillis,
+                            )
+                        }
+                        is BrokerDeliveryResult.Offline,
+                        is BrokerDeliveryResult.Failed -> {
+                            dao.markRetrying(record.envelope.requestId, record.envelope.requestVersion)
+                            BrokerRetryWorker.enqueue(
+                                this@RescueDeliveryService,
+                                record.envelope.requestId,
+                                record.envelope.requestVersion,
+                            )
+                        }
+                        is BrokerDeliveryResult.Disabled -> { /* endpoint cleared; stop */ }
+                    }
+                }
+                delay(10_000)
+            }
+        }
+    }
+
+    /**
+     * Polls Broker for signed shelter receipts.
+     * Only SHELTER_* states come from signed receipts via applyReceipt().
+     */
+    private fun startBrokerReceiptPolling(app: RelayApplication) {
+        if (brokerReceiptPollJob?.isActive == true) return
+        val endpoint = app.cloudBrokerEndpoint
+        if (endpoint.isBlank()) return
+
+        brokerReceiptPollJob = serviceScope.launch {
+            val poller = BrokerReceiptPoller(this@RescueDeliveryService)
+            poller.start(this, app)
         }
     }
 

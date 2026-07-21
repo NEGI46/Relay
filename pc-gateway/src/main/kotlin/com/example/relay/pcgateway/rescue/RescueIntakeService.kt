@@ -28,6 +28,8 @@ class RescueIntakeService(
     private val persistence: RescuePersistence = InMemoryRescuePersistence(),
     private val clock: RescueClock = RescueClock(System::currentTimeMillis),
     private val idGenerator: RescueIdGenerator = RescueIdGenerator { UUID.randomUUID().toString() },
+    /** Called after every receipt signing (ingest, status update). Used by ReceiptOutbox. */
+    private val onReceiptIssued: ((SignedShelterReceipt) -> Unit)? = null,
 ) {
     init {
         require(isIdentifier(shelterId)) { "invalid shelter id" }
@@ -231,8 +233,8 @@ class RescueIntakeService(
         envelope: EncryptedRescueEnvelope,
         receivedAt: Long,
         status: ShelterReceiptStatus,
-    ): SignedShelterReceipt =
-        RescueCryptography.signReceipt(
+    ): SignedShelterReceipt {
+        val signed = RescueCryptography.signReceipt(
             UnsignedShelterReceipt(
                 receiptId = idGenerator.nextId(),
                 envelopeId = envelope.envelopeId,
@@ -245,6 +247,9 @@ class RescueIntakeService(
             ),
             shelterSigningPrivateKey,
         )
+        onReceiptIssued?.invoke(signed)
+        return signed
+    }
 
     private fun isIdentifier(value: String): Boolean = value.length in 1..128 &&
         value.all { it.isLetterOrDigit() || it in "-_.:" }

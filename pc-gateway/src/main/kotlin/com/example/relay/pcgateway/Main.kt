@@ -3,12 +3,21 @@ package com.example.relay.pcgateway
 import com.example.relay.pcgateway.rescue.RescueDeliveryIngress
 import com.example.relay.pcgateway.rescue.RescueIntakeService
 import com.example.relay.pcgateway.rescue.RescueKeyStore
+import com.example.relay.pcgateway.rescue.BrokerPullAgent
+import com.example.relay.pcgateway.rescue.ReceiptOutbox
 import com.example.relay.pcgateway.rescue.provisioning.BleBridgeEnvironmentStore
 import com.example.relay.pcgateway.rescue.provisioning.SignedShelterManifestStore
 import com.example.relay.rescue.RegionalRootBundle
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import java.io.File
 import java.nio.file.Path
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
@@ -28,11 +37,13 @@ fun main() {
     // Do not bind the sidecar ingress unless the advertised shelter identity is root-signed,
     // current, and matches the two locally held private keys. This prevents an unprovisioned PC
     // from accepting delivery traffic merely because its generated public manifest is reachable.
+    var receiptOutboxRef: ReceiptOutbox? = null
     val rescueIntakeService = RescueIntakeService(
         shelterId = config.shelterId,
         recipientPrivateKey = rescueKeys.recipientPrivateKey,
         shelterSigningPrivateKey = rescueKeys.receiptSigningPrivateKey,
         persistence = store.rescuePersistence(),
+        onReceiptIssued = { receipt -> receiptOutboxRef?.enqueue(receipt) },
     )
     rescueIntakeService.purgeExpiredDetails()
     val offlineMap = GsiTileCache(Path.of(config.offlineMapPath))
@@ -59,6 +70,40 @@ fun main() {
         println("LAN discovery beacon: UDP ${config.lanDiscoveryPort} → /api/public/sync/messages")
     } else if (config.lanDiscoveryEnabled) {
         println("LAN discovery is inactive while the HTTP server is bound to loopback")
+    }
+
+    // Broker cloud relay: pull agent + receipt outbox (independent of LAN/BLE)
+    val brokerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    var brokerHttpClient: HttpClient? = null
+    var receiptOutbox: ReceiptOutbox? = null
+    if (config.brokerUrl != null) {
+        val client = HttpClient(CIO)
+        brokerHttpClient = client
+        val pullAgent = BrokerPullAgent(
+            brokerUrl = config.brokerUrl,
+            shelterId = config.shelterId,
+            gatewayId = config.gatewayId,
+            intakeService = rescueIntakeService,
+            httpClient = client,
+            pollIntervalMs = config.brokerPollIntervalMs,
+        )
+        brokerScope.launch { pullAgent.start(this) }
+
+        val outboxDbPath = File(config.dbPath).resolveSibling("receipt-outbox.db").path
+        val outbox = ReceiptOutbox(
+            dbConnection = ReceiptOutbox.open(outboxDbPath),
+            brokerUrl = config.brokerUrl,
+            shelterId = config.shelterId,
+            gatewayId = config.gatewayId,
+            httpClient = client,
+        )
+        receiptOutbox = outbox
+        receiptOutboxRef = outbox
+        brokerScope.launch { outbox.startFlusher(this) }
+
+        println("Broker cloud relay: ${config.brokerUrl} (poll every ${config.brokerPollIntervalMs}ms)")
+    } else {
+        println("Broker cloud relay: disabled (RELAY_BROKER_URL not set)")
     }
     if (config.host == "0.0.0.0") {
         val os = System.getProperty("os.name").orEmpty().lowercase()
@@ -95,6 +140,7 @@ fun main() {
     } finally {
         beacon.close()
         offlineMap.close()
+        brokerHttpClient?.close()
         store.close()
     }
 }

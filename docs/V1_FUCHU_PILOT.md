@@ -42,6 +42,7 @@ Relay v1 は、通信障害時の救助依頼をスマートフォンから暗�
 | 府中町オフライン地図、公式警報キャッシュ | 実装済み（PC） |
 | 日本語 / English切替 | 実装済み（Android救助フロー） |
 | PCの対応中・完了状態をスマホへ逆配送 | 実装済み。署名ReceiptをBLE再接触またはNearby端末経由で返送 |
+| モバイル通信経由のBroker配送 | 実装済み。HTTPS Broker経由でNearby/BLE/LANと並行配送。設定時に有効化 |
 | Androidの公式情報限定画面 | 実装済み（府中町・広島県・気象庁） |
 | 独立した複数Gateway間の担当同期 | 次版。v1は1 Gatewayを複数スタッフPCで共有 |
 | プロセス終了後も継続するGPS追跡 | 次版。暗号文の自動中継自体はForeground Serviceで継続 |
@@ -54,8 +55,14 @@ Relayは消防・警察・自治体の緊急連絡や認証済み人命安全シ
 shared/.../rescue/RescueModels.kt              暗号化するv1救助契約
 app/.../ui/rescue/                              Android救助UIと状態管理
 app/.../location/                               GPS取得と時刻
+app/.../rescue/BrokerRescueDelivery.kt          Broker HTTPS配送
+app/.../rescue/BrokerRetryWorker.kt             Broker再送WorkManager
+app/.../rescue/BrokerReceiptPoller.kt           Broker Receipt取得
 pc-gateway/.../rescue/                          復号、担当、状態、保持期間
+pc-gateway/.../rescue/BrokerPullAgent.kt        BrokerからEnvelope取得
+pc-gateway/.../rescue/ReceiptOutbox.kt          署名ReceiptのBroker再送
 pc-gateway/.../GsiTileCache.kt                  府中町の地図保存
 pc-gateway/.../OfficialInformationService.kt    気象庁・公式情報
 pc-gateway/src/main/resources/web/              スタッフ画面
+broker/                                         HTTPS Brokerサーバー
 ```
