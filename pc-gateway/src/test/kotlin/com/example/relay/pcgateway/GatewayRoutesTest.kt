@@ -84,6 +84,7 @@ class GatewayRoutesTest {
             val response = client.post("/api/sync/messages") {
                 contentType(ContentType.Application.Json)
                 header(HttpHeaders.Authorization, "Bearer $token")
+                header("X-Bridge-Id", "bridge")
                 setBody(
                     GatewayJson.encodeToString(
                         SyncMessagesRequest(

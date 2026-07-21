@@ -20,6 +20,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.http.content.staticResources
@@ -34,6 +35,8 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import kotlinx.serialization.Serializable
 import io.ktor.server.routing.routing
+
+private const val MAX_CONTROL_BODY_BYTES = 16L * 1024
 
 @Serializable data class PairRequest(val code: String, val bridgeId: String, val bridgeName: String)
 @Serializable data class PairApproveRequest(val code: String, val bridgeId: String)
@@ -103,7 +106,7 @@ fun Application.gatewayModule(
                     shelterId = config.shelterId,
                     recipientKeyId = config.rescueRecipientKeyId,
                     manifestFingerprint = config.rescueManifestFingerprint,
-                    rescueIngressReady = rescueIntakeService != null,
+                    rescueIngressReady = rescueIntakeService != null && rescueBleReady && config.anonymousIngressEnabled,
                     rescueKeyPath = config.rescueKeyPath,
                 ),
             )
@@ -148,6 +151,7 @@ fun Application.gatewayModule(
             }
             val service = rescueIntakeService ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
             val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+            if (!call.requireBoundedBody(MAX_CONTROL_BODY_BYTES)) return@post
             val request = call.receive<RescueStatusChangeRequest>()
             when (val result = service.updateStatus(id, request.status, request.operatorNodeId)) {
                 is RescueStatusUpdateResult.Updated -> call.respond(
@@ -208,6 +212,7 @@ fun Application.gatewayModule(
             call.respond(mapOf("code" to store.createPairingCode()))
         }
         post("/api/pair/request") {
+            if (!call.requireBoundedBody(MAX_CONTROL_BODY_BYTES)) return@post
             val request = call.receive<PairRequest>()
             val accepted = store.requestPair(request.code, request.bridgeId, request.bridgeName)
             call.respond(if (accepted) PairResponse(true) else PairResponse(false, reason = "invalid_or_expired_code"))
@@ -216,6 +221,7 @@ fun Application.gatewayModule(
             if (call.request.headers["X-Admin-Key"] != config.adminKey) {
                 return@post call.respond(HttpStatusCode.Unauthorized)
             }
+            if (!call.requireBoundedBody(MAX_CONTROL_BODY_BYTES)) return@post
             val request = call.receive<PairApproveRequest>()
             val token = store.approvePair(request.bridgeId, request.code)
             call.respond(if (token == null) PairResponse(false, reason = "pairing_failed") else PairResponse(true, token))
@@ -224,6 +230,7 @@ fun Application.gatewayModule(
             if (call.request.headers["X-Admin-Key"] != config.adminKey) {
                 return@post call.respond(HttpStatusCode.Unauthorized)
             }
+            if (!call.requireBoundedBody(MAX_CONTROL_BODY_BYTES)) return@post
             val request = call.receive<PairRejectRequest>()
             if (request.bridgeId.isBlank()) {
                 return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "bridgeId_required"))
@@ -232,11 +239,16 @@ fun Application.gatewayModule(
             call.respond(if (ok) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
         }
         post("/api/sync/messages") {
-            val contentLength = call.request.headers["Content-Length"]?.toLongOrNull()
-            if (contentLength != null && contentLength > config.maxPayloadBytes.toLong() * config.maxMessagesPerRequest) {
-                return@post call.respond(HttpStatusCode.PayloadTooLarge)
-            }
+            val bridgeId = call.request.headers["X-Bridge-Id"]
+                ?: return@post call.respond(HttpStatusCode.Unauthorized)
+            val token = bearer(call.request.headers["Authorization"])
+                ?: return@post call.respond(HttpStatusCode.Unauthorized)
+            if (!store.authenticate(bridgeId, token)) return@post call.respond(HttpStatusCode.Forbidden)
+            if (!call.requireBoundedBody(config.maxPayloadBytes.toLong() * config.maxMessagesPerRequest)) return@post
             val request = call.receive<SyncMessagesRequest>()
+            if (request.bridgeId != bridgeId) {
+                return@post call.respond(HttpStatusCode.Forbidden)
+            }
             if (request.protocolVersion != GATEWAY_PROTOCOL_VERSION || request.messages.size > config.maxMessagesPerRequest) {
                 return@post call.respond(
                     HttpStatusCode.UnprocessableEntity,
@@ -245,9 +257,6 @@ fun Application.gatewayModule(
                     ),
                 )
             }
-            val token = bearer(call.request.headers["Authorization"])
-                ?: return@post call.respond(HttpStatusCode.Unauthorized)
-            if (!store.authenticate(request.bridgeId, token)) return@post call.respond(HttpStatusCode.Forbidden)
             val now = System.currentTimeMillis()
             val outcomes = request.messages.map { message ->
                 val reason = validate(message, config.maxPayloadBytes, now)
@@ -270,10 +279,7 @@ fun Application.gatewayModule(
         }
         post("/api/public/sync/messages") {
             if (!config.anonymousIngressEnabled) return@post call.respond(HttpStatusCode.NotFound)
-            val declaredLength = call.request.headers["Content-Length"]?.toLongOrNull()
-            if (declaredLength != null && declaredLength > config.maxAnonymousRequestBytes) {
-                return@post call.respond(HttpStatusCode.PayloadTooLarge)
-            }
+            if (!call.requireBoundedBody(config.maxAnonymousRequestBytes.toLong())) return@post
             val raw = call.receiveText()
             val rawBytes = raw.encodeToByteArray().size
             if (rawBytes > config.maxAnonymousRequestBytes) return@post call.respond(HttpStatusCode.PayloadTooLarge)
@@ -318,6 +324,7 @@ fun Application.gatewayModule(
         post("/api/public/rescue/deliver") {
             if (!config.anonymousIngressEnabled) return@post call.respond(HttpStatusCode.NotFound)
             val service = rescueIntakeService ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            if (!call.requireBoundedBody(config.maxAnonymousRequestBytes.toLong())) return@post
             val raw = call.receiveText()
             if (raw.encodeToByteArray().size > config.maxAnonymousRequestBytes) {
                 return@post call.respond(HttpStatusCode.PayloadTooLarge)
@@ -453,6 +460,28 @@ private fun syncResponse(
 
 private fun bearer(value: String?): String? =
     value?.removePrefix("Bearer ")?.takeIf { it != value && it.isNotBlank() }
+
+private suspend fun ApplicationCall.requireBoundedBody(maxBytes: Long): Boolean {
+    val rawLength = request.headers[HttpHeaders.ContentLength]
+        ?: run {
+            respond(HttpStatusCode.LengthRequired)
+            return false
+        }
+    val contentLength = rawLength.toLongOrNull()
+        ?: run {
+            respond(HttpStatusCode.BadRequest)
+            return false
+        }
+    if (contentLength < 0) {
+        respond(HttpStatusCode.BadRequest)
+        return false
+    }
+    if (contentLength > maxBytes) {
+        respond(HttpStatusCode.PayloadTooLarge)
+        return false
+    }
+    return true
+}
 
 private fun validate(
     message: com.example.relay.gateway.protocol.GatewayMessage,

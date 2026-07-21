@@ -120,6 +120,70 @@ class RescueNearbyCoordinatorTest {
     }
 
     @Test
+    fun `inventory pages include records beyond the first sixty four`() = runTest {
+        val now = NOW
+        val store = InMemoryRescueEnvelopeRepository()
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val creator = RescueRequestCreator(store)
+        repeat(65) { index ->
+            val result = creator.create(
+                RescueRequestDraft(
+                    requestId = "request-${index.toString().padStart(3, '0')}",
+                    senderDeviceId = "member-a",
+                    destinationShelterId = "shelter-1",
+                    createdAtEpochMillis = now - 100,
+                    expiresAtEpochMillis = now + 3_600_000,
+                    urgency = RescueUrgency.URGENT,
+                    personCount = 1,
+                ),
+                recipient.publicKey,
+                envelopeId = "envelope-${index.toString().padStart(3, '0')}",
+            )
+            assertTrue(result is com.example.relay.rescue.RescueCreationResult.Stored)
+        }
+        val transport = RecordingTransport()
+        val coordinator = RescueNearbyCoordinator(store, transport, nowEpochMillis = { now })
+
+        coordinator.onPeerConnected("courier-b")
+
+        val inventories = transport.sent.map {
+            RescueNearbyPacketCodec().decode(it.second) as RescueNearbyPacket.Inventory
+        }
+        assertEquals(listOf(64, 1), inventories.map { it.entries.size })
+        assertEquals(65, inventories.flatMap { it.entries }.map { it.requestId }.distinct().size)
+    }
+
+    @Test
+    fun `missing inventory entries are requested in multiple bounded pages`() = runTest {
+        val now = NOW
+        val transport = RecordingTransport()
+        val coordinator = RescueNearbyCoordinator(
+            InMemoryRescueEnvelopeRepository(),
+            transport,
+            nowEpochMillis = { now },
+        )
+        val entries = List(64) { index ->
+            RescueInventoryEntry(
+                requestId = "request-$index",
+                requestVersion = 1,
+                ciphertextSha256Hex = index.toString().padStart(64, '0'),
+                expiresAtEpochMillis = now + 3_600_000,
+            )
+        }
+
+        coordinator.handlePayload(
+            "member-a",
+            RescueNearbyPacketCodec().encode(RescueNearbyPacket.Inventory(entries)),
+        )
+
+        val requests = transport.sent.map {
+            RescueNearbyPacketCodec().decode(it.second) as RescueNearbyPacket.Request
+        }
+        assertEquals(listOf(32, 32), requests.map { it.keys.size })
+        assertEquals(64, requests.flatMap { it.keys }.distinct().size)
+    }
+
+    @Test
     fun `mesh hop advances only after matching durable peer acknowledgement`() = runTest {
         val store = InMemoryRescueEnvelopeRepository()
         val envelope = createAndStore(store, freeText = CONFIDENTIAL_TEXT)
