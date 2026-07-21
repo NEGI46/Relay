@@ -3,7 +3,7 @@
   One-action PC Gateway launcher (Windows).
 
 .DESCRIPTION
-  Ensures installDist exists (builds if needed), applies safe defaults, starts the real
+  Ensures installDist exists (builds if needed), applies production-safe loopback defaults, starts the real
   gateway process, and optionally opens the operator console in the browser.
   Double-click entry: repo-root Start-PC-Gateway.cmd
 
@@ -28,7 +28,11 @@ $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $Root
 
-if (-not $env:RELAY_GATEWAY_HOST) { $env:RELAY_GATEWAY_HOST = '0.0.0.0' }
+if (-not $env:RELAY_PROFILE) { $env:RELAY_PROFILE = 'production' }
+if (-not $env:RELAY_GATEWAY_LAN_MODE) { $env:RELAY_GATEWAY_LAN_MODE = 'disabled' }
+if (-not $env:RELAY_GATEWAY_HOST) {
+    $env:RELAY_GATEWAY_HOST = if ($env:RELAY_PROFILE -eq 'development') { '0.0.0.0' } else { '127.0.0.1' }
+}
 if ($Port -gt 0) {
     $env:RELAY_GATEWAY_PORT = "$Port"
 } elseif (-not $env:RELAY_GATEWAY_PORT) {
@@ -38,10 +42,11 @@ if (-not $env:RELAY_GATEWAY_DB) {
     $env:RELAY_GATEWAY_DB = Join-Path $env:USERPROFILE '.relay\relay-gateway.db'
 }
 if (-not $env:RELAY_GATEWAY_ID) { $env:RELAY_GATEWAY_ID = 'pc-gateway-local' }
-if (-not $env:RELAY_GATEWAY_LAN_DISCOVERY) { $env:RELAY_GATEWAY_LAN_DISCOVERY = 'true' }
-if (-not $env:RELAY_RESCUE_KEY_FILE) { $env:RELAY_RESCUE_KEY_FILE = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'RelayPcGateway\rescue-keys.json')) }
-if (-not $env:RELAY_RESCUE_SIGNED_MANIFEST_FILE) { $env:RELAY_RESCUE_SIGNED_MANIFEST_FILE = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'RelayPcGateway\rescue-manifest.json')) }
-if (-not $env:RELAY_RESCUE_REGIONAL_ROOT_BUNDLE_FILE) { $env:RELAY_RESCUE_REGIONAL_ROOT_BUNDLE_FILE = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'RelayPcGateway\regional-root.json')) }
+if (-not $env:RELAY_GATEWAY_ANONYMOUS_INGRESS) { $env:RELAY_GATEWAY_ANONYMOUS_INGRESS = if ($env:RELAY_PROFILE -eq 'development') { 'true' } else { 'false' } }
+if (-not $env:RELAY_GATEWAY_LAN_DISCOVERY) { $env:RELAY_GATEWAY_LAN_DISCOVERY = if ($env:RELAY_PROFILE -eq 'development') { 'true' } else { 'false' } }
+if (-not $env:RELAY_RESCUE_KEY_FILE) { $env:RELAY_RESCUE_KEY_FILE = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.relay\rescue-keys.json')) }
+if (-not $env:RELAY_RESCUE_SIGNED_MANIFEST_FILE) { $env:RELAY_RESCUE_SIGNED_MANIFEST_FILE = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.relay\rescue-manifest.json')) }
+if (-not $env:RELAY_RESCUE_REGIONAL_ROOT_BUNDLE_FILE) { $env:RELAY_RESCUE_REGIONAL_ROOT_BUNDLE_FILE = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.relay\regional-root.json')) }
 
 $dbDir = Split-Path -Parent $env:RELAY_GATEWAY_DB
 if ($dbDir -and -not (Test-Path -LiteralPath $dbDir)) {
@@ -75,9 +80,11 @@ Write-Host '========================================'
 Write-Host "  Console : $consoleUrl"
 Write-Host "  Health  : $healthUrl"
 Write-Host "  DB      : $($env:RELAY_GATEWAY_DB)"
+Write-Host "  Profile : $($env:RELAY_PROFILE) / LAN: $($env:RELAY_GATEWAY_LAN_MODE)"
 Write-Host "  Host    : $($env:RELAY_GATEWAY_HOST):$listenPort"
 Write-Host '========================================'
 Write-Host '  Stop with Ctrl+C in this window.'
+Write-Host '  First run: create a named administrator with bootstrap-admin; no default password exists.'
 Write-Host ''
 
 if (-not $NoBrowser) {

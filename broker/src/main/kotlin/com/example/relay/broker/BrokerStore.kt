@@ -5,6 +5,8 @@ import com.example.relay.rescue.SignedShelterReceipt
 import com.example.relay.rescue.authenticatedHeaderBytes
 import java.io.File
 import java.security.KeyFactory
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 import java.sql.Connection
@@ -30,6 +32,23 @@ sealed interface BrokerPutResult {
 data class DeviceRegistrationResult(
     val deviceKeyId: String,
     val capabilityToken: String,
+)
+
+/** Returned exactly once by the local issuance command. The raw token is never persisted. */
+data class IssuedGatewayCredential(
+    val credentialId: String,
+    val gatewayId: String,
+    val shelterId: String,
+    val expiresAtEpochMillis: Long,
+    val token: String,
+)
+
+/** Authenticated scope used by pull and receipt endpoints. */
+data class BrokerGatewayPrincipal(
+    val credentialId: String,
+    val gatewayId: String,
+    val shelterId: String,
+    val expiresAtEpochMillis: Long,
 )
 
 /**
@@ -115,10 +134,91 @@ class BrokerStore(dbPath: String) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
+            st.execute(
+                """
+                CREATE TABLE IF NOT EXISTS broker_gateway_credentials(
+                  credential_id TEXT PRIMARY KEY,
+                  token_hash TEXT NOT NULL UNIQUE,
+                  gateway_id TEXT NOT NULL,
+                  shelter_id TEXT NOT NULL,
+                  issued_at INTEGER NOT NULL,
+                  expires_at INTEGER NOT NULL,
+                  revoked_at INTEGER
+                )
+                """.trimIndent(),
+            )
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelopes_shelter ON broker_envelopes(shelter_id, expires_at)")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelopes_cursor ON broker_envelopes(shelter_id, stored_at, envelope_id)")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_receipts_device ON broker_receipts(shelter_id, uploaded_at)")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_receipts_seq ON broker_receipts(seq)")
+            st.execute("CREATE INDEX IF NOT EXISTS idx_broker_gateway_credential_scope ON broker_gateway_credentials(gateway_id, shelter_id, expires_at)")
+        }
+    }
+
+    /**
+     * Issues a high-entropy credential scoped to exactly one Gateway and shelter.  SQLite stores
+     * only a SHA-256 digest; this is suitable for a generated 256-bit bearer token and avoids a
+     * reversible shared secret in backups or database inspection.
+     */
+    fun issueGatewayCredential(
+        gatewayId: String,
+        shelterId: String,
+        expiresAtEpochMillis: Long,
+        now: Long = System.currentTimeMillis(),
+    ): IssuedGatewayCredential = synchronized(lock) {
+        require(isScopeIdentifier(gatewayId)) { "invalid gateway id" }
+        require(isScopeIdentifier(shelterId)) { "invalid shelter id" }
+        require(expiresAtEpochMillis > now) { "credential expiry must be in the future" }
+        val credentialId = UUID.randomUUID().toString().replace("-", "")
+        val rawSecret = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also(SecureRandom()::nextBytes))
+        val token = "rgc_${credentialId}_$rawSecret"
+        connection.prepareStatement(
+            """INSERT INTO broker_gateway_credentials
+               (credential_id,token_hash,gateway_id,shelter_id,issued_at,expires_at,revoked_at)
+               VALUES(?,?,?,?,?,?,NULL)""",
+        ).use { ps ->
+            ps.setString(1, credentialId)
+            ps.setString(2, gatewayTokenHash(token))
+            ps.setString(3, gatewayId)
+            ps.setString(4, shelterId)
+            ps.setLong(5, now)
+            ps.setLong(6, expiresAtEpochMillis)
+            ps.executeUpdate()
+        }
+        IssuedGatewayCredential(credentialId, gatewayId, shelterId, expiresAtEpochMillis, token)
+    }
+
+    fun revokeGatewayCredential(credentialId: String, now: Long = System.currentTimeMillis()): Boolean = synchronized(lock) {
+        if (credentialId.length !in 16..80) return false
+        connection.prepareStatement(
+            "UPDATE broker_gateway_credentials SET revoked_at=? WHERE credential_id=? AND revoked_at IS NULL",
+        ).use { ps ->
+            ps.setLong(1, now)
+            ps.setString(2, credentialId)
+            ps.executeUpdate() == 1
+        }
+    }
+
+    /** Returns no scope at all for malformed, expired, revoked, or unknown credentials. */
+    fun authenticateGatewayCredential(token: String?, now: Long = System.currentTimeMillis()): BrokerGatewayPrincipal? = synchronized(lock) {
+        if (token.isNullOrBlank() || token.length !in 48..256) return null
+        val digest = gatewayTokenHash(token)
+        connection.prepareStatement(
+            """SELECT credential_id,token_hash,gateway_id,shelter_id,expires_at,revoked_at
+               FROM broker_gateway_credentials WHERE token_hash=?""",
+        ).use { ps ->
+            ps.setString(1, digest)
+            ps.executeQuery().use { rs ->
+                if (!rs.next() || rs.getObject("revoked_at") != null || rs.getLong("expires_at") <= now) return null
+                val storedHash = rs.getString("token_hash")
+                if (!MessageDigest.isEqual(storedHash.toByteArray(Charsets.UTF_8), digest.toByteArray(Charsets.UTF_8))) return null
+                BrokerGatewayPrincipal(
+                    credentialId = rs.getString("credential_id"),
+                    gatewayId = rs.getString("gateway_id"),
+                    shelterId = rs.getString("shelter_id"),
+                    expiresAtEpochMillis = rs.getLong("expires_at"),
+                )
+            }
         }
     }
 
@@ -442,6 +542,14 @@ class BrokerStore(dbPath: String) : AutoCloseable {
             ps.executeUpdate()
         }
     }
+
+    private fun isScopeIdentifier(value: String): Boolean = value.length in 1..128 &&
+        value.all { it.isLetterOrDigit() || it in "-_.:" }
+
+    /** A digest is sufficient only because [issueGatewayCredential] creates 256-bit random tokens. */
+    private fun gatewayTokenHash(token: String): String = Base64.getEncoder().encodeToString(
+        MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8)),
+    )
 
     override fun close() = synchronized(lock) {
         if (!connection.isClosed) connection.close()

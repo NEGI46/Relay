@@ -29,7 +29,9 @@ Assert-True ($ps1Text -match 'installDist') 'launcher builds installDist when mi
 Assert-True ($ps1Text -match 'pc-gateway\.bat') 'launcher starts real installDist entry (pc-gateway.bat)'
 Assert-True ($ps1Text -match 'RELAY_GATEWAY_DB') 'launcher sets DB under user profile defaults'
 Assert-True ($ps1Text -match 'api/health') 'launcher documents health URL'
-Assert-True ($ps1Text -match '0\.0\.0\.0') 'launcher default bind is LAN-capable 0.0.0.0'
+Assert-True ($ps1Text -match "RELAY_PROFILE = 'production'") 'launcher explicitly defaults to production profile'
+Assert-True ($ps1Text -match "127\.0\.0\.1") 'launcher default bind is loopback'
+Assert-True ($ps1Text -match 'bootstrap-admin') 'launcher documents named administrator bootstrap'
 
 # Parser / param surface: -SkipBuild and -NoBrowser must be accepted by the script AST.
 $errors = $null

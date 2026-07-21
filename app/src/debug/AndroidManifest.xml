@@ -3,7 +3,9 @@
     <!-- This component exists only in the debug APK and is intentionally exported
          for a host-side Mobly/snippet process to bind to. It is never merged into
          the release manifest. -->
-    <application>
+    <application
+        android:networkSecurityConfig="@xml/network_security_config_debug"
+        android:usesCleartextTraffic="true">
         <service
             android:name=".test.RelayTestSnippetService"
             android:exported="true"

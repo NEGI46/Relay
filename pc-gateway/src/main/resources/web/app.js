@@ -1,6 +1,6 @@
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { requests: [], selectedId: null, filter: "active", timer: null, soundTimer: null, notifiedWarning: false };
+  const state = { requests: [], selectedId: null, filter: "active", timer: null, soundTimer: null, notifiedWarning: false, staff: null };
   const initialMapView = { latitude: 34.392, longitude: 132.504, zoom: 15 };
   const mapBounds = { south: 34.36, north: 34.43, west: 132.45, east: 132.55 };
   const mapLimits = { minZoom: 13, maxNativeZoom: 15, maxZoom: 18 };
@@ -9,10 +9,9 @@
     fullMap: { ...initialMapView },
   };
 
-  function pin() { return sessionStorage.getItem("relay_staff_pin") || ""; }
-  function nodeId() { return sessionStorage.getItem("relay_node_id") || "fuchu-shelter-pc-1"; }
+  function nodeId() { return state.staff?.username || ""; }
   function authHeaders(json = false) {
-    const headers = { "X-Admin-Key": pin() };
+    const headers = {};
     if (json) headers["Content-Type"] = "application/json";
     return headers;
   }
@@ -33,7 +32,7 @@
   }
   function fmtTime(value) { return value ? new Date(value).toLocaleString("ja-JP", { hour12: false }) : "不明"; }
   function statusLabel(value) {
-    return ({ UNCONFIRMED: "未確認", CONFIRMED: "確認済み", PREPARING: "対応準備中", RESCUE_REQUESTED: "救助機関へ要請済み", RESPONDING: "対応中", COMPLETED: "完了", UNABLE: "対応不可", DUPLICATE: "重複" })[value] || value;
+    return ({ UNCONFIRMED: "未確認", CONFIRMED: "確認済み", PREPARING: "対応準備中", RESCUE_REQUESTED: "対応要請を記録（外部連携未確認）", RESPONDING: "対応中", COMPLETED: "完了", UNABLE: "対応不可", DUPLICATE: "重複" })[value] || value;
   }
   function conditionLabel(value) {
     return ({ LIFE_THREATENING: "命の危険", INJURED_OR_UNWELL: "けが・体調不良", MOBILITY_IMPAIRED: "自力移動困難", SUPPORT_NEEDED: "生活・医療支援" })[value] || value;
@@ -46,12 +45,11 @@
 
   async function unlock(event) {
     event.preventDefault();
-    const candidate = $("staffPin").value.trim();
-    if (!candidate) return;
-    sessionStorage.setItem("relay_staff_pin", candidate);
-    sessionStorage.setItem("relay_node_id", $("nodeId").value.trim() || "fuchu-shelter-pc-1");
+    const username = $("staffUsername").value.trim();
+    const password = $("staffPassword").value;
+    if (!username || !password) return;
     try {
-      await loadRequests();
+      state.staff = await api("/api/auth/login", { method: "POST", headers: authHeaders(true), body: JSON.stringify({ username, password }) });
       $("setup").classList.add("hidden");
       $("staffNodeLabel").textContent = nodeId();
       $("settingsNode").textContent = nodeId();
@@ -59,18 +57,19 @@
       await refreshAll();
       armRefresh();
     } catch (error) {
-      sessionStorage.removeItem("relay_staff_pin");
-      $("staffPin").setCustomValidity(error.status === 401 ? "PINが違います" : "接続できません");
-      $("staffPin").reportValidity();
-      $("staffPin").setCustomValidity("");
+      state.staff = null;
+      $("staffPassword").setCustomValidity(error.status === 401 ? "利用者名またはパスワードが違います" : "接続できません");
+      $("staffPassword").reportValidity();
+      $("staffPassword").setCustomValidity("");
     }
   }
 
-  function lock() {
-    sessionStorage.removeItem("relay_staff_pin");
+  async function lock() {
+    try { await api("/api/auth/logout", { method: "POST", headers: authHeaders() }); } catch (_) { /* reset local UI either way */ }
+    state.staff = null;
     stopAlarm();
     if (state.timer) clearInterval(state.timer);
-    $("staffPin").value = "";
+    $("staffPassword").value = "";
     $("setup").classList.remove("hidden");
   }
 
@@ -136,7 +135,7 @@
 
   async function updateStatus(id, status) {
     try {
-      await api(`/api/rescue/requests/${encodeURIComponent(id)}/status`, { method: "POST", headers: authHeaders(true), body: JSON.stringify({ status, operatorNodeId: nodeId() }) });
+      await api(`/api/rescue/requests/${encodeURIComponent(id)}/status`, { method: "POST", headers: authHeaders(true), body: JSON.stringify({ status }) });
       await loadRequests();
     } catch (error) {
       alert(error.status === 409 ? "別のPCが先に担当したか、状態の順序が正しくありません。更新してください。" : `状態更新に失敗しました: ${error.message}`);
@@ -326,7 +325,7 @@
   async function prepareMap() { await api("/api/map/prepare", { method: "POST", headers: authHeaders() }); await loadMapStatus(); }
 
   async function loadOfficial() {
-    const info = await api("/api/official-info");
+    const info = await api("/api/official-info", { headers: authHeaders() });
     $("officialAlert").textContent = info.urgent ? `気象庁: ${info.warningHeadline}` : `公式情報: ${info.warningHeadline}`;
     $("officialAlert").classList.toggle("urgent", info.urgent);
     $("warningDetail").innerHTML = `<h3>気象庁 警報・注意報</h3><p>${escapeHtml(info.warningHeadline)}</p><ul>${info.warningStatuses.map((value) => `<li>${escapeHtml(value)}</li>`).join("") || "<li>府中町の発表状況なし</li>"}</ul><p class="fine">確認 ${fmtTime(info.checkedAtEpochMillis)}${info.usedCachedWarning ? "（保存済み情報）" : ""}</p>`;
@@ -355,5 +354,13 @@
   $("refreshButton").addEventListener("click", refreshAll); $("prepareMap").addEventListener("click", prepareMap);
   document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => activatePanel(tab.dataset.panel)));
   document.querySelectorAll(".filter").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; document.querySelectorAll(".filter").forEach((item) => item.classList.toggle("active", item === button)); renderRequests(); }));
-  if (pin()) { $("staffPin").value = pin(); $("nodeId").value = nodeId(); $("setupForm").requestSubmit(); }
+  (async () => {
+    try {
+      state.staff = await api("/api/auth/session", { headers: authHeaders() });
+      $("setup").classList.add("hidden");
+      $("staffNodeLabel").textContent = nodeId();
+      $("settingsNode").textContent = nodeId();
+      await refreshAll(); armRefresh();
+    } catch (_) { /* sign-in dialog remains visible */ }
+  })();
 })();

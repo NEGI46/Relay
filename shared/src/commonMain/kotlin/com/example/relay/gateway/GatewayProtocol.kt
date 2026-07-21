@@ -62,6 +62,7 @@ data class GatewayLanAnnouncement(
     val protocolVersion: Int = 1,
     val gatewayId: String = "",
     val apiPort: Int = 8080,
+    val apiScheme: String = "http",
     val anonymousIngressPath: String = "/api/public/sync/messages",
     val receiptTrust: String = "UNVERIFIED",
 )
@@ -70,4 +71,5 @@ data class DiscoveredGateway(
     val host: String,
     val port: Int,
     val gatewayId: String,
+    val scheme: String = "http",
 )

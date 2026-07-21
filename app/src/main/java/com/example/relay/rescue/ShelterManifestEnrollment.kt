@@ -1,5 +1,6 @@
 package com.example.relay.rescue
 
+import com.example.relay.BuildConfig
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -11,11 +12,17 @@ fun interface ShelterManifestClient {
 }
 
 class HttpShelterManifestClient(
+    /** HTTPS is the release default. Debug/localDev may deliberately opt into local HTTP. */
+    private val scheme: String = "https",
     private val json: Json = Json { ignoreUnknownKeys = false },
 ) : ShelterManifestClient {
     override fun fetch(host: String, port: Int): ShelterPublicKeyManifest {
         require(isValidHost(host) && port in 1..65_535) { "invalid shelter address" }
-        val connection = (URL("http", host, port, "/api/public/rescue/manifest").openConnection() as HttpURLConnection).apply {
+        val normalizedScheme = scheme.trim().lowercase()
+        require(normalizedScheme == "https" || (normalizedScheme == "http" && BuildConfig.ALLOW_HTTP_GATEWAY)) {
+            "cleartext shelter manifest transport is disabled in this build"
+        }
+        val connection = (URL(normalizedScheme, host, port, "/api/public/rescue/manifest").openConnection() as HttpURLConnection).apply {
             connectTimeout = 5_000
             readTimeout = 5_000
             instanceFollowRedirects = false

@@ -21,7 +21,7 @@ function Stop-OrWarnBlocked([string]$Reason) {
     Write-Warning $Reason
 }
 if (-not (Test-Path -LiteralPath $PackageRoot)) { Stop-OrWarnBlocked "Distribution directory is missing; signature verification is BLOCKED: $PackageRoot"; exit 0 }
-$files = Get-ChildItem -LiteralPath $PackageRoot -Recurse -File | Where-Object Extension -in '.apk','.aab','.ipa','.msix','.zip'
+$files = Get-ChildItem -LiteralPath $PackageRoot -Recurse -File | Where-Object Extension -in '.apk','.aab','.ipa','.msix','.msi','.exe','.zip'
 if (-not $files) { Stop-OrWarnBlocked 'No signed distribution candidates found; signature verification is BLOCKED.'; exit 0 }
 $cosignCommand=Get-Command $Cosign -ErrorAction SilentlyContinue
 if (-not $cosignCommand) { Stop-OrWarnBlocked "cosign is not installed; signature verification is BLOCKED: $Cosign"; exit 0 }

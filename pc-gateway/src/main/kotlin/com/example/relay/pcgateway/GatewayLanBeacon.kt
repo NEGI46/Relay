@@ -17,6 +17,8 @@ data class GatewayLanAnnouncement(
     val protocolVersion: Int = GATEWAY_PROTOCOL_VERSION,
     val gatewayId: String,
     val apiPort: Int,
+    /** Public endpoint scheme; production reverse-proxy deployments advertise HTTPS only. */
+    val apiScheme: String = "http",
     val anonymousIngressPath: String = "/api/public/sync/messages",
     val receiptTrust: String = "UNVERIFIED",
 )
@@ -30,7 +32,11 @@ class GatewayLanBeacon(
     private var worker: Thread? = null
 
     fun announcementBytes(): ByteArray = GatewayJson.encodeToString(
-        GatewayLanAnnouncement(gatewayId = config.gatewayId, apiPort = config.port),
+        GatewayLanAnnouncement(
+            gatewayId = config.gatewayId,
+            apiPort = config.publicPort,
+            apiScheme = config.publicScheme,
+        ),
     ).encodeToByteArray()
 
     internal fun broadcastTargets(): Set<InetAddress> {

@@ -1,47 +1,59 @@
-# 実機試験チェックリスト（zero-operation）
+# 実機試験チェックリスト（限定区域・訓練・共同実証）
 
-**正本:** [OPERATION_MODEL.md](OPERATION_MODEL.md)  
-**E2E runbook:** [runbooks/PHONE_TO_PC_PUBLIC_SYNC_E2E.md](runbooks/PHONE_TO_PC_PUBLIC_SYNC_E2E.md)
+**正本:** [FIELD_ACCEPTANCE_TEST.md](runbooks/FIELD_ACCEPTANCE_TEST.md)
+**運用境界:** [MUNICIPAL_PILOT_READINESS.md](readiness/MUNICIPAL_PILOT_READINESS.md)
 
-未実施項目を PASS と書かない。手動の接続承認は **主経路ではない**（診断用の Nearby 桁のみ残る場合あり）。
+未実施は NOT_RUN、外部条件不足は BLOCKED と記録し、PASS にしない。これは119代替や実災害利用を認定する試験ではない。
 
-## A. 単体 Android
+## 0. 記録欄
 
-- [ ] APK インストール・起動・クラッシュなし
-- [ ] 権限許可後、災害通信が自動開始（FGS 通知）
-- [ ] 安否 / 物資 REPORT 作成・保存
-- [ ] force-stop 後の REPORT 復元
-- [ ] 通信停止で Transport 終了
-- [ ] 未実装機能（QR 等）が利用可能に見えない
-- [ ] 地域情報の配信ラベルが Peer / 未認証 / Gateway を区別する
+| 試験日 | 担当 | Android機種/OEM | Android OS | Gateway commit | Broker/TLS構成 | 結果 |
+|---|---|---|---|---|---|---|
+|  |  |  |  |  |  |  |
 
-## B. Nearby 2 台（自動接続）
+## A. Android単体（機種・OSごと）
 
-- [ ] 双方起動後、**承認 UI なし**で接続
-- [ ] A の REPORT が B に保存
-- [ ] Peer 到達表示が「最終配信ではない」こと
-- [ ] 切断・再接続で重複排除
-- [ ] 認証コード入力・双方承認を **要求しない**
+- [ ] APK の出所・署名状態を記録（debug/未署名を正式成果物と呼ばない）
+- [ ] インストール、起動、クラッシュなし
+- [ ] 位置/近距離通信/通知をそれぞれ許可・拒否した場合の安全な表示
+- [ ] 省電力、バッテリー残量低下、画面消灯、force-stop、再起動後の挙動
+- [ ] 安否/物資/合成SOSの作成と端末内保存（実在人物/GPS本文は使わない）
+- [ ] release/pilotRelease が HTTP Gateway を使わず、debug/localDev だけが開発 HTTP を使えること
+- [ ] ログ・画面・共有データに本文、GPS、token、秘密値が出ない
 
-## C. Phone ↔ PC 公開同期
+## B. Nearby / BLE（2台・3台多段）
 
-- [ ] PC Gateway 起動、Health 200
-- [ ] UDP 42888 ビーコン有効
-- [ ] Windows Private + Firewall（TCP API + UDP 発見）
-- [ ] Android が IP/token 入力なしで中継拠点を見つける
-- [ ] REPORT が PC SQLite に UNVERIFIED で保存
-- [ ] Android に「中継拠点へ保存済み（未認証）」
-- [ ] 同一 messageId の重複が 1 件
-- [ ] （推奨）PC 停止中作成 → 復旧後再送
+- [ ] 2台: A の合成 REPORT が B に保存、重複排除、切断/再接続
+- [ ] 3台: A→B→C の多段中継、各段が最終救助/最終配達を主張しない
+- [ ] Bluetooth off/on、Nearby権限拒否、通知拒否、画面消灯、OEM省電力
+- [ ] 端末再起動・アプリ再起動時の待機/再送/失敗表示
+- [ ] 未認証/未検証の経路情報が救助担当や完了を自動変更しない
 
-## D. 任意: Bridge経路のペアリング
+## C. Phone ↔ PC Gateway（プロファイル別）
 
-- [ ] 管理画面でコード生成・承認
-- [ ] 認証同期で `GATEWAY_RECEIVED`（PC保存）
-- [ ] PC管理画面で経路は `AUTHENTICATED_BRIDGE`、内容は `UNVERIFIED`
-- [ ] `GATEWAY_RECEIVED`を公式情報・最終配信と表示しない
-- [ ] reject/revoke 後は同期拒否
+- [ ] production 既定: loopback、匿名 ingress off、UDP discovery off、リモート管理 off
+- [ ] 開発 compatibility: development を明示した場合だけ HTTP/匿名/legacy 管理キーを使用可能
+- [ ] 閉域網: 明示的 closed-network、Windows Private/Firewall、LAN遮断時の安全な失敗
+- [ ] TLS reverse proxy: Relay が loopback のまま、外部 HTTPS 証明書・cookie・アクセス制御が有効
+- [ ] Gateway電源断、DB復旧、鍵ファイル権限不備、鍵期限警告時の fail-closed / warning
+- [ ] VIEWER/OPERATOR/ADMIN、失効session、監査閲覧/CSV、担当開始・状態変更の境界
 
-## E. ログ・プライバシー
+## D. モバイル回線 → HTTPS Broker → Gateway
 
-- [ ] メッセージ本文・token が logcat に出ない
+- [ ] 実モバイル回線から HTTPS Broker upload、Gateway pull、署名Receipt return
+- [ ] Broker 停止、TLS/DNS障害、Gateway停止、各復旧時に偽の成功/完了を表示しない
+- [ ] shelter A 資格情報による shelter B pull / receipt upload が拒否される
+- [ ] 資格情報失効後の拒否、再発行、原文tokenがログ/バックアップに無いこと
+- [ ] Broker health に秘密値・個人情報がないこと
+
+## E. 高負荷・偽SOS・レート制限
+
+- [ ] 合成偽SOS、形式不正、巨大payload、replay、同時要求の拒否/隔離/監査
+- [ ] 事前に決めた高負荷閾値、停止条件、CPU/メモリ/DB容量を記録
+- [ ] 実消防・自治体の連絡先へ送らないことを試験前に確認
+
+## F. 判定
+
+- [ ] すべての FAIL / BLOCKED / NOT_RUN を責任者と共有
+- [ ] 限定区域・訓練の範囲、停止条件、連絡先、復旧/バックアップ、個人情報取扱いを記録
+- [ ] 実災害導入・HA・実機無線検証済み・119代替を主張しない

@@ -18,6 +18,7 @@ private data class AndroidGatewayLanAnnouncement(
     val protocolVersion: Int = 1,
     val gatewayId: String = "",
     val apiPort: Int = 8080,
+    val apiScheme: String = "http",
     val anonymousIngressPath: String = "/api/public/sync/messages",
     val receiptTrust: String = "UNVERIFIED",
 )
@@ -62,11 +63,12 @@ class UdpGatewayDiscovery(
                         if (announcement.service != "relay-pc-gateway" ||
                             announcement.discoveryVersion != 1 ||
                             announcement.apiPort !in 1..65_535 ||
+                            announcement.apiScheme !in setOf("http", "https") ||
                             announcement.gatewayId.isBlank() ||
                             announcement.anonymousIngressPath != "/api/public/sync/messages"
                         ) continue
                         val host = packet.address.hostAddress ?: continue
-                        return@runCatching DiscoveredGateway(host, announcement.apiPort, announcement.gatewayId)
+                        return@runCatching DiscoveredGateway(host, announcement.apiPort, announcement.gatewayId, announcement.apiScheme)
                     }
                     null
                 }

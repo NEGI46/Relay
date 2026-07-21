@@ -12,11 +12,11 @@
       <div class="wordmark" aria-hidden="true">R</div>
       <p class="eyebrow">STAFF ONLY</p>
       <h1 id="setupTitle">Relay 救助拠点を開始</h1>
-      <p>対象地域は <strong>広島県安芸郡府中町</strong> です。運用者共通PINと、このPCの表示名を入力してください。</p>
-      <label>共通PIN（管理者キー）<input id="staffPin" type="password" required autocomplete="current-password"></label>
-      <label>このPCの表示名<input id="nodeId" required maxlength="64" value="fuchu-shelter-pc-1"></label>
+      <p>対象地域は <strong>広島県安芸郡府中町</strong> です。個人の運用者アカウントでサインインしてください。</p>
+      <label>利用者名<input id="staffUsername" type="text" required autocomplete="username" maxlength="64"></label>
+      <label>パスワード<input id="staffPassword" type="password" required autocomplete="current-password"></label>
       <button class="button primary" type="submit">運用画面を開く</button>
-      <p class="fine">初回PINは <code>%USERPROFILE%\.relay\admin.key</code> にあります。PINはこのタブを閉じると消去されます。</p>
+      <p class="fine">パスワードはブラウザへ保存されません。初回管理者はローカルの一回限りbootstrapで作成します。</p>
     </form>
   </div>
 
