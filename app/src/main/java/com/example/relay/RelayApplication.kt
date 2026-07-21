@@ -81,12 +81,29 @@ class RelayApplication : Application() {
     val rescueRepository: RoomRescueEnvelopeRepository by lazy { RoomRescueEnvelopeRepository(database) }
     val rescueShelterKeyStore: RescueShelterKeyStore by lazy { RescueShelterKeyStore(this) }
     val reportSigningKeyStore: ReportSigningKeyStore by lazy { ReportSigningKeyStore() }
-    val uploadSigningKeyStore: UploadSigningKeyStore by lazy { UploadSigningKeyStore() }
+    val uploadSigningKeyStore: UploadSigningKeyStore by lazy { UploadSigningKeyStore(this) }
 
-    /** Broker endpoint from SharedPreferences. Empty = Broker delivery disabled. */
+    /**
+     * Broker endpoint resolution order:
+     * 1. SharedPreferences override (set during provisioning/enrollment)
+     * 2. Build-time resource (broker.xml) for pilot deployments
+     * Empty = Broker delivery disabled. Must be HTTPS.
+     */
     val cloudBrokerEndpoint: String
-        get() = getSharedPreferences("relay_broker_config", MODE_PRIVATE)
-            .getString("broker_endpoint", "").orEmpty()
+        get() {
+            val fromPrefs = getSharedPreferences("relay_broker_config", MODE_PRIVATE)
+                .getString("broker_endpoint", null)
+            val endpoint = fromPrefs ?: getString(R.string.broker_endpoint).trim()
+            // Enforce HTTPS-only; reject invalid endpoints
+            return if (endpoint.isNotBlank() && endpoint.startsWith("https://")) endpoint else ""
+        }
+
+    /** Sets the Broker endpoint (called during provisioning). */
+    fun setCloudBrokerEndpoint(url: String) {
+        require(url.isBlank() || url.startsWith("https://")) { "Broker endpoint must use HTTPS" }
+        getSharedPreferences("relay_broker_config", MODE_PRIVATE)
+            .edit().putString("broker_endpoint", url).apply()
+    }
     val shelterManifestEnrollment: ShelterManifestEnrollment by lazy {
         ShelterManifestEnrollment(HttpShelterManifestClient(), rescueShelterKeyStore)
     }

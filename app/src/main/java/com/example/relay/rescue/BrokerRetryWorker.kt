@@ -2,7 +2,9 @@ package com.example.relay.rescue
 
 import android.content.Context
 import androidx.work.BackoffPolicy
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -75,7 +77,12 @@ class BrokerRetryWorker(
             "broker_retry_${requestId}_$requestVersion"
 
         fun enqueue(context: Context, requestId: String, requestVersion: Int) {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+
             val request = OneTimeWorkRequestBuilder<BrokerRetryWorker>()
+                .setConstraints(constraints)
                 .setInputData(
                     workDataOf(
                         KEY_REQUEST_ID to requestId,

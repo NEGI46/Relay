@@ -5,6 +5,7 @@ import com.example.relay.pcgateway.rescue.RescueIntakeService
 import com.example.relay.pcgateway.rescue.RescueKeyStore
 import com.example.relay.pcgateway.rescue.BrokerPullAgent
 import com.example.relay.pcgateway.rescue.ReceiptOutbox
+import com.example.relay.pcgateway.rescue.SqliteRescuePersistence
 import com.example.relay.pcgateway.rescue.provisioning.BleBridgeEnvironmentStore
 import com.example.relay.pcgateway.rescue.provisioning.SignedShelterManifestStore
 import com.example.relay.rescue.RegionalRootBundle
@@ -72,34 +73,42 @@ fun main() {
         println("LAN discovery is inactive while the HTTP server is bound to loopback")
     }
 
-    // Broker cloud relay: pull agent + receipt outbox (independent of LAN/BLE)
+    // Broker cloud relay: receipt outbox + pull agent (independent of LAN/BLE)
+    // Startup order: Outbox MUST be ready before PullAgent starts (receipts from early pulls must not be lost)
     val brokerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     var brokerHttpClient: HttpClient? = null
     var receiptOutbox: ReceiptOutbox? = null
     if (config.brokerUrl != null) {
         val client = HttpClient(CIO)
         brokerHttpClient = client
+
+        // 1. Create ReceiptOutbox FIRST using the same DB connection as rescue persistence
+        val rescuePersistence = store.rescuePersistence() as SqliteRescuePersistence
+        val outbox = ReceiptOutbox(
+            dbConnection = rescuePersistence.rawConnection,
+            brokerUrl = config.brokerUrl,
+            shelterId = config.shelterId,
+            gatewayId = config.gatewayId,
+            httpClient = client,
+            gatewayApiKey = config.brokerApiKey,
+        )
+        receiptOutbox = outbox
+        receiptOutboxRef = outbox
+        brokerScope.launch { outbox.startFlusher(this) }
+
+        // 2. Start PullAgent AFTER outbox is ready
+        val cursorPath = Path.of(config.dbPath).resolveSibling("broker-pull-cursor.txt")
         val pullAgent = BrokerPullAgent(
             brokerUrl = config.brokerUrl,
             shelterId = config.shelterId,
             gatewayId = config.gatewayId,
             intakeService = rescueIntakeService,
             httpClient = client,
+            gatewayApiKey = config.brokerApiKey,
+            cursorPath = cursorPath,
             pollIntervalMs = config.brokerPollIntervalMs,
         )
         brokerScope.launch { pullAgent.start(this) }
-
-        val outboxDbPath = File(config.dbPath).resolveSibling("receipt-outbox.db").path
-        val outbox = ReceiptOutbox(
-            dbConnection = ReceiptOutbox.open(outboxDbPath),
-            brokerUrl = config.brokerUrl,
-            shelterId = config.shelterId,
-            gatewayId = config.gatewayId,
-            httpClient = client,
-        )
-        receiptOutbox = outbox
-        receiptOutboxRef = outbox
-        brokerScope.launch { outbox.startFlusher(this) }
 
         println("Broker cloud relay: ${config.brokerUrl} (poll every ${config.brokerPollIntervalMs}ms)")
     } else {

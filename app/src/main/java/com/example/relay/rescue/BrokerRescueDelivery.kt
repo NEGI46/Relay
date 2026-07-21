@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import java.net.HttpURLConnection
 import java.net.URL
+import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -29,10 +30,25 @@ data class BrokerUploadResponse(
     val storedAtEpochMillis: Long,
 )
 
-/** Wire model matching Broker's BrokerReceiptBatch. */
+/** Wire model matching Broker's BrokerDeviceRegisterRequest. */
+@Serializable
+data class BrokerDeviceRegisterRequest(
+    val deviceKeyId: String,
+    val publicKeyBase64: String,
+)
+
+/** Wire model matching Broker's BrokerDeviceRegisterResponse. */
+@Serializable
+data class BrokerDeviceRegisterResponse(
+    val deviceKeyId: String,
+    val capabilityToken: String,
+)
+
+/** Wire model matching Broker's BrokerReceiptBatch (with monotonic cursor). */
 @Serializable
 data class BrokerReceiptBatch(
     val receipts: List<SignedShelterReceipt>,
+    val cursor: Long = 0,
 )
 
 /** Result of a Broker delivery attempt. */
@@ -47,14 +63,47 @@ sealed interface BrokerDeliveryResult {
  * Delivers encrypted rescue envelopes to the HTTPS Broker.
  * Does NOT increment hopCount — Broker is not a Store-Carry-Forward hop.
  * Runs independently of Nearby/BLE/LAN paths.
+ *
+ * Security: HTTPS-only, no redirects, endpoint validation.
  */
 class BrokerRescueDelivery(
     private val context: Context,
     private val endpoint: String,
     private val signingKeyStore: UploadSigningKeyStore,
-    private val json: Json = Json { ignoreUnknownKeys = false; encodeDefaults = true },
+    private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
 ) {
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
+
+    init {
+        require(endpoint.isBlank() || endpoint.startsWith("https://")) {
+            "Broker endpoint must use HTTPS (got: $endpoint)"
+        }
+    }
+
+    /**
+     * Registers this device with the Broker and stores the capability token.
+     * Must be called before upload/receipt operations. Idempotent.
+     */
+    suspend fun ensureRegistered(): Boolean = withContext(Dispatchers.IO) {
+        if (endpoint.isBlank()) return@withContext false
+        if (signingKeyStore.capabilityToken != null) return@withContext true
+        if (!isOnline()) return@withContext false
+
+        runCatching {
+            val request = BrokerDeviceRegisterRequest(
+                deviceKeyId = signingKeyStore.keyId,
+                publicKeyBase64 = signingKeyStore.publicKeyBase64(),
+            )
+            val connection = openSecureConnection("$endpoint/v1/devices/register", "POST")
+            connection.outputStream.use { it.write(json.encodeToString(request).toByteArray()) }
+            val status = connection.responseCode
+            if (status !in 200..299) return@withContext false
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            val response = json.decodeFromString<BrokerDeviceRegisterResponse>(body)
+            signingKeyStore.capabilityToken = response.capabilityToken
+            true
+        }.getOrDefault(false)
+    }
 
     /**
      * Attempts to upload the envelope to the Broker.
@@ -63,6 +112,13 @@ class BrokerRescueDelivery(
     suspend fun deliver(envelope: EncryptedRescueEnvelope): BrokerDeliveryResult = withContext(Dispatchers.IO) {
         if (endpoint.isBlank()) return@withContext BrokerDeliveryResult.Disabled
         if (!isOnline()) return@withContext BrokerDeliveryResult.Offline
+
+        // Ensure device is registered before upload
+        if (signingKeyStore.capabilityToken == null) {
+            if (!ensureRegisteredSync()) {
+                return@withContext BrokerDeliveryResult.Failed("registration_failed", retryable = true)
+            }
+        }
 
         val signature = try {
             signingKeyStore.sign(envelope)
@@ -77,13 +133,7 @@ class BrokerRescueDelivery(
         )
 
         runCatching {
-            val connection = (URL("$endpoint/v1/rescue/upload").openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                doOutput = true
-                connectTimeout = 10_000
-                readTimeout = 15_000
-                setRequestProperty("Content-Type", "application/json")
-            }
+            val connection = openSecureConnection("$endpoint/v1/rescue/upload", "POST")
             connection.outputStream.use { it.write(json.encodeToString(request).toByteArray()) }
             val status = connection.responseCode
             val body = (if (status in 200..299) connection.inputStream else connection.errorStream)
@@ -94,6 +144,7 @@ class BrokerRescueDelivery(
                     val response = json.decodeFromString<BrokerUploadResponse>(body)
                     BrokerDeliveryResult.Stored(response)
                 }
+                status == 401 -> BrokerDeliveryResult.Failed("unauthorized", retryable = true)
                 status == 409 -> BrokerDeliveryResult.Failed("collision", retryable = false)
                 status == 429 -> BrokerDeliveryResult.Failed("rate_limited", retryable = true)
                 status in 400..499 -> BrokerDeliveryResult.Failed("client_error_$status", retryable = false)
@@ -105,26 +156,58 @@ class BrokerRescueDelivery(
     }
 
     /**
-     * Polls the Broker for signed shelter receipts addressed to this device.
-     * The deviceKeyId acts as a capability token.
+     * Polls the Broker for signed shelter receipts using the unguessable capability token.
+     * Uses Broker monotonic seq cursor (not device time).
      */
-    suspend fun pollReceipts(sinceEpochMillis: Long = 0): List<SignedShelterReceipt> = withContext(Dispatchers.IO) {
-        if (endpoint.isBlank()) return@withContext emptyList()
-        if (!isOnline()) return@withContext emptyList()
+    suspend fun pollReceipts(sinceSeq: Long = 0): BrokerReceiptBatch = withContext(Dispatchers.IO) {
+        if (endpoint.isBlank()) return@withContext BrokerReceiptBatch(emptyList(), sinceSeq)
+        if (!isOnline()) return@withContext BrokerReceiptBatch(emptyList(), sinceSeq)
+
+        val token = signingKeyStore.capabilityToken
+            ?: return@withContext BrokerReceiptBatch(emptyList(), sinceSeq)
 
         runCatching {
-            val url = "$endpoint/v1/devices/${signingKeyStore.keyId}/receipts?since=$sinceEpochMillis"
-            val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 10_000
-                readTimeout = 15_000
-                setRequestProperty("Accept", "application/json")
-            }
+            val url = "$endpoint/v1/receipts?token=$token&sinceSeq=$sinceSeq"
+            val connection = openSecureConnection(url, "GET")
+            connection.setRequestProperty("Accept", "application/json")
             val status = connection.responseCode
-            if (status !in 200..299) return@withContext emptyList()
+            if (status !in 200..299) return@withContext BrokerReceiptBatch(emptyList(), sinceSeq)
             val body = connection.inputStream.bufferedReader().use { it.readText() }
-            json.decodeFromString<BrokerReceiptBatch>(body).receipts
-        }.getOrDefault(emptyList())
+            json.decodeFromString<BrokerReceiptBatch>(body)
+        }.getOrDefault(BrokerReceiptBatch(emptyList(), sinceSeq))
+    }
+
+    /**
+     * Opens an HTTPS-only connection with redirects disabled.
+     * Rejects non-HTTPS URLs at the connection level.
+     */
+    private fun openSecureConnection(url: String, method: String): HttpsURLConnection {
+        require(url.startsWith("https://")) { "HTTPS required for Broker communication" }
+        val connection = URL(url).openConnection() as HttpsURLConnection
+        connection.requestMethod = method
+        connection.instanceFollowRedirects = false
+        connection.connectTimeout = 10_000
+        connection.readTimeout = 15_000
+        connection.setRequestProperty("Content-Type", "application/json")
+        return connection
+    }
+
+    private fun ensureRegisteredSync(): Boolean {
+        if (signingKeyStore.capabilityToken != null) return true
+        return runCatching {
+            val request = BrokerDeviceRegisterRequest(
+                deviceKeyId = signingKeyStore.keyId,
+                publicKeyBase64 = signingKeyStore.publicKeyBase64(),
+            )
+            val connection = openSecureConnection("$endpoint/v1/devices/register", "POST")
+            connection.outputStream.use { it.write(json.encodeToString(request).toByteArray()) }
+            val status = connection.responseCode
+            if (status !in 200..299) return false
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            val response = json.decodeFromString<BrokerDeviceRegisterResponse>(body)
+            signingKeyStore.capabilityToken = response.capabilityToken
+            true
+        }.getOrDefault(false)
     }
 
     private fun isOnline(): Boolean {

@@ -3,9 +3,13 @@ package com.example.relay.pcgateway.rescue
 import com.example.relay.rescue.EncryptedRescueEnvelope
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
+import io.ktor.client.request.headers
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +27,9 @@ data class BrokerEnvelopeBatch(
  * Pulls encrypted rescue envelopes from the Broker via outbound HTTPS GET.
  * v1: 1 shelterId = 1 active Gateway. No multi-Gateway failover.
  * On Broker unreachable: logs and retries with backoff. LAN/BLE ingress unaffected.
+ *
+ * Cursor is persisted to disk so restarts resume from the last position
+ * (composite cursor: stored_at:envelope_id — no wrap, no skip).
  */
 class BrokerPullAgent(
     private val brokerUrl: String,
@@ -30,10 +37,12 @@ class BrokerPullAgent(
     private val gatewayId: String,
     private val intakeService: RescueIntakeService,
     private val httpClient: HttpClient,
+    private val gatewayApiKey: String? = null,
+    private val cursorPath: Path? = null,
     private val pollIntervalMs: Long = 10_000L,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
-    private var cursor: String? = null
+    private var cursor: String? = loadCursor()
     private var consecutiveFailures = 0
 
     /**
@@ -71,13 +80,17 @@ class BrokerPullAgent(
             cursor?.let { append("&cursor=$it") }
         }
 
-        val response: HttpResponse = httpClient.get(url)
+        val response: HttpResponse = httpClient.get(url) {
+            headers {
+                gatewayApiKey?.let { append(HttpHeaders.Authorization, "Bearer $it") }
+                append("X-Gateway-Id", gatewayId)
+            }
+        }
         if (!response.status.isSuccess()) {
             throw RuntimeException("Broker pull returned ${response.status}")
         }
 
         val batch = json.decodeFromString<BrokerEnvelopeBatch>(response.bodyAsText())
-        cursor = batch.cursor
 
         var ingested = 0
         for (envelope in batch.envelopes) {
@@ -97,6 +110,28 @@ class BrokerPullAgent(
                 }
             }
         }
+
+        // Advance cursor AFTER successful processing (at-least-once: re-pull on crash is safe)
+        if (batch.cursor != null) {
+            cursor = batch.cursor
+            persistCursor()
+        }
         return ingested
+    }
+
+    private fun loadCursor(): String? {
+        if (cursorPath == null) return null
+        return runCatching {
+            Files.readString(cursorPath).trim().takeIf { it.isNotEmpty() }
+        }.getOrNull()
+    }
+
+    private fun persistCursor() {
+        if (cursorPath == null || cursor == null) return
+        runCatching {
+            Files.writeString(cursorPath, cursor!!)
+        }.onFailure {
+            System.err.println("[BrokerPullAgent] failed to persist cursor: ${it.message}")
+        }
     }
 }

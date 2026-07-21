@@ -2,9 +2,14 @@ package com.example.relay.broker
 
 import com.example.relay.rescue.EncryptedRescueEnvelope
 import com.example.relay.rescue.SignedShelterReceipt
+import com.example.relay.rescue.authenticatedHeaderBytes
 import java.io.File
+import java.security.KeyFactory
+import java.security.Signature
+import java.security.spec.X509EncodedKeySpec
 import java.sql.Connection
 import java.sql.DriverManager
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedDeque
@@ -21,9 +26,17 @@ sealed interface BrokerPutResult {
     data class Collision(val existingEnvelopeId: String) : BrokerPutResult
 }
 
+/** Result of device registration. */
+data class DeviceRegistrationResult(
+    val deviceKeyId: String,
+    val capabilityToken: String,
+)
+
 /**
  * SQLite-backed Broker store. Never decrypts envelopes.
  * Provides: dedup, collision isolation, TTL purge, shelter-queue pull, receipt relay.
+ * Composite cursor (stored_at, envelope_id) prevents skip/dup on same-timestamp records.
+ * Receipts use a monotonic seq for reliable device polling.
  */
 class BrokerStore(dbPath: String) : AutoCloseable {
     private val lock = Any()
@@ -56,7 +69,8 @@ class BrokerStore(dbPath: String) : AutoCloseable {
             st.execute(
                 """
                 CREATE TABLE IF NOT EXISTS broker_receipts(
-                  receipt_id TEXT PRIMARY KEY,
+                  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                  receipt_id TEXT NOT NULL UNIQUE,
                   envelope_id TEXT NOT NULL,
                   shelter_id TEXT NOT NULL,
                   receipt_json TEXT NOT NULL,
@@ -91,8 +105,20 @@ class BrokerStore(dbPath: String) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
+            st.execute(
+                """
+                CREATE TABLE IF NOT EXISTS broker_devices(
+                  device_key_id TEXT PRIMARY KEY,
+                  public_key_base64 TEXT NOT NULL,
+                  capability_token TEXT NOT NULL UNIQUE,
+                  registered_at INTEGER NOT NULL
+                )
+                """.trimIndent(),
+            )
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelopes_shelter ON broker_envelopes(shelter_id, expires_at)")
+            st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelopes_cursor ON broker_envelopes(shelter_id, stored_at, envelope_id)")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_receipts_device ON broker_receipts(shelter_id, uploaded_at)")
+            st.execute("CREATE INDEX IF NOT EXISTS idx_broker_receipts_seq ON broker_receipts(seq)")
         }
     }
 
@@ -169,32 +195,126 @@ class BrokerStore(dbPath: String) : AutoCloseable {
         }
     }
 
+    // ─── Device Registration & Capability Tokens ───────────────────────────────────
+
     /**
-     * Pull pending envelopes for a shelter. Cursor is the last seen stored_at timestamp.
-     * Marks pulled envelopes in the ledger.
+     * Registers a device public key and returns a capability token.
+     * Idempotent: re-registration with same key returns existing token.
+     */
+    fun registerDevice(deviceKeyId: String, publicKeyBase64: String, now: Long): DeviceRegistrationResult = synchronized(lock) {
+        // Check if already registered
+        connection.prepareStatement(
+            "SELECT capability_token FROM broker_devices WHERE device_key_id=?",
+        ).use { ps ->
+            ps.setString(1, deviceKeyId)
+            ps.executeQuery().use { rs ->
+                if (rs.next()) {
+                    return DeviceRegistrationResult(deviceKeyId, rs.getString(1))
+                }
+            }
+        }
+        val capabilityToken = UUID.randomUUID().toString().replace("-", "") +
+            UUID.randomUUID().toString().replace("-", "")
+        connection.prepareStatement(
+            "INSERT OR IGNORE INTO broker_devices(device_key_id, public_key_base64, capability_token, registered_at) VALUES(?,?,?,?)",
+        ).use { ps ->
+            ps.setString(1, deviceKeyId)
+            ps.setString(2, publicKeyBase64)
+            ps.setString(3, capabilityToken)
+            ps.setLong(4, now)
+            ps.executeUpdate()
+        }
+        DeviceRegistrationResult(deviceKeyId, capabilityToken)
+    }
+
+    /** Returns the registered public key for a device, or null if unregistered. */
+    fun devicePublicKey(deviceKeyId: String): String? = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT public_key_base64 FROM broker_devices WHERE device_key_id=?",
+        ).use { ps ->
+            ps.setString(1, deviceKeyId)
+            ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+        }
+    }
+
+    /** Resolves a capability token to a device key ID, or null if invalid. */
+    fun deviceForCapabilityToken(token: String): String? = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT device_key_id FROM broker_devices WHERE capability_token=?",
+        ).use { ps ->
+            ps.setString(1, token)
+            ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+        }
+    }
+
+    /**
+     * Verifies the upload signature against the device's registered public key.
+     * Returns true if valid, false otherwise.
+     */
+    fun verifyUploadSignature(
+        deviceKeyId: String,
+        envelope: EncryptedRescueEnvelope,
+        signatureBase64: String,
+    ): Boolean = synchronized(lock) {
+        val publicKeyBase64 = devicePublicKey(deviceKeyId) ?: return false
+        try {
+            val keyBytes = Base64.getDecoder().decode(publicKeyBase64)
+            val keySpec = X509EncodedKeySpec(keyBytes)
+            val publicKey = KeyFactory.getInstance("EC").generatePublic(keySpec)
+            val dataToVerify = envelope.authenticatedHeaderBytes() +
+                envelope.ciphertextSha256Hex.encodeToByteArray()
+            val sig = Signature.getInstance("SHA256withECDSA")
+            sig.initVerify(publicKey)
+            sig.update(dataToVerify)
+            sig.verify(Base64.getDecoder().decode(signatureBase64))
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Pull pending envelopes for a shelter using a composite cursor (stored_at, envelope_id).
+     * This prevents skipping records with identical timestamps and never wraps to the start.
+     * Cursor format: "{stored_at}:{envelope_id}" (opaque to callers).
      */
     fun pendingForShelter(
         shelterId: String,
         now: Long,
-        cursor: Long?,
+        cursor: String?,
         limit: Int,
         gatewayId: String,
     ): BrokerEnvelopeBatch = synchronized(lock) {
         val envelopes = mutableListOf<EncryptedRescueEnvelope>()
-        var lastStoredAt = cursor ?: 0L
+        var lastStoredAt = 0L
+        var lastEnvelopeId = ""
+
+        // Parse composite cursor
+        if (cursor != null) {
+            val parts = cursor.split(":", limit = 2)
+            if (parts.size == 2) {
+                lastStoredAt = parts[0].toLongOrNull() ?: 0L
+                lastEnvelopeId = parts[1]
+            }
+        }
+
+        // Composite cursor query: (stored_at, envelope_id) > (cursorStoredAt, cursorEnvelopeId)
         connection.prepareStatement(
-            """SELECT envelope_json, stored_at FROM broker_envelopes
-               WHERE shelter_id=? AND expires_at>? AND stored_at>?
-               ORDER BY stored_at ASC LIMIT ?""",
+            """SELECT envelope_json, stored_at, envelope_id FROM broker_envelopes
+               WHERE shelter_id=? AND expires_at>?
+               AND (stored_at > ? OR (stored_at = ? AND envelope_id > ?))
+               ORDER BY stored_at ASC, envelope_id ASC LIMIT ?""",
         ).use { ps ->
             ps.setString(1, shelterId)
             ps.setLong(2, now)
             ps.setLong(3, lastStoredAt)
-            ps.setInt(4, limit)
+            ps.setLong(4, lastStoredAt)
+            ps.setString(5, lastEnvelopeId)
+            ps.setInt(6, limit)
             ps.executeQuery().use { rs ->
                 while (rs.next()) {
                     envelopes.add(brokerJson.decodeFromString(rs.getString(1)))
                     lastStoredAt = rs.getLong(2)
+                    lastEnvelopeId = rs.getString(3)
                 }
             }
         }
@@ -212,11 +332,16 @@ class BrokerStore(dbPath: String) : AutoCloseable {
                 ps.executeBatch()
             }
         }
-        val nextCursor = if (envelopes.size == limit) lastStoredAt.toString() else null
+        // Always return cursor if we got results (even partial page) to avoid re-scanning
+        val nextCursor = if (envelopes.isNotEmpty()) "$lastStoredAt:$lastEnvelopeId" else null
         BrokerEnvelopeBatch(envelopes, nextCursor)
     }
 
-    /** Store a signed receipt from the Gateway for later device pickup. Idempotent by receipt_id. */
+    /**
+     * Store a signed receipt from the Gateway for later device pickup.
+     * Idempotent by receipt_id. Returns true if stored (new), false if duplicate.
+     * Throws if the envelope is unknown (save failure → caller must NOT return success).
+     */
     fun saveReceipt(shelterId: String, receipt: SignedShelterReceipt, now: Long): Boolean = synchronized(lock) {
         // Verify the receipt's envelope exists and belongs to this shelter
         connection.prepareStatement(
@@ -224,7 +349,9 @@ class BrokerStore(dbPath: String) : AutoCloseable {
         ).use { ps ->
             ps.setString(1, receipt.receipt.envelopeId)
             ps.setString(2, shelterId)
-            ps.executeQuery().use { rs -> if (!rs.next()) return false }
+            ps.executeQuery().use { rs ->
+                if (!rs.next()) throw IllegalStateException("unknown_envelope:${receipt.receipt.envelopeId}")
+            }
         }
         connection.prepareStatement(
             "INSERT OR IGNORE INTO broker_receipts(receipt_id, envelope_id, shelter_id, receipt_json, uploaded_at) VALUES(?,?,?,?,?)",
@@ -239,22 +366,33 @@ class BrokerStore(dbPath: String) : AutoCloseable {
     }
 
     /**
-     * Retrieve receipts for a device. The deviceKeyId acts as a capability token:
-     * only receipts for envelopes uploaded by that device key are returned.
+     * Retrieve receipts for a device using Broker-assigned monotonic seq cursor.
+     * The capabilityToken resolves to a deviceKeyId; only that device's receipts are returned.
+     * Returns receipts with seq > sinceSeq, plus the max seq seen (for next cursor).
      */
-    fun receiptsForDevice(deviceKeyId: String, since: Long): List<SignedShelterReceipt> = synchronized(lock) {
-        connection.prepareStatement(
-            """SELECT r.receipt_json FROM broker_receipts r
+    fun receiptsForDevice(capabilityToken: String, sinceSeq: Long): BrokerReceiptBatch = synchronized(lock) {
+        val deviceKeyId = deviceForCapabilityToken(capabilityToken)
+            ?: return BrokerReceiptBatch(emptyList(), sinceSeq)
+        var maxSeq = sinceSeq
+        val receipts = connection.prepareStatement(
+            """SELECT r.receipt_json, r.seq FROM broker_receipts r
                JOIN broker_envelopes e ON e.envelope_id = r.envelope_id
-               WHERE e.device_key_id=? AND r.uploaded_at>?
-               ORDER BY r.uploaded_at ASC LIMIT 100""",
+               WHERE e.device_key_id=? AND r.seq>?
+               ORDER BY r.seq ASC LIMIT 100""",
         ).use { ps ->
             ps.setString(1, deviceKeyId)
-            ps.setLong(2, since)
+            ps.setLong(2, sinceSeq)
             ps.executeQuery().use { rs ->
-                buildList { while (rs.next()) add(brokerJson.decodeFromString(rs.getString(1))) }
+                buildList {
+                    while (rs.next()) {
+                        add(brokerJson.decodeFromString<SignedShelterReceipt>(rs.getString(1)))
+                        val seq = rs.getLong(2)
+                        if (seq > maxSeq) maxSeq = seq
+                    }
+                }
             }
         }
+        BrokerReceiptBatch(receipts, maxSeq)
     }
 
     /** Purge expired envelopes and their cascading receipts/ledger entries. */

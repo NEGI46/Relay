@@ -97,29 +97,14 @@ class ReceiptOutboxTest {
     }
 
     private fun createOutbox(): ReceiptOutbox {
-        // Create table manually since we can't use HttpClient in unit test easily
-        connection.createStatement().use { stmt ->
-            stmt.executeUpdate(
-                """CREATE TABLE IF NOT EXISTS receipt_outbox (
-                    receipt_id TEXT NOT NULL PRIMARY KEY,
-                    envelope_id TEXT NOT NULL,
-                    shelter_id TEXT NOT NULL,
-                    receipt_json TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'PENDING',
-                    created_at INTEGER NOT NULL,
-                    sent_at INTEGER,
-                    retry_count INTEGER NOT NULL DEFAULT 0
-                )""",
-            )
-        }
-        // Return a minimal outbox that shares the connection
-        // We test the SQL operations directly rather than the HTTP flush
+        // ReceiptOutbox creates its own table in init{} using the shared connection
         return ReceiptOutbox(
             dbConnection = connection,
             brokerUrl = "https://broker.test",
             shelterId = "shelter-1",
             gatewayId = "gateway-1",
             httpClient = io.ktor.client.HttpClient(io.ktor.client.engine.cio.CIO),
+            gatewayApiKey = "test-api-key",
         )
     }
 
@@ -131,7 +116,7 @@ class ReceiptOutboxTest {
                 envelopeId = envelopeId,
                 requestId = "request-1",
                 requestVersion = 1,
-                ciphertextSha256Hex = "abc123",
+                ciphertextSha256Hex = "a".repeat(64),
                 shelterId = "shelter-1",
                 receivedAtEpochMillis = System.currentTimeMillis(),
                 status = ShelterReceiptStatus.STORED,

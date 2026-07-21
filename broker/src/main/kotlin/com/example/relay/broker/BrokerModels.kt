@@ -8,7 +8,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class BrokerUploadRequest(
     val envelope: EncryptedRescueEnvelope,
-    /** Android Keystore install key identifier. Proves upload origin but is NOT identity-verified. */
+    /** Per-device unique key identifier (UUID generated on first launch). */
     val deviceKeyId: String,
     /** ECDSA-P256 signature over envelope authenticatedHeaderBytes + ciphertextSha256Hex. */
     val uploadSignatureBase64: String,
@@ -23,11 +23,25 @@ data class BrokerUploadResponse(
     val storedAtEpochMillis: Long,
 )
 
-/** Batch of pending envelopes for a Gateway to pull. Cursor-based pagination. */
+/** Device registration request. */
+@Serializable
+data class BrokerDeviceRegisterRequest(
+    val deviceKeyId: String,
+    val publicKeyBase64: String,
+)
+
+/** Device registration response with unguessable capability token for receipt polling. */
+@Serializable
+data class BrokerDeviceRegisterResponse(
+    val deviceKeyId: String,
+    val capabilityToken: String,
+)
+
+/** Batch of pending envelopes for a Gateway to pull. Composite cursor pagination. */
 @Serializable
 data class BrokerEnvelopeBatch(
     val envelopes: List<EncryptedRescueEnvelope>,
-    /** Opaque cursor for the next page. Null when no more results. */
+    /** Opaque composite cursor (stored_at:envelope_id). Null when no results. */
     val cursor: String? = null,
 )
 
@@ -44,10 +58,12 @@ data class BrokerReceiptUploadResponse(
     val reason: String? = null,
 )
 
-/** Receipts available for a device to poll. Capability token is the deviceKeyId path parameter. */
+/** Receipts available for a device to poll. Uses Broker monotonic seq cursor. */
 @Serializable
 data class BrokerReceiptBatch(
     val receipts: List<SignedShelterReceipt>,
+    /** Monotonic cursor: pass as sinceSeq on next poll. */
+    val cursor: Long = 0,
 )
 
 @Serializable
@@ -55,7 +71,7 @@ data class BrokerHealthResponse(
     val status: String = "ok",
     val pendingEnvelopes: Int,
     val pendingReceipts: Int,
-    val version: String = "1.0.0",
+    val version: String = "1.1.0",
 )
 
 /** Internal ledger status for Broker-side tracking. Separate from shelter receipt statuses. */

@@ -8,6 +8,7 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.request.contentLength
 import io.ktor.server.request.receive
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
@@ -24,8 +25,14 @@ private const val MAX_PULL_LIMIT = 100
 /** Default pull batch size. */
 private const val DEFAULT_PULL_LIMIT = 50
 
+/**
+ * Broker HTTP module.
+ * @param gatewayApiKey Pre-shared key for Gateway authentication (Bearer token).
+ *        If null, gateway endpoints are open (development only).
+ */
 fun Application.brokerModule(
     store: BrokerStore,
+    gatewayApiKey: String? = System.getenv("RELAY_BROKER_GATEWAY_API_KEY")?.takeIf { it.isNotBlank() },
     uploadRateLimiter: SlidingWindowRateLimiter = SlidingWindowRateLimiter(maxRequests = 30, windowMillis = 60_000),
     pullRateLimiter: SlidingWindowRateLimiter = SlidingWindowRateLimiter(maxRequests = 120, windowMillis = 60_000),
 ) {
@@ -33,11 +40,49 @@ fun Application.brokerModule(
 
     routing {
         /**
+         * POST /v1/devices/register
+         * Android registers its public key and receives an unguessable capability token.
+         * Idempotent: re-registration returns existing token.
+         */
+        post("/v1/devices/register") {
+            val request = try {
+                call.receive<BrokerDeviceRegisterRequest>()
+            } catch (_: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "malformed_request"))
+                return@post
+            }
+            if (request.deviceKeyId.isBlank() || request.deviceKeyId.length > 128) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_device_key_id"))
+                return@post
+            }
+            if (request.publicKeyBase64.isBlank() || request.publicKeyBase64.length > 1024) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_public_key"))
+                return@post
+            }
+            if (!uploadRateLimiter.allow("register:${request.deviceKeyId}")) {
+                call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
+                return@post
+            }
+            val result = store.registerDevice(request.deviceKeyId, request.publicKeyBase64, System.currentTimeMillis())
+            call.respond(HttpStatusCode.OK, BrokerDeviceRegisterResponse(
+                deviceKeyId = result.deviceKeyId,
+                capabilityToken = result.capabilityToken,
+            ))
+        }
+
+        /**
          * POST /v1/rescue/upload
-         * Android uploads an encrypted envelope. Broker validates structure, deduplicates,
-         * and stores. Never decrypts. hopCount is NOT modified.
+         * Android uploads an encrypted envelope. Broker validates structure, verifies
+         * upload signature against registered device key, deduplicates, and stores.
+         * Never decrypts. hopCount is NOT modified.
          */
         post("/v1/rescue/upload") {
+            // Size limit BEFORE reading body (check Content-Length header first)
+            val contentLength = call.request.contentLength()
+            if (contentLength != null && contentLength > MAX_UPLOAD_BODY_BYTES) {
+                call.respond(HttpStatusCode.PayloadTooLarge, mapOf("reason" to "envelope_too_large"))
+                return@post
+            }
             val rawBody = call.receiveText()
             if (rawBody.toByteArray().size > MAX_UPLOAD_BODY_BYTES) {
                 call.respond(HttpStatusCode.PayloadTooLarge, mapOf("reason" to "envelope_too_large"))
@@ -63,6 +108,16 @@ fun Application.brokerModule(
             // Rate limit per device key
             if (!uploadRateLimiter.allow(request.deviceKeyId)) {
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
+                return@post
+            }
+            // Verify device is registered
+            if (store.devicePublicKey(request.deviceKeyId) == null) {
+                call.respond(HttpStatusCode.Unauthorized, mapOf("reason" to "device_not_registered"))
+                return@post
+            }
+            // Verify upload signature against registered public key
+            if (!store.verifyUploadSignature(request.deviceKeyId, envelope, request.uploadSignatureBase64)) {
+                call.respond(HttpStatusCode.Unauthorized, mapOf("reason" to "invalid_signature"))
                 return@post
             }
             // Reject expired envelopes
@@ -92,10 +147,11 @@ fun Application.brokerModule(
 
         /**
          * GET /v1/gateways/{shelterId}/pull?cursor=&limit=
-         * PC Gateway pulls pending envelopes for its shelter. Outbound from Gateway perspective.
-         * At-least-once: pull does not delete; Gateway acknowledges via receipt upload.
+         * PC Gateway pulls pending envelopes for its shelter. Requires Bearer auth.
+         * Composite cursor (stored_at:envelope_id) prevents skip/dup.
          */
         get("/v1/gateways/{shelterId}/pull") {
+            if (!authenticateGateway(gatewayApiKey)) return@get
             val shelterId = call.parameters["shelterId"]
             if (shelterId.isNullOrBlank() || shelterId.length > 128) {
                 call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_shelter_id"))
@@ -105,20 +161,23 @@ fun Application.brokerModule(
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
                 return@get
             }
-            val cursor = call.request.queryParameters["cursor"]?.toLongOrNull()
+            val cursor = call.request.queryParameters["cursor"]
             val limit = (call.request.queryParameters["limit"]?.toIntOrNull() ?: DEFAULT_PULL_LIMIT)
                 .coerceIn(1, MAX_PULL_LIMIT)
             val now = System.currentTimeMillis()
-            val batch = store.pendingForShelter(shelterId, now, cursor, limit, gatewayId = shelterId)
+            val gatewayId = call.request.headers["X-Gateway-Id"] ?: shelterId
+            val batch = store.pendingForShelter(shelterId, now, cursor, limit, gatewayId = gatewayId)
             call.respond(HttpStatusCode.OK, batch)
         }
 
         /**
          * POST /v1/gateways/{shelterId}/receipts
          * PC Gateway uploads a signed shelter receipt for relay back to the device.
-         * Idempotent by receipt_id.
+         * Requires Bearer auth. Idempotent by receipt_id.
+         * Returns 202 only when receipt is actually saved; 500 on save failure.
          */
         post("/v1/gateways/{shelterId}/receipts") {
+            if (!authenticateGateway(gatewayApiKey)) return@post
             val shelterId = call.parameters["shelterId"]
             if (shelterId.isNullOrBlank() || shelterId.length > 128) {
                 call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_shelter_id"))
@@ -145,31 +204,39 @@ fun Application.brokerModule(
                 return@post
             }
             val now = System.currentTimeMillis()
-            val saved = store.saveReceipt(shelterId, upload.receipt, now)
+            val saved = try {
+                store.saveReceipt(shelterId, upload.receipt, now)
+            } catch (e: IllegalStateException) {
+                // Unknown envelope — Broker cannot store this receipt
+                call.respond(HttpStatusCode.UnprocessableEntity, mapOf(
+                    "reason" to (e.message ?: "save_failed"),
+                ))
+                return@post
+            }
             call.respond(HttpStatusCode.Accepted, BrokerReceiptUploadResponse(
                 accepted = true,
-                reason = if (saved) null else "duplicate_or_unknown_envelope",
+                reason = if (saved) null else "duplicate",
             ))
         }
 
         /**
-         * GET /v1/devices/{deviceKeyId}/receipts?since=
-         * Android polls for signed shelter receipts. deviceKeyId is the capability token:
-         * only receipts for envelopes uploaded by this key are returned.
+         * GET /v1/receipts?token=&sinceSeq=
+         * Android polls for signed shelter receipts using an unguessable capability token.
+         * Uses Broker monotonic seq cursor (not device time).
          */
-        get("/v1/devices/{deviceKeyId}/receipts") {
-            val deviceKeyId = call.parameters["deviceKeyId"]
-            if (deviceKeyId.isNullOrBlank() || deviceKeyId.length > 128) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_device_key_id"))
+        get("/v1/receipts") {
+            val token = call.request.queryParameters["token"]
+            if (token.isNullOrBlank() || token.length > 128) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_token"))
                 return@get
             }
-            if (!pullRateLimiter.allow("device:$deviceKeyId")) {
+            if (!pullRateLimiter.allow("receipts:$token")) {
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
                 return@get
             }
-            val since = call.request.queryParameters["since"]?.toLongOrNull() ?: 0L
-            val receipts = store.receiptsForDevice(deviceKeyId, since)
-            call.respond(HttpStatusCode.OK, BrokerReceiptBatch(receipts))
+            val sinceSeq = call.request.queryParameters["sinceSeq"]?.toLongOrNull() ?: 0L
+            val batch = store.receiptsForDevice(token, sinceSeq)
+            call.respond(HttpStatusCode.OK, batch)
         }
 
         /** GET /v1/health — operational status. */
@@ -181,4 +248,18 @@ fun Application.brokerModule(
             ))
         }
     }
+}
+
+/**
+ * Validates the Gateway Bearer token. Returns true if authenticated.
+ * If gatewayApiKey is null (development mode), all requests pass.
+ */
+private suspend fun io.ktor.server.routing.RoutingContext.authenticateGateway(gatewayApiKey: String?): Boolean {
+    if (gatewayApiKey == null) return true // development mode
+    val authHeader = call.request.headers["Authorization"]
+    if (authHeader != "Bearer $gatewayApiKey") {
+        call.respond(HttpStatusCode.Unauthorized, mapOf("reason" to "invalid_gateway_credentials"))
+        return false
+    }
+    return true
 }

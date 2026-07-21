@@ -62,6 +62,12 @@ class SqliteRescuePersistence(
     private val lock = Any()
     private val connection: Connection
 
+    /**
+     * Exposes the raw JDBC connection for co-located tables (e.g., receipt_outbox)
+     * that must participate in the same transaction as rescue state changes.
+     */
+    val rawConnection: Connection get() = connection
+
     init {
         File(dbPath).parentFile?.mkdirs()
         connection = DriverManager.getConnection("jdbc:sqlite:$dbPath")

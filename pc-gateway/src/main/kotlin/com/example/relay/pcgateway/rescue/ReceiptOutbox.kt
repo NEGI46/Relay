@@ -2,14 +2,16 @@ package com.example.relay.pcgateway.rescue
 
 import com.example.relay.rescue.SignedShelterReceipt
 import io.ktor.client.HttpClient
+import io.ktor.client.request.headers
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
+import io.ktor.http.ContentType.Application.Json
+import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import java.sql.Connection
-import java.sql.DriverManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CoroutineScope
@@ -26,9 +28,15 @@ data class BrokerReceiptUpload(
 
 /**
  * Transactional Receipt Outbox for the PC Gateway.
+ * Uses the SAME database connection as SqliteRescuePersistence so that
+ * receipt enqueue is atomic with rescue state changes (same transaction).
+ *
  * Ensures signed receipts (STORED/ACCEPTED/RESPONDING/COMPLETED/REJECTED) are
  * reliably delivered to the Broker via at-least-once semantics.
  * Broker deduplicates by receipt_id (idempotent).
+ *
+ * The flusher only marks SENT after receiving 2xx from Broker.
+ * Non-2xx (including 422 unknown_envelope) keeps the entry PENDING for retry.
  */
 class ReceiptOutbox(
     private val dbConnection: Connection,
@@ -36,6 +44,7 @@ class ReceiptOutbox(
     private val shelterId: String,
     private val gatewayId: String,
     private val httpClient: HttpClient,
+    private val gatewayApiKey: String? = null,
     private val flushIntervalMs: Long = 5_000L,
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
 ) {
@@ -62,7 +71,8 @@ class ReceiptOutbox(
 
     /**
      * Enqueues a signed receipt for delivery to the Broker.
-     * Called within the same transaction as the status change.
+     * Called within the same transaction as the status change (via onReceiptIssued callback
+     * inside persistence.transaction{}), ensuring atomicity.
      */
     fun enqueue(receipt: SignedShelterReceipt) {
         dbConnection.prepareStatement(
@@ -108,8 +118,12 @@ class ReceiptOutbox(
             )
             try {
                 val response: HttpResponse = httpClient.post("$brokerUrl/v1/gateways/$shelterId/receipts") {
-                    contentType(ContentType.Application.Json)
+                    contentType(Json)
                     setBody(json.encodeToString(upload))
+                    headers {
+                        gatewayApiKey?.let { append(HttpHeaders.Authorization, "Bearer $it") }
+                        append("X-Gateway-Id", gatewayId)
+                    }
                 }
                 if (response.status.isSuccess()) {
                     markSent(receiptId)
@@ -154,16 +168,6 @@ class ReceiptOutbox(
         ).use { stmt ->
             stmt.setString(1, receiptId)
             stmt.executeUpdate()
-        }
-    }
-
-    companion object {
-        /** Opens or creates the outbox database connection. */
-        fun open(dbPath: String): Connection {
-            val url = "jdbc:sqlite:$dbPath"
-            return DriverManager.getConnection(url).apply {
-                autoCommit = true
-            }
         }
     }
 }

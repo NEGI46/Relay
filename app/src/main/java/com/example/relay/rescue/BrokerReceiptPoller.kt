@@ -8,7 +8,8 @@ import kotlinx.coroutines.CoroutineScope
 
 /**
  * Periodically polls the Broker for signed shelter receipts addressed to this device.
- * The deviceKeyId acts as a capability token (not identity-verified).
+ * Uses an unguessable capability token (not the public deviceKeyId).
+ * Uses Broker-assigned monotonic seq cursor (not device time) for reliable incremental polling.
  * Only SHELTER_* states come from signed receipts via applyReceipt();
  * BROKER_STORED is a separate ledger flag and does NOT advance shelter status.
  */
@@ -16,7 +17,8 @@ class BrokerReceiptPoller(
     private val context: Context,
     private val pollIntervalMs: Long = 30_000L,
 ) {
-    private var lastPollEpochMillis: Long = 0L
+    /** Broker monotonic seq cursor. Persisted via SharedPreferences for restart resilience. */
+    private var lastSeq: Long = 0L
 
     /**
      * Starts the polling loop. Call from a coroutine scope.
@@ -32,6 +34,10 @@ class BrokerReceiptPoller(
             signingKeyStore = app.uploadSigningKeyStore,
         )
 
+        // Load persisted cursor
+        lastSeq = context.getSharedPreferences("relay_broker_poller", Context.MODE_PRIVATE)
+            .getLong("last_seq", 0L)
+
         while (scope.isActive) {
             pollOnce(delivery, app)
             delay(pollIntervalMs)
@@ -40,12 +46,12 @@ class BrokerReceiptPoller(
 
     /** Single poll iteration. Exposed for testing. */
     suspend fun pollOnce(delivery: BrokerRescueDelivery, app: RelayApplication) {
-        val receipts = delivery.pollReceipts(sinceEpochMillis = lastPollEpochMillis)
-        if (receipts.isEmpty()) return
+        val batch = delivery.pollReceipts(sinceSeq = lastSeq)
+        if (batch.receipts.isEmpty()) return
 
         val keys = app.rescueShelterKeyStore.load() ?: return
 
-        for (receipt in receipts) {
+        for (receipt in batch.receipts) {
             val result = app.rescueRepository.applyReceipt(
                 RescueRequestKey(receipt.receipt.requestId, receipt.receipt.requestVersion),
                 receipt,
@@ -54,10 +60,17 @@ class BrokerReceiptPoller(
             if (result == ReceiptApplicationResult.APPLIED) {
                 app.rescueNearbyCoordinator?.onLocalStoreChanged()
             }
-            // Track the latest receipt timestamp for incremental polling
-            if (receipt.receipt.receivedAtEpochMillis > lastPollEpochMillis) {
-                lastPollEpochMillis = receipt.receipt.receivedAtEpochMillis
-            }
         }
+
+        // Advance cursor to Broker's monotonic seq (not device time)
+        if (batch.cursor > lastSeq) {
+            lastSeq = batch.cursor
+            persistCursor()
+        }
+    }
+
+    private fun persistCursor() {
+        context.getSharedPreferences("relay_broker_poller", Context.MODE_PRIVATE)
+            .edit().putLong("last_seq", lastSeq).apply()
     }
 }

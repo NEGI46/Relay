@@ -69,7 +69,10 @@ data class GatewayConfig(
     val lanDiscoveryPort: Int = (System.getenv("RELAY_GATEWAY_DISCOVERY_PORT") ?: "42888").toIntOrNull() ?: 42888,
     val lanDiscoveryIntervalMs: Long = 5_000,
     /** Broker URL for cloud relay. Empty/null = Broker pull disabled. */
-    val brokerUrl: String? = System.getenv("RELAY_BROKER_URL")?.trim()?.takeIf { it.isNotEmpty() },
+    val brokerUrl: String? = System.getenv("RELAY_BROKER_URL")?.trim()?.takeIf { it.isNotEmpty() }?.also {
+        require(it.startsWith("https://")) { "RELAY_BROKER_URL must use HTTPS (got: $it)" }
+    },
+    val brokerApiKey: String? = System.getenv("RELAY_BROKER_API_KEY")?.trim()?.takeIf { it.isNotEmpty() },
     val brokerPollIntervalMs: Long = (System.getenv("RELAY_BROKER_POLL_INTERVAL_MS") ?: "10000").toLongOrNull() ?: 10_000L,
 )
 

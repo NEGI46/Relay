@@ -1,26 +1,50 @@
 package com.example.relay.rescue
 
+import android.content.Context
+import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
-import java.security.PublicKey
 import java.security.Signature
 import java.util.Base64
+import java.util.UUID
 
 /**
  * Android Keystore-backed ECDSA P-256 key for signing Broker uploads.
- * The key proves upload origin but is NOT identity-verified by the Broker.
+ * Each device generates a unique keyId (UUID) on first launch.
+ * The key proves upload origin; the Broker verifies signatures against the registered public key.
  */
-class UploadSigningKeyStore {
+class UploadSigningKeyStore(context: Context) {
     private val keyStore: KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("relay_device_identity", Context.MODE_PRIVATE)
 
-    val keyId: String
-        get() = KEY_ALIAS
+    /**
+     * Per-device unique key identifier. Generated once on first launch and persisted.
+     * This is NOT the Keystore alias (which is constant) — it's a random UUID.
+     */
+    val keyId: String by lazy {
+        prefs.getString(KEY_DEVICE_ID, null) ?: run {
+            val id = UUID.randomUUID().toString()
+            prefs.edit().putString(KEY_DEVICE_ID, id).apply()
+            id
+        }
+    }
 
-    /** Returns the public key for registration with the Broker (informational only). */
+    /**
+     * Capability token issued by the Broker on device registration.
+     * Used for receipt polling instead of the public deviceKeyId.
+     * Persisted across restarts.
+     */
+    var capabilityToken: String?
+        get() = prefs.getString(KEY_CAPABILITY_TOKEN, null)
+        set(value) = prefs.edit().putString(KEY_CAPABILITY_TOKEN, value).apply()
+
+    /** Returns the public key for registration with the Broker. */
     fun publicKeyBase64(): String {
+        ensureKeyExists()
         val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry
             ?: return ""
         val publicKey = entry.certificate.publicKey
@@ -38,6 +62,11 @@ class UploadSigningKeyStore {
         signature.initSign(privateKey)
         signature.update(dataToSign)
         return Base64.getEncoder().encodeToString(signature.sign())
+    }
+
+    private fun ensureKeyExists() {
+        if (keyStore.containsAlias(KEY_ALIAS)) return
+        getOrCreatePrivateKey()
     }
 
     private fun getOrCreatePrivateKey(): PrivateKey {
@@ -65,5 +94,7 @@ class UploadSigningKeyStore {
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val KEY_ALIAS = "relay_broker_upload"
         private const val SIGNATURE_ALGORITHM = "SHA256withECDSA"
+        private const val KEY_DEVICE_ID = "device_key_id"
+        private const val KEY_CAPABILITY_TOKEN = "capability_token"
     }
 }
