@@ -28,6 +28,11 @@ class PilotSecurityContractTest(unittest.TestCase):
         self.assertIn('android:usesCleartextTraffic="false"', manifest)
         self.assertIn('cleartextTrafficPermitted="false"', policy)
         self.assertIn('android:usesCleartextTraffic="true"', debug_manifest)
+        self.assertIn('xmlns:tools="http://schemas.android.com/tools"', debug_manifest)
+        self.assertIn(
+            'tools:replace="android:networkSecurityConfig,android:usesCleartextTraffic"',
+            debug_manifest,
+        )
         self.assertIn('create("pilotRelease")', build)
         self.assertGreaterEqual(build.count('buildConfigField("boolean", "ALLOW_HTTP_GATEWAY", "false")'), 2)
 
@@ -85,6 +90,20 @@ class PilotSecurityContractTest(unittest.TestCase):
         for name, content in (("release", workflow), ("ci", ci)):
             mutable = re.findall(r"uses:\s+[^\s@]+@(?:v\d+|main|master)\b", content)
             self.assertEqual([], mutable, f"{name} workflow has mutable action refs: {mutable}")
+
+        installer = read("scripts/install-security-tools.sh")
+        for required in (
+            'actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16',
+            "go-version: '1.24.4'",
+            'github.com/anchore/syft/cmd/syft',
+            'v1.20.0',
+            'github.com/google/osv-scanner/v2/cmd/osv-scanner',
+            'v2.0.3',
+            'github.com/anchore/grype/cmd/grype',
+            'v0.80.0',
+            "GOSUMDB='sum.golang.org'",
+        ):
+            self.assertIn(required, f"{workflow}\n{ci}\n{installer}")
 
 
 if __name__ == "__main__":

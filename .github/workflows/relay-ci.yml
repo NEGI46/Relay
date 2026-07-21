@@ -130,9 +130,18 @@ jobs:
   deps-scan:
     name: Dependency vulnerability scan
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # Pin the toolchain action and scanner source versions. The bootstrap refuses an
+      # unverified Go proxy/checksum configuration and fails rather than emitting PASS.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.24.4'
+          cache: false
+      - name: Install pinned dependency-security scanners
+        shell: bash
+        run: bash ./scripts/install-security-tools.sh "$RUNNER_TEMP/relay-security-tools"
       - shell: pwsh
         run: ./scripts/run-syft.ps1 -SourcePath . -OutputPath artifacts/syft-sbom.json -SpdxOutputPath artifacts/syft-sbom.spdx.json -Mode $env:SECURITY_MODE
         continue-on-error: true
