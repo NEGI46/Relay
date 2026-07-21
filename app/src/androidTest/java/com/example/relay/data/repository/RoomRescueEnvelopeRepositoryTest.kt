@@ -17,7 +17,6 @@ import com.example.relay.rescue.RescueUrgency
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -75,18 +74,11 @@ class RoomRescueEnvelopeRepositoryTest {
         database = null
         val reopenedRepository = RoomRescueEnvelopeRepository(openDatabase())
 
-        val restored = reopenedRepository.get(key)
-        assertNotNull(restored)
-        assertEquals(
-            created.record.envelope,
-            restored?.envelope ?: created.record.envelope
-        )
+        val restored = requireNotNull(reopenedRepository.get(key))
+        assertEquals(created.record.envelope, restored.envelope)
         assertEquals(created.record.state, restored.state)
         assertEquals(1, reopenedRepository.all().size)
-        val decrypted = RescueCryptography.decrypt(
-            restored?.envelope ?: created.record.envelope,
-            recipient.privateKey
-        )
+        val decrypted = RescueCryptography.decrypt(restored.envelope, recipient.privateKey)
         assertEquals(PRIVATE_NOTE, decrypted.freeText)
         assertTrue(decrypted.injured)
     }
