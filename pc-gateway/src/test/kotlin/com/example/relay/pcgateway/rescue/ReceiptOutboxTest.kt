@@ -4,7 +4,8 @@ import com.example.relay.rescue.RescueCryptography
 import com.example.relay.rescue.ShelterReceiptStatus
 import com.example.relay.rescue.SignedShelterReceipt
 import com.example.relay.rescue.UnsignedShelterReceipt
-import java.sql.DriverManager
+import java.io.File
+import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -12,16 +13,22 @@ import org.junit.Before
 import org.junit.Test
 
 class ReceiptOutboxTest {
-    private lateinit var connection: java.sql.Connection
+    private lateinit var persistence: SqliteRescuePersistence
+    private lateinit var dbFile: File
 
     @Before
     fun setup() {
-        connection = DriverManager.getConnection("jdbc:sqlite::memory:")
+        dbFile = File.createTempFile("receipt-outbox-test", ".db")
+        persistence = SqliteRescuePersistence(
+            dbPath = dbFile.absolutePath,
+            json = Json { ignoreUnknownKeys = false; encodeDefaults = true },
+        )
     }
 
     @After
     fun teardown() {
-        connection.close()
+        persistence.close()
+        dbFile.delete()
     }
 
     @Test
@@ -35,6 +42,24 @@ class ReceiptOutboxTest {
         assertEquals(1, rows.size)
         assertEquals("receipt-1", rows[0]["receipt_id"])
         assertEquals("PENDING", rows[0]["status"])
+    }
+
+    @Test
+    fun `enqueue rolls back with its enclosing rescue transaction`() {
+        val outbox = createOutbox()
+        var rolledBack = false
+
+        try {
+            persistence.transaction {
+                outbox.enqueue(createReceipt("receipt-rollback", "envelope-rollback"))
+                error("force rollback")
+            }
+        } catch (_: IllegalStateException) {
+            rolledBack = true
+        }
+
+        assertTrue(rolledBack)
+        assertTrue(queryAll().isEmpty())
     }
 
     @Test
@@ -67,12 +92,14 @@ class ReceiptOutboxTest {
         outbox.enqueue(createReceipt("receipt-1", "envelope-1"))
 
         // Simulate markSent via direct SQL (normally called by flusher)
-        connection.prepareStatement(
-            "UPDATE receipt_outbox SET status = 'SENT', sent_at = ? WHERE receipt_id = ?",
-        ).use { stmt ->
-            stmt.setLong(1, System.currentTimeMillis())
-            stmt.setString(2, "receipt-1")
-            stmt.executeUpdate()
+        persistence.withConnection { connection ->
+            connection.prepareStatement(
+                "UPDATE receipt_outbox SET status = 'SENT', sent_at = ? WHERE receipt_id = ?",
+            ).use { stmt ->
+                stmt.setLong(1, System.currentTimeMillis())
+                stmt.setString(2, "receipt-1")
+                stmt.executeUpdate()
+            }
         }
 
         val rows = queryAll()
@@ -85,11 +112,13 @@ class ReceiptOutboxTest {
         val outbox = createOutbox()
         outbox.enqueue(createReceipt("receipt-1", "envelope-1"))
 
-        connection.prepareStatement(
-            "UPDATE receipt_outbox SET retry_count = retry_count + 1 WHERE receipt_id = ?",
-        ).use { stmt ->
-            stmt.setString(1, "receipt-1")
-            stmt.executeUpdate()
+        persistence.withConnection { connection ->
+            connection.prepareStatement(
+                "UPDATE receipt_outbox SET retry_count = retry_count + 1 WHERE receipt_id = ?",
+            ).use { stmt ->
+                stmt.setString(1, "receipt-1")
+                stmt.executeUpdate()
+            }
         }
 
         val rows = queryAll()
@@ -97,9 +126,9 @@ class ReceiptOutboxTest {
     }
 
     private fun createOutbox(): ReceiptOutbox {
-        // ReceiptOutbox creates its own table in init{} using the shared connection
+        // ReceiptOutbox uses the persistence lock and participates in its transaction.
         return ReceiptOutbox(
-            dbConnection = connection,
+            persistence = persistence,
             brokerUrl = "https://broker.test",
             shelterId = "shelter-1",
             gatewayId = "gateway-1",
@@ -126,21 +155,23 @@ class ReceiptOutboxTest {
     }
 
     private fun queryAll(): List<Map<String, String?>> {
-        val results = mutableListOf<Map<String, String?>>()
-        connection.prepareStatement("SELECT * FROM receipt_outbox ORDER BY created_at ASC").use { stmt ->
-            stmt.executeQuery().use { rs ->
-                while (rs.next()) {
-                    results.add(mapOf(
-                        "receipt_id" to rs.getString("receipt_id"),
-                        "envelope_id" to rs.getString("envelope_id"),
-                        "shelter_id" to rs.getString("shelter_id"),
-                        "status" to rs.getString("status"),
-                        "sent_at" to rs.getString("sent_at"),
-                        "retry_count" to rs.getString("retry_count"),
-                    ))
+        return persistence.withConnection { connection ->
+            val results = mutableListOf<Map<String, String?>>()
+            connection.prepareStatement("SELECT * FROM receipt_outbox ORDER BY created_at ASC").use { stmt ->
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        results.add(mapOf(
+                            "receipt_id" to rs.getString("receipt_id"),
+                            "envelope_id" to rs.getString("envelope_id"),
+                            "shelter_id" to rs.getString("shelter_id"),
+                            "status" to rs.getString("status"),
+                            "sent_at" to rs.getString("sent_at"),
+                            "retry_count" to rs.getString("retry_count"),
+                        ))
+                    }
                 }
             }
+            results
         }
-        return results
     }
 }

@@ -46,6 +46,10 @@ class BrokerReceiptPoller(
 
     /** Single poll iteration. Exposed for testing. */
     suspend fun pollOnce(delivery: BrokerRescueDelivery, app: RelayApplication) {
+        // A Broker restart, token loss, or Android backup restore can leave the local receipt
+        // cursor intact while the registration is gone. Re-establish the capability before
+        // polling rather than silently treating that state as an empty receipt batch forever.
+        if (!delivery.ensureRegistered()) return
         val batch = delivery.pollReceipts(sinceSeq = lastSeq)
         if (batch.receipts.isEmpty()) return
 

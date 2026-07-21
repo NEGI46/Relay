@@ -23,17 +23,21 @@ Android <──HTTPS GET─── Broker (receipt)     <──HTTPS POST──�
 
 | Method | Path | 説明 |
 |---|---|---|
+| POST | `/v1/devices/register` | Androidが端末公開鍵を登録し、Receipt取得用capability tokenを受け取る |
 | POST | `/v1/rescue/upload` | AndroidがEnvelopeをアップロード |
 | GET | `/v1/gateways/{shelterId}/pull?cursor=&limit=` | Gatewayが未配送Envelopeを取得 |
 | POST | `/v1/gateways/{shelterId}/receipts` | Gatewayが署名Receiptをアップロード |
-| GET | `/v1/devices/{deviceKeyId}/receipts?since=` | AndroidがReceiptを取得 |
+| GET | `/v1/receipts?token=&sinceSeq=` | Androidが自身の署名Receiptを取得 |
 | GET | `/v1/health` | ヘルスチェック |
 
 ### セキュリティ
 
-- HTTPS必須（TLS設定は環境変数で指定）
+- Android / Gatewayの外部接続はHTTPS必須。Broker本体はTLS終端リバースプロキシの内側でHTTP動作
 - envelope JSON 64 KiB制限（deserialization前に拒否）
-- device_key_id / gateway_id あたりのスライディングウィンドウレート制限
+- AndroidはAndroid KeystoreのECDSA P-256鍵を端末ごとのUUIDに登録し、アップロード署名をBrokerで検証
+- Receipt取得は公開のdevice_key_idではなく、登録時に発行する推測困難なcapability tokenを使用
+- Gateway APIは`RELAY_BROKER_GATEWAY_API_KEY`を設定した場合Bearer認証を必須化
+- device_key_id / capability token / gatewayあたりのスライディングウィンドウレート制限
 - 衝突隔離: 同一(requestId, requestVersion)で異なるciphertext_hash → quarantine + 409
 
 ## Android側
@@ -42,7 +46,7 @@ Android <──HTTPS GET─── Broker (receipt)     <──HTTPS POST──�
 |---|---|
 | `BrokerRescueDelivery` | HTTPS POSTでEnvelopeをBrokerへ送信（hopCount不変） |
 | `BrokerRetryWorker` | 失敗時にOneTime WorkManagerで再送（指数backoff 30s〜15min） |
-| `BrokerReceiptPoller` | 30s間隔でBrokerから署名Receiptを取得し`applyReceipt()`で検証 |
+| `BrokerReceiptPoller` | 30s間隔でBrokerから署名Receiptを取得し`applyReceipt()`で検証。token失効時は再登録して回復 |
 | `UploadSigningKeyStore` | Android Keystore ECDSA P-256でアップロード署名 |
 | `BrokerLedgerEntity` / `BrokerLedgerDao` | Room DB v6の別テーブルでBroker状態を管理 |
 
@@ -62,17 +66,16 @@ SharedPreferences `relay_broker_config` の `broker_endpoint` が空の場合は
 | 環境変数 | デフォルト | 説明 |
 |---|---|---|
 | `RELAY_BROKER_URL` | (無効) | BrokerのHTTPS URL |
+| `RELAY_BROKER_API_KEY` | (空) | Broker側のGateway Bearer API key |
 | `RELAY_BROKER_POLL_INTERVAL_MS` | 10000 | Pull間隔 |
 
 ## Brokerサーバー
 
 | 環境変数 | デフォルト | 説明 |
 |---|---|---|
-| `RELAY_BROKER_PORT` | 8443 | リッスンポート |
+| `RELAY_BROKER_PORT` | 8443 | Broker HTTPリッスンポート（本番はTLS終端リバースプロキシの内側） |
 | `RELAY_BROKER_DB_PATH` | ./data/broker.db | SQLite DBパス |
-| `RELAY_BROKER_TLS_KEYSTORE` | — | TLSキーストアパス |
-| `RELAY_BROKER_TLS_PASSWORD` | — | キーストアパスワード |
-| `RELAY_BROKER_TLS_ALIAS` | relay-broker | 証明書エイリアス |
+| `RELAY_BROKER_GATEWAY_API_KEY` | (空、開発時のみ) | Gateway Pull/Receipt APIのBearer key |
 
 Envelopeの最大TTLは7日。期限切れは定期的にpurgeされる。
 

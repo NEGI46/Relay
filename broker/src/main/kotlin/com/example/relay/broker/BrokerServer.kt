@@ -234,6 +234,12 @@ fun Application.brokerModule(
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
                 return@get
             }
+            if (store.deviceForCapabilityToken(token) == null) {
+                // Let the Android client distinguish an invalid/stale capability from a valid
+                // account that simply has no receipts, so it can re-register and recover.
+                call.respond(HttpStatusCode.Unauthorized, mapOf("reason" to "invalid_capability_token"))
+                return@get
+            }
             val sinceSeq = call.request.queryParameters["sinceSeq"]?.toLongOrNull() ?: 0L
             val batch = store.receiptsForDevice(token, sinceSeq)
             call.respond(HttpStatusCode.OK, batch)

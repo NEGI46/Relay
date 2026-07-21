@@ -183,7 +183,7 @@ class RescueDeliveryService : Service() {
                     }
                 for (record in candidates) {
                     val ledger = dao.find(record.envelope.requestId, record.envelope.requestVersion)
-                    if (ledger?.brokerStatus == "UPLOADED") continue
+                    if (ledger?.brokerStatus in setOf("UPLOADED", "FAILED")) continue
 
                     // Ensure ledger entry exists
                     if (ledger == null) {
@@ -205,14 +205,25 @@ class RescueDeliveryService : Service() {
                                 uploadedAt = result.response.storedAtEpochMillis,
                             )
                         }
-                        is BrokerDeliveryResult.Offline,
-                        is BrokerDeliveryResult.Failed -> {
+                        is BrokerDeliveryResult.Offline -> {
                             dao.markRetrying(record.envelope.requestId, record.envelope.requestVersion)
                             BrokerRetryWorker.enqueue(
                                 this@RescueDeliveryService,
                                 record.envelope.requestId,
                                 record.envelope.requestVersion,
                             )
+                        }
+                        is BrokerDeliveryResult.Failed -> {
+                            if (result.retryable) {
+                                dao.markRetrying(record.envelope.requestId, record.envelope.requestVersion)
+                                BrokerRetryWorker.enqueue(
+                                    this@RescueDeliveryService,
+                                    record.envelope.requestId,
+                                    record.envelope.requestVersion,
+                                )
+                            } else {
+                                dao.markFailed(record.envelope.requestId, record.envelope.requestVersion)
+                            }
                         }
                         is BrokerDeliveryResult.Disabled -> { /* endpoint cleared; stop */ }
                     }

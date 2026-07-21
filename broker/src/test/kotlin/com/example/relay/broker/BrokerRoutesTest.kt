@@ -209,11 +209,11 @@ class BrokerRoutesTest {
     }
 
     @Test
-    fun `receipts returns empty for invalid token`() = testApplication {
+    fun `receipts returns 401 for invalid token so Android can re-register`() = testApplication {
         application { brokerModule(store) }
         val response = client.get("/v1/receipts?token=invalid-token&sinceSeq=0")
-        assertEquals(HttpStatusCode.OK, response.status)
-        assertTrue(response.bodyAsText().contains("\"receipts\":[]"))
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertTrue(response.bodyAsText().contains("invalid_capability_token"))
     }
 
     @Test

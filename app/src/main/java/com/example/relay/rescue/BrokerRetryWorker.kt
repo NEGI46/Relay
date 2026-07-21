@@ -63,6 +63,7 @@ class BrokerRetryWorker(
                     app.database.brokerLedgerDao().markRetrying(requestId, requestVersion)
                     Result.retry()
                 } else {
+                    app.database.brokerLedgerDao().markFailed(requestId, requestVersion)
                     Result.failure()
                 }
             }

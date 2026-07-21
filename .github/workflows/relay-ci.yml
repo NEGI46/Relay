@@ -27,7 +27,7 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
       - name: Build debug APK and JVM artifacts
-        run: ./gradlew :app:assembleDebug :pc-gateway:build --no-daemon
+        run: ./gradlew :app:assembleDebug :pc-gateway:build :broker:test --no-daemon
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         if: always()
