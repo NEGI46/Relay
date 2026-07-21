@@ -29,8 +29,8 @@ class RescueIntakeServiceTest {
 
         assertEquals("private-note", accepted.request.payload.freeText)
         assertEquals(2, duplicate.request.uniqueCarrierCount)
-        assertEquals(ShelterReceiptStatus.STORED, service.receipt("request-1")!!.receipt.status)
-        assertTrue(RescueCryptography.verifyReceipt(service.receipt("request-1")!!, signer.publicKey))
+        assertEquals(ShelterReceiptStatus.STORED, service.receipt("request-1")?.receipt?.status)
+        assertTrue(service.receipt("request-1")?.let { RescueCryptography.verifyReceipt(it, signer.publicKey) } ?: false)
     }
 
     @Test
@@ -49,7 +49,7 @@ class RescueIntakeServiceTest {
             it.copy(ciphertextBase64 = it.ciphertextBase64.dropLast(2) + "AA")
         }
 
-        assertEquals(2, service.detail("request-1")!!.key.requestVersion)
+        assertEquals(2, service.detail("request-1")?.key?.requestVersion ?: 0)
         assertEquals(
             RescueRejectionCode.CORRUPT_OR_UNDECRYPTABLE,
             (service.ingest(tampered, "courier-3") as RescueIngestResult.Rejected).code,
@@ -72,16 +72,16 @@ class RescueIntakeServiceTest {
         val claimed = service.updateStatus("request-1", RescueResponseStatus.CONFIRMED, "operator-a")
             as RescueStatusUpdateResult.Updated
         assertEquals("operator-a", claimed.request.assignedNodeId)
-        assertEquals(ShelterReceiptStatus.ACCEPTED, service.receipt("request-1")!!.receipt.status)
+        assertEquals(ShelterReceiptStatus.ACCEPTED, service.receipt("request-1")?.receipt?.status)
         val conflict = service.updateStatus("request-1", RescueResponseStatus.PREPARING, "operator-b")
             as RescueStatusUpdateResult.AssignedElsewhere
         assertEquals("operator-a", conflict.assignedNodeId)
 
         service.updateStatus("request-1", RescueResponseStatus.PREPARING, "operator-a")
         service.updateStatus("request-1", RescueResponseStatus.RESPONDING, "operator-a")
-        assertEquals(ShelterReceiptStatus.RESPONDING, service.receipt("request-1")!!.receipt.status)
+        assertEquals(ShelterReceiptStatus.RESPONDING, service.receipt("request-1")?.receipt?.status)
         service.updateStatus("request-1", RescueResponseStatus.COMPLETED, "operator-a")
-        assertEquals(ShelterReceiptStatus.COMPLETED, service.receipt("request-1")!!.receipt.status)
+        assertEquals(ShelterReceiptStatus.COMPLETED, service.receipt("request-1")?.receipt?.status)
         now += 31L * 24 * 60 * 60 * 1_000
 
         assertEquals(1, service.purgeExpiredDetails())
@@ -102,7 +102,7 @@ class RescueIntakeServiceTest {
 
         service.ingest(RescueCryptography.encrypt(cancelled, recipient.publicKey, "envelope-2"), "courier-1")
 
-        assertEquals(RescueResponseStatus.COMPLETED, service.detail("request-1")!!.responseStatus)
+        assertEquals(RescueResponseStatus.COMPLETED, service.detail("request-1")?.responseStatus ?: error("Detail is null"))
     }
 
     private fun payload(version: Int) = RescuePayload(

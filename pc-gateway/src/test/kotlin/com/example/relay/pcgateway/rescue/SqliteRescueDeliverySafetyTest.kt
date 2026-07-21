@@ -43,7 +43,7 @@ class SqliteRescueDeliverySafetyTest {
                 val restarted = service(recipient.privateKey, signer.privateKey, persistence)
                 val restored = restarted.detail("request-restart")
                 assertNotNull(restored)
-                assertEquals(1, restored!!.uniqueCarrierCount)
+                assertEquals(1, restored?.uniqueCarrierCount ?: 0)
                 assertEquals(1, restored.uniqueDeliveryCount)
                 assertTrue(RescueCryptography.verifyReceipt(restored.receipt, signer.publicKey))
 

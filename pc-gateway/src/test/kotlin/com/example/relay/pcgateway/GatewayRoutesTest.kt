@@ -76,7 +76,7 @@ class GatewayRoutesTest {
         val store = GatewayStore(config)
         val code = store.createPairingCode(1_000)
         store.requestPair(code, "bridge", "Bridge", 1_001)
-        val token = store.approvePair("bridge", code, 1_002)!!
+        val token = store.approvePair("bridge", code, 1_002) ?: error("approvePair returned null")
         application { gatewayModule(config, store) }
         val report = report()
         val change = statusChange(report.messageId)
