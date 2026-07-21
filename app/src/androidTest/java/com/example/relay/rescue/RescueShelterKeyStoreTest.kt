@@ -3,7 +3,6 @@ package com.example.relay.rescue
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
@@ -37,9 +36,8 @@ class RescueShelterKeyStoreTest {
         }
         store.saveVerifiedManifest(manifest, manifest.fingerprint())
 
-        val loaded = store.load()
-        assertNotNull(loaded)
-        assertEquals(manifest.shelterId, loaded?.shelterId ?: "")
+        val loaded = requireNotNull(store.load())
+        assertEquals(manifest.shelterId, loaded.shelterId)
         assertEquals(manifest.fingerprint(), loaded.manifestFingerprint)
     }
 
