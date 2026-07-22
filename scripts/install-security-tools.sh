@@ -77,6 +77,14 @@ check_version syft "${syft_version#v}"
 check_version osv-scanner "${osv_version#v}"
 check_version grype "${grype_version#v}"
 
+# Runner images can retain an expired Grype database. Refresh it while bootstrapping the pinned
+# scanner so the subsequent SBOM scan is based on current vulnerability data rather than a stale
+# cache that Grype correctly refuses to load.
+if ! "$GOBIN/grype" db update; then
+  echo 'Security scanner bootstrap BLOCKED: Grype vulnerability database update failed.' >&2
+  exit 1
+fi
+
 if [[ -n "${GITHUB_PATH:-}" ]]; then
   # GitHub Actions makes this available to subsequent steps, while this script keeps using
   # the explicit GOBIN path for its own verification.
