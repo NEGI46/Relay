@@ -100,7 +100,7 @@ class PilotSecurityContractTest(unittest.TestCase):
             'github.com/google/osv-scanner/v2/cmd/osv-scanner',
             'v2.0.3',
             'github.com/anchore/grype/cmd/grype',
-            'v0.80.0',
+            'v0.116.0',
             "GOSUMDB='sum.golang.org'",
         ):
             self.assertIn(required, f"{workflow}\n{ci}\n{installer}")

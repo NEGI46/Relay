@@ -45,9 +45,8 @@ fi
 
 go install "$osv_module@$osv_version"
 
-# Go deliberately rejects `go install package@version` when the target module has a
-# replace directive. Grype v0.80.0 has one for its version-pinned archiver dependency, so
-# download the checksum-verified module and build it as the main module instead.
+# Build the checksum-verified Grype module as its main module so release-local module
+# replacements cannot invalidate the pinned scanner build.
 grype_source_dir="$(go env GOMODCACHE)/$grype_root_module@$grype_version"
 go mod download "$grype_root_module@$grype_version"
 if [[ ! -f "$grype_source_dir/go.mod" ]]; then

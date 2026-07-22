@@ -196,7 +196,7 @@ jobs:
       # scanner toolchain as Relay CI. Missing scanners remain a hard failure below.
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.24.4'
+          go-version: '1.26.3'
           cache: false
       - name: Install pinned dependency-security scanners
         shell: bash
