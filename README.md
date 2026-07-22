@@ -19,11 +19,11 @@
 </div>
 
 > [!CAUTION]
-> **Relayは119、消防・警察・自治体の緊急連絡、公式警報、認証済み人命安全システムを置き換えません。** 現在は限定区域の訓練・共同実証に向けたコード基盤です。送信、保存、Broker保管、Receiptは、救助実施や最終到達の保証ではありません。
+> **Relayは119、消防・警察・自治体の緊急連絡、公式警報、認証済み人命安全システムを置き換えません。** 現在は限定区域の訓練・共同実証に向けたコード基盤です。端末保存、中継、Broker保管、Gateway受信、Receiptは、救助実施や最終到達の保証ではありません。
 
 ## 30秒でわかるRelay
 
-Relayは、Androidで作った救助要請を**端末内で暗号化**し、Nearby、承認済みPC Gateway、任意のHTTPS Brokerを使って避難所へ送達しようとする、ローカル優先の中継システムです。
+Relayは、Androidで作った救助要請を**端末内で暗号化**し、Nearby、承認済みPC Gateway、任意のHTTPS Brokerを使って地域の救助拠点へ近づける、ローカル優先の中継システムです。
 
 ```mermaid
 flowchart LR
@@ -41,24 +41,27 @@ flowchart LR
 
 | 対象 | 現在できること |
 |---|---|
-| **Android利用者** | 赤いSOSを2秒長押し、通常依頼、更新、取消、署名済み対応状況の確認 |
-| **中継端末** | 本文を復号せず暗号化Envelopeを運び、自分のLAN/Broker経路で onward deliveryを継続 |
-| **PCスタッフ** | 個人アカウントでログインし、担当・確認・準備・対応・完了を管理 |
+| **Android利用者** | 赤いSOSを2秒長押し、通常依頼、更新、取消、現在の送達段階と署名済み対応状況の確認 |
+| **中継端末** | 本文を復号せず暗号化Envelopeを運び、自分のLAN/Broker経路でonward deliveryを継続 |
+| **PCスタッフ** | 個人アカウントでログインし、受信・担当・準備・対応・完了を管理 |
 | **Broker** | 暗号文を復号せず一時保存し、PC Gatewayとの配送とReceipt返送を補助 |
-| **開発者** | Windows開発ランチャー、development prerelease、Docker/Caddy Broker、Quick Tunnel PoCを利用可能 |
+| **開発者** | Windows開発ランチャー、自動起動、development prerelease、Docker/Caddy Broker、Quick Tunnel PoCを利用可能 |
 
 ## 現在の状態
 
-**基準日: 2026-07-22 / HEAD: `408bee4`**
+**実装確認基準: 2026-07-22 / `f39206e`**  
+このREADME更新コミットは文書のみを変更します。
 
 | 区分 | 状態 | 内容 |
 |---|---:|---|
-| 救助UI・暗号化Envelope | ✅ 実装済み | 2秒SOS、通常依頼、version付き更新・取消、署名Receipt表示 |
+| 救助UI・暗号化Envelope | ✅ 実装済み | 2秒SOS、通常依頼、version付き更新・取消、状態別の日英コピー、署名Receipt表示 |
 | 受信先未解決時のSOS | ✅ 実装済み | 送信元だけが復元できるAES-GCM保留状態へ保存し、信頼済み受信鍵の解決後にEnvelope化 |
 | 送信者セッション復元 | ✅ 実装済み | Room + SQLCipherと別Keystore鍵で復元情報を保持し、通常のprocess restart後も更新・取消を再開 |
 | Nearby courier配送 | ✅ 修正済み | 受信端末がEnvelopeを永続保存すると、自身のLAN/Broker配送ownerを直ちに起動 |
 | PC Gateway DB書込み | ✅ 修正済み | 複数SQLite接続のwriteを共有coordinatorとlock fileで直列化し、`SQLITE_BUSY`を抑制 |
+| CSV export | ✅ 修正済み | messages/audit共通のencoderで`= + - @`先頭をtext化し、表計算ソフトのformula injectionを防止 |
 | PC Gatewayアクセス制御 | ✅ 実装済み | 個人アカウント、`ADMIN` / `OPERATOR` / `VIEWER`、監査、secure session |
+| Gateway自動起動 | ✅ 開発・PoC用あり | native GatewayのWindows起動時タスクと、Docker PoCのログオン時タスクを分離して提供 |
 | HTTPS Broker配置 | ✅ 限定テスト用構成あり | Docker Compose + Caddy、またはCloudflare Quick Tunnel PoC |
 | BLE Gateway信頼チェーン | ⚠️ コード実装・実運用BLOCKED | Root → signed Directory → signed Manifest → BLE fingerprint。正式な府中町Root/Directoryは未提供 |
 | 継続バックグラウンドGPS | ❌ 未実装 | Android 14+ location FGSと明示同意を含む別設計が必要 |
@@ -66,7 +69,7 @@ flowchart LR
 | 正式Release | ⛔ 外部鍵・証明書待ち | Android組織署名、Authenticode、cosign/TUF、正式scanner evidenceが必要 |
 
 > [!IMPORTANT]
-> **IMPLEMENTED ≠ AUTOMATED_TESTED ≠ DEVICE_TESTED ≠ DEPLOYMENT-READY** です。最後に文書化された監査ではshared JVM 20/20、Android JVM 201/201、PC Gateway 57/57、Broker 28/28がPASSしましたが、その後も機能修正が入っています。最新HEADについて物理端末・現地試験済みとは主張しません。
+> **IMPLEMENTED ≠ AUTOMATED_TESTED ≠ DEVICE_TESTED ≠ DEPLOYMENT-READY** です。最後に文書化されたaggregate監査ではshared JVM 20/20、Android JVM 201/201、PC Gateway 57/57、Broker 28/28がPASSしました。その後のUIコピー、CSV、自動起動にもtest codeは追加されていますが、このREADMEは最新HEADの全CI成功や物理端末・現地試験完了を新たに主張しません。
 
 ## 画面イメージ
 
@@ -77,15 +80,17 @@ flowchart LR
 ## 開発プレビューを試す
 
 > [!WARNING]
-> 次の手順は**個人開発・動作確認専用**です。unsigned Windows installerとdebug/localDev APKを、共同実証・訓練・緊急運用へ使用しないでください。
+> 次の手順は**個人開発・動作確認専用**です。unsigned Windows installerとdebug/localDev APKを、自治体共同実証・訓練での正式配布・緊急運用へ使用しないでください。
 
 ### Windows PC Gateway
 
-GitHub Actionsの **Publish Relay development preview** は、次をprereleaseとして分離公開できます。
+GitHub Actionsの **Publish Relay development preview** は、次をprereleaseとして正式Releaseから分離して公開できます。
 
 - `Relay-Android-development-preview-debug.apk`
 - `Relay-PC-Gateway-development-preview-unsigned.exe`
 - `Start-Relay-PC-Gateway-Development.cmd`
+- `Relay-PC-Gateway-development.ps1`
+- `Register-Relay-PC-Gateway-Autostart-development.ps1`
 - SHA-256とdevelopment-only notice
 
 インストール後、`Start-Relay-PC-Gateway-Development.cmd`をダブルクリックします。初回は管理者の**ユーザー名と12文字以上のパスワード**だけを入力します。
@@ -93,14 +98,52 @@ GitHub Actionsの **Publish Relay development preview** は、次をprerelease�
 - 開発DB・生成鍵: `%LOCALAPPDATA%\Relay\development`
 - Operator UI: `http://127.0.0.1:8080/`
 - profile: `development`
-- 開発時のみanonymous rescue ingressとUDP discoveryを有効化
-- 同じポートのGatewayが既に動作中なら二重起動せず既存画面を開く
+- 開発時だけanonymous rescue ingressとUDP discoveryを有効化
+- 同じportのGatewayが既に正常なら二重起動せず既存画面を開く
 
 ソースから起動する場合:
 
 ```powershell
 .\scripts\start-pc-gateway-development.ps1
 ```
+
+### Native GatewayをWindows起動時に常駐させる
+
+開発プレビューに含まれる`Register-Relay-PC-Gateway-Autostart-development.ps1`は、**管理者PowerShell**で実行するnative EXE向けのTask Scheduler登録scriptです。
+
+- Windows起動時にSYSTEMとして起動
+- 予期しない終了時はTask Schedulerが再起動
+- 複数instanceは起動しない
+- shared admin keyや既定passwordを作らない
+- Broker credentialなどのsecretをscriptへ埋め込まない
+
+これはproductionにも設定可能なnative Gateway用scriptです。実際のproduction登録では、正式な鍵、profile、network topology、staff bootstrapを別途正しくprovisionしてください。
+
+### Docker Quick Tunnel PoCをログオン後に復旧する
+
+Docker PoC専用の自動起動は別scriptです。通常のユーザーPowerShellで登録できます。
+
+```powershell
+.\scripts\register-poc-gateway-autostart.ps1
+```
+
+- task名: `Relay-PC-Gateway-Autostart`
+- 現在のユーザー・ログオン時に実行
+- 昇格なし・Windows password保存なし
+- Docker Desktopを最大300秒待機
+- Gatewayが既にhealthyなら二重起動しない
+- `http://127.0.0.1:8080/api/health`を確認
+- log: `%LOCALAPPDATA%\Relay\logs\pc-gateway-autostart.log`
+- Broker credential、password、救助内容、GPS、秘密鍵をlogへ出さない
+
+状態確認と解除:
+
+```powershell
+.\scripts\register-poc-gateway-autostart.ps1 -Status
+.\scripts\register-poc-gateway-autostart.ps1 -Unregister
+```
+
+詳細: [PC Gatewayログオン自動起動](docs/runbooks/PC_GATEWAY_AUTOSTART.md)
 
 ### Android localDev
 
@@ -128,8 +171,37 @@ app/build/outputs/apk/localDev/app-localDev.apk
 4. GPS位置、取得時刻、精度を含む本文を暗号化し、SQLCipher DBへ保存する。
 5. Nearby、承認済みGateway、設定済みBrokerを独立して再試行する。
 6. 暗号化復元情報から依頼の更新・取消を継続する。
-7. 避難所が署名したReceiptだけを「確認・対応中・完了」として表示する。
-8. 終了結果は利用者が確認するまで保持し、その後に暗号化session recovery rowを削除する。
+7. 現在の送達段階を、実際の状態に応じた説明で表示する。
+8. 避難所が署名したReceiptだけを「救助拠点に保存・スタッフ受領・対応中・完了」として表示する。
+9. 終了結果は利用者が確認するまで保持し、その後に暗号化session recovery rowを削除する。
+
+## 利用者向け送達状態
+
+Androidは状態名を`RescueStatusCopy`へ集約し、日本語と英語で同じ保証範囲を表示します。
+
+| 内部状態 | 日本語表示 | 意味・信頼レベル | 終了 |
+|---|---|---|---:|
+| `PENDING_DESTINATION` | この端末に保存しました | 端末内の暗号化復元dataのみ。転送可能Envelopeは未生成 | いいえ |
+| `PENDING` | 近くの端末を探しています | 受信先確認済み。Nearby中継準備中 | いいえ |
+| `IN_TRANSIT` | 近くの端末へ中継中です | peerが搬送中。避難所確認なし | いいえ |
+| `SHELTER_STORED` | 救助拠点に保存（署名確認済み） | 署名ReceiptでGateway保存を確認。staff未対応 | いいえ |
+| `SHELTER_ACCEPTED` | スタッフが受領しました | staffが依頼を受領 | いいえ |
+| `SHELTER_RESPONDING` | 避難所が対応中です | staffが対応中 | いいえ |
+| `SHELTER_COMPLETED` | 対応が完了しました | 署名済み完了状態 | はい |
+| `CANCELLED` | 取り消し済みです | 救助拠点が取消を確認 | はい |
+| `SHELTER_REJECTED` | 確認が必要です | 救助拠点側の確認が必要な終了状態 | はい |
+
+次のものを「避難所へ届いた」「救助開始」とは表示しません。
+
+- Nearby payload transfer完了
+- peer ACK
+- Gatewayへの単なるHTTP 2xx
+- Brokerの`BROKER_STORED`
+- 未検証Receipt
+
+位置情報は依頼作成時と更新送信時に取得します。現在、常時追跡中とは表示しません。画面を閉じた後の中継も、通信serviceが動作している間に限られ、force-stopや省電力設定で止まる可能性があります。
+
+詳細: [UIコピー刷新監査](docs/audits/UI_COPY_REFRESH_2026-07.md)
 
 ### オフラインで受信先鍵がまだ無い場合
 
@@ -137,7 +209,7 @@ SOS作成と端末内保存にWi-Fiやモバイル通信は不要です。受信
 
 - plaintextのSOS本文を中継端末へ渡しません。
 - 信頼済み受信先鍵が後から解決されると、同じrequest versionのまま転送可能な暗号化Envelopeへmaterializeします。
-- 未materializeの保留SOSは、利用者が安全にローカル取消できます。
+- 未materializeの保留SOSは、利用者が安全にlocal取消できます。
 - Gateway HTTP成功やBrokerの`BROKER_STORED`を避難所受領として表示しません。
 
 ## Nearby Store–Carry–Forward
@@ -188,7 +260,7 @@ verify-regional-directory
 print-public-fingerprints
 ```
 
-このCLIは私有Root materialのGit worktree内出力、既存file上書き、秘密鍵の標準出力を拒否します。生成したRootが自治体の正式Rootになるわけではありません。
+このCLIはprivate Root materialのGit worktree内出力、既存file上書き、秘密鍵の標準出力を拒否します。生成したRootが自治体の正式Rootになるわけではありません。
 
 ## PC Gateway
 
@@ -218,17 +290,28 @@ Androidの`release` / `pilotRelease`はcleartext Gateway URLを拒否します�
 - auditにはoperator、action、result、最小限のtarget/source metadataだけを保存します。
 - rescue本文、GPS、ciphertext、password、token、credential、private key、exception textはauditへ保存しません。
 
-状態遷移:
+PC staffの対応状態は、Androidの送達状態とは別軸です。
 
 ```text
-未確認 → 確認済み → 準備中 → 対応中 → 完了
+未確認 → 確認済み → 対応準備中 → 対応要請を記録 → 対応中 → 完了
+                                      └→ 対応不可 / 重複
 ```
+
+「対応要請を記録」は外部機関との連携完了を保証しません。担当者は「最初に確認したPC」ではなく、最初に確認を成功させた**サインイン中の運用者**として表示します。Gateway画面にはdevelopment時だけ運用モードchipを表示します。
+
+### CSV exportの安全化
+
+messages exportとaudit exportは共通の`csvSafeCell()`を使用します。
+
+- `=`、`+`、`-`、`@`で始まるcellへsingle quoteを付け、Excel/Google Sheetsによるformula実行を防止
+- comma、double quote、改行を含むcellをquote/escape
+- messagesとauditの実装を共通化し、安全性の差分再発を防止
 
 ### SQLite書込み競合対策
 
 `GatewayStore`、`GatewayAccessStore`、救助persistenceは同じSQLite fileへ別JDBC connectionを持ちます。WALはreaderとwriterの並行性を改善しますが、writerは同時に1つだけです。
 
-最新版では、DB pathごとの`GatewaySqliteWriteCoordinator`が次を行います。
+DB pathごとの`GatewaySqliteWriteCoordinator`が次を行います。
 
 - fair `ReentrantLock`でprocess内writeを直列化
 - sibling `.relay-writer.lock` fileで同じ開発DBを誤って開いた複数Gateway processも調整
@@ -244,6 +327,7 @@ Gatewayの救助秘密鍵は現在もowner-only local fileです。DPAPI、HSM�
 - [PC Gatewayセットアップ](docs/PC_GATEWAY_SETUP.md)
 - [Production Gateway deployment](docs/runbooks/PRODUCTION_GATEWAY_DEPLOYMENT.md)
 - [PC Gateway security](docs/PC_GATEWAY_SECURITY.md)
+- [PC Gatewayログオン自動起動](docs/runbooks/PC_GATEWAY_AUTOSTART.md)
 
 ## HTTPS Broker
 
@@ -293,7 +377,7 @@ Health:
 https://<domain>/v1/health
 ```
 
-詳細: [deployment/broker/README.md](deployment/broker/README.md)
+詳細: [HTTPS Broker deployment](deployment/broker/README.md)
 
 ### Cloudflare Quick Tunnel PoC
 
@@ -356,13 +440,12 @@ docker compose -f compose.quick-tunnel.yml down -v
 用途:
 
 - 個人開発
-- 同一LANでの開発Gateway接続
-- UI・配送PoC
+- 同一LANでのdevelopment Gateway接続
+- UI・配送・mobile-network PoC
 
 禁止:
 
-- 自治体共同実証
-- 訓練での正式配布
+- 自治体共同実証での正式配布
 - 緊急運用
 - 署名済み正式版としての案内
 
@@ -403,6 +486,7 @@ Windows PowerShell:
 .\gradlew.bat :shared:jvmTest :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :pc-gateway:test :broker:test
 .\gradlew.bat :app:assembleDebug :app:assembleLocalDev :pc-gateway:build :broker:build
 .\gradlew.bat :app:verifyNoTestTrustArtifactsInReleaseApks
+powershell -ExecutionPolicy Bypass -File .\scripts\tests\register-poc-gateway-autostart.tests.ps1
 ```
 
 macOS / Linux:
@@ -419,16 +503,16 @@ macOS / Linux:
 
 | 場所 | 役割 |
 |---|---|
-| `app/` | Android UI、SQLCipher、session復元、Nearby/Gateway/Broker/BLE、PoC diagnostics |
+| `app/` | Android UI、状態copy、SQLCipher、session復元、Nearby/Gateway/Broker/BLE、PoC diagnostics |
 | `shared/` | rescue model、cryptography、signed Receipt、regional trust contract |
-| `pc-gateway/` | rescue復号、staff/auth/audit、SQLite coordination、地図、公式情報、Broker Pull/Outbox |
+| `pc-gateway/` | rescue復号、staff/auth/audit、CSV safety、SQLite coordination、地図、公式情報、Broker Pull/Outbox |
 | `broker/` | scoped encrypted-envelope relay、device registration、Gateway credential、Receipt relay |
 | `deployment/broker/` | Docker Compose + CaddyによるHTTPS Broker限定テスト配置 |
 | `compose.quick-tunnel.yml` | Cloudflare Quick Tunnel PoC |
-| `scripts/` | Gateway launcher、PoC起動、packaging、scanner、verification |
+| `scripts/` | Gateway launcher、native/PoC autostart、PoC起動、packaging、scanner、verification |
 | `relay-protocol/` | Gateway wire contract |
 | `pc-ble-bridge/` | Windows BLE GATT sidecar |
-| `composeApp/`, `apple/` | desktop/iOS frameworkとApple contract |
+| `composeApp/`, `apple/` | desktop/iOS frameworkとApple contract。現在は開発previewでSOS・自動中継なし |
 | `gateway-meshtastic-adapter/` | 分離されたMeshtastic adapter |
 | `gateway-bp7-export/` | BPv7 export-only boundary |
 | `test-lab/`, `tools/ble-sim/` | host、fault、decoder、virtual BLE test |
@@ -442,7 +526,7 @@ macOS / Linux:
 - TLS/DNS/reverse proxy/WAF/hostingと承認済みnetwork boundary
 - Android/Windows/cosign/TUFの組織署名・検証material
 - privacy、retention、法務、保険、license、OSS noticeの判断
-- 実Android端末、Windows配備先、現地スタッフによる [Field acceptance test](docs/runbooks/FIELD_ACCEPTANCE_TEST.md)
+- 実Android端末、Windows配備先、現地staffによる [Field acceptance test](docs/runbooks/FIELD_ACCEPTANCE_TEST.md)
 
 **現在の総合状態:** `READY_FOR_DEVICE_TEST_WITH_TRUST_ARTIFACT_BLOCKER`
 
@@ -450,9 +534,11 @@ macOS / Linux:
 
 - [Municipal pilot readiness](docs/readiness/MUNICIPAL_PILOT_READINESS.md)
 - [Rescue durability and BLE trust audit](docs/audits/RESCUE_DURABILITY_INITIAL_AUDIT.md)
+- [UI copy refresh audit](docs/audits/UI_COPY_REFRESH_2026-07.md)
 - [PC Gateway setup](docs/PC_GATEWAY_SETUP.md)
 - [PC Gateway security](docs/PC_GATEWAY_SECURITY.md)
 - [Production Gateway deployment](docs/runbooks/PRODUCTION_GATEWAY_DEPLOYMENT.md)
+- [PC Gateway autostart](docs/runbooks/PC_GATEWAY_AUTOSTART.md)
 - [Broker architecture](docs/BROKER_ARCHITECTURE.md)
 - [HTTPS Broker deployment](deployment/broker/README.md)
 - [Quick Tunnel Broker PoC](docs/runbooks/QUICK_TUNNEL_BROKER_POC.md)
@@ -472,14 +558,14 @@ Relay is a **local-first encrypted rescue-information relay** for outages and in
 
 ### Latest changes
 
-- An SOS can be stored locally as an AES-GCM sealed `PENDING_DESTINATION` session when no trusted recipient key is available. It is materialized into a transferable envelope only after a recipient is resolved.
-- A courier that durably stores a Nearby rescue envelope immediately starts its own onward LAN/Broker delivery instead of leaving the envelope stranded.
-- Nearby inventory, ACK, collision, update/cancellation, and signed-receipt handling were tightened.
-- PC Gateway SQLite writes across the message, access, and rescue stores are serialized by a per-database coordinator and sibling lock file. Session `last_seen_at` writes are throttled to a 60-second interval by default.
-- A Windows development launcher now asks only for a username and a 12+ character password, isolates state under LocalAppData, and opens the local console.
-- A separate development-prerelease workflow publishes a localDev APK and unsigned Windows installer without confusing them with formal release artifacts.
-- Controlled HTTPS Broker deployment is available with Docker Compose and Caddy.
-- A Cloudflare Quick Tunnel configuration is available strictly for a time-limited mobile-network PoC; it has no SLA and is not production infrastructure.
+- Rescue status text is centralized in one Japanese/English model. Device-only storage, relaying, signed Gateway storage, staff handling, and resolved states are no longer presented as one fixed progress sequence.
+- An SOS can be stored locally as an AES-GCM sealed `PENDING_DESTINATION` session when no trusted recipient key is available. It becomes transferable only after a recipient is resolved.
+- A courier that durably stores a Nearby envelope immediately starts its own onward LAN/Broker delivery.
+- PC Gateway SQLite writes are serialized by a per-database coordinator and sibling lock file. Session `last_seen_at` writes are throttled by default.
+- Message and audit CSV exports share a formula-injection-safe encoder that neutralizes cells beginning with `=`, `+`, `-`, or `@`.
+- The Windows development preview includes a native Gateway startup-task registration script.
+- A separate current-user logon task can recover the Docker Quick Tunnel PoC after Docker Desktop becomes ready, without storing a Windows password or Broker credential.
+- Controlled HTTPS Broker deployment remains available with Docker Compose and Caddy; Quick Tunnel remains a time-limited, no-SLA PoC.
 
 ### Trust and deployment boundary
 
@@ -489,11 +575,18 @@ The default Gateway `production` profile is loopback-only with anonymous ingress
 
 The Broker never decrypts. Gateway credentials are high-entropy, hashed at rest, and scoped to one Gateway and shelter. Production/lab Broker processes bind to loopback behind an externally operated TLS proxy.
 
+### Product boundaries
+
+- Android provides SOS creation, update/cancellation, Nearby relay, background communication service, and signed receipt display.
+- PC Gateway provides staff intake, assignment, response-state management, maps, official information, audit, and exports.
+- Compose Multiplatform/iOS is a development preview for safety/supply/regional information and development Gateway sync. It does not currently provide SOS or automatic relay.
+- Continuous background GPS tracking is not implemented.
+
 ### Validation boundary
 
-The latest documented audit baseline recorded shared JVM 20/20, Android JVM 201/201, PC Gateway 57/57, and Broker 28/28 passing tests. Later fixes added more tests and tooling, but physical Nearby/BLE, multi-hop, Phone-to-PC, mobile-to-Broker-to-Gateway, OEM background behavior, power-loss recovery, and field operation remain unvalidated.
+The latest documented aggregate baseline recorded shared JVM 20/20, Android JVM 201/201, PC Gateway 57/57, and Broker 28/28 passing tests. Later changes added UI-copy, CSV-safety, dashboard, and autostart tests, but this README does not newly claim an all-green current-head CI run.
 
-Continuous background GPS tracking is not implemented. Formal distribution remains blocked until organization Android signing, Windows Authenticode, SBOM/vulnerability evidence, cosign/TUF verification, and production infrastructure are available.
+Physical Nearby/BLE, multi-hop, Phone-to-PC, mobile-to-Broker-to-Gateway, OEM background behavior, power-loss recovery, production TLS, formal signing, and field operations remain unvalidated.
 
 **Overall status:** `READY_FOR_DEVICE_TEST_WITH_TRUST_ARTIFACT_BLOCKER`
 
