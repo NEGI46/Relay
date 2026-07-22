@@ -74,7 +74,7 @@ check_version() {
 }
 
 check_version syft "${syft_version#v}"
-check_version osv-scanner "$osv_version"
+check_version osv-scanner "${osv_version#v}"
 check_version grype "${grype_version#v}"
 
 if [[ -n "${GITHUB_PATH:-}" ]]; then
