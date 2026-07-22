@@ -927,10 +927,10 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         header + "\n" + rows + "\n"
     }
 
-    private fun csvEscape(value: String): String {
-        val needs = value.any { it == ',' || it == '"' || it == '\n' || it == '\r' }
-        return if (!needs) value else "\"${value.replace("\"", "\"\"")}\""
-    }
+    // Delegates to the shared [csvSafeCell] so message and audit exports cannot drift apart.
+    // Message ids / origin ids are only length-validated on ingest, so this must also neutralise
+    // spreadsheet formula injection, not just quote delimiter characters.
+    private fun csvEscape(value: String): String = csvSafeCell(value)
 
     override fun close() {
         if (rescuePersistenceDelegate.isInitialized()) rescuePersistenceDelegate.value.close()

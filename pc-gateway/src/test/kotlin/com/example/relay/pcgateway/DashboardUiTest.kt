@@ -142,6 +142,35 @@ class DashboardUiTest {
     }
 
     @Test
+    fun `messages csv neutralizes spreadsheet formula injection`() = testApplication {
+        val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
+            dbPath = Files.createTempFile("relay-ui-csvinj", ".db").toString(),
+            adminKey = "admin-secret",
+        )
+        GatewayStore(config).use { store ->
+            // messageId / originDeviceId are only length-validated on ingest, so an attacker can
+            // supply spreadsheet formula payloads that a staff CSV export would otherwise execute.
+            val hostile = message("=cmd").copy(originDeviceId = "=2+5")
+            store.ingestUnregistered(listOf(hostile), 2_000)
+            application { gatewayModule(config, store) }
+
+            val csv = client.get("/api/messages/export.csv") {
+                header("X-Admin-Key", "admin-secret")
+            }
+            assertEquals(HttpStatusCode.OK, csv.status)
+            val body = csv.bodyAsText()
+            // Formula-looking cells must be neutralised with a leading quote.
+            assertTrue(body.contains("'=cmd"))
+            assertTrue(body.contains("'=2+5"))
+            // ...and must never survive as a raw formula cell that a spreadsheet would execute.
+            assertFalse(
+                body.lines().any { line -> line.split(",").any { it == "=cmd" || it == "=2+5" } },
+            )
+        }
+    }
+
+    @Test
     fun `filtered messages endpoint accepts trust query`() = testApplication {
         val config = GatewayConfig(
             profile = GatewayProfile.DEVELOPMENT,
