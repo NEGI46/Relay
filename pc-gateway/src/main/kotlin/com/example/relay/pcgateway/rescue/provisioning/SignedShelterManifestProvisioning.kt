@@ -228,8 +228,7 @@ internal fun requireOfflinePrivatePath(path: Path) {
     val unresolvedSegments = mutableListOf<Path>()
     var existingAncestor = absolutePath
     while (!Files.exists(existingAncestor, LinkOption.NOFOLLOW_LINKS)) {
-        unresolvedSegments += existingAncestor.fileName
-            ?: error("private material requires a filesystem parent")
+        unresolvedSegments.add(existingAncestor.fileName ?: error("private material requires a filesystem parent"))
         existingAncestor = existingAncestor.parent
             ?: error("private material requires a filesystem parent")
     }
