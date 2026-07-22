@@ -45,7 +45,8 @@ class ReceiptOutbox(
     private val shelterId: String,
     private val gatewayId: String,
     private val httpClient: HttpClient,
-    private val gatewayApiKey: String? = null,
+    /** Per-Gateway, per-shelter Broker credential; never stored in the outbox database. */
+    private val gatewayCredential: String? = null,
     private val flushIntervalMs: Long = 5_000L,
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
 ) {
@@ -101,8 +102,10 @@ class ReceiptOutbox(
         while (scope.isActive) {
             try {
                 flushPending()
-            } catch (e: Exception) {
-                System.err.println("[ReceiptOutbox] flush failed: ${e.message}")
+            } catch (error: Exception) {
+                // Transport exception text can contain endpoint diagnostics. Receipt metadata is
+                // also sensitive operational data, so retain only a stable error class here.
+                System.err.println("[ReceiptOutbox] flush failed (${error.javaClass.simpleName})")
             }
             delay(flushIntervalMs)
         }
@@ -127,7 +130,7 @@ class ReceiptOutbox(
                     contentType(Json)
                     setBody(json.encodeToString(upload))
                     headers {
-                        gatewayApiKey?.let { append(HttpHeaders.Authorization, "Bearer $it") }
+                        gatewayCredential?.let { append(HttpHeaders.Authorization, "Bearer $it") }
                         append("X-Gateway-Id", gatewayId)
                     }
                 }
@@ -139,7 +142,7 @@ class ReceiptOutbox(
                 } else {
                     incrementRetry(receiptId)
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 incrementRetry(receiptId)
             }
         }

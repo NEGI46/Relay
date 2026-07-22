@@ -73,6 +73,8 @@ data class BrokerHealthResponse(
     val status: String = "ok",
     val pendingEnvelopes: Int,
     val pendingReceipts: Int,
+    /** Configuration posture only; no token, credential, personal, or envelope data is exposed. */
+    val profile: String = "production",
     val version: String = "1.2.0",
 )
 

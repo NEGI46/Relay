@@ -1,4 +1,6 @@
-# Device / distribution validation report
+# Device / distribution validation report（2026-07-19 時点の履歴）
+
+> この報告は production profile、個人 staff account、scoped Broker credential、正式リリース fail-closed を導入する**前**の証跡です。以下の PASS は現在の安全化変更を検証した PASS ではありません。現在の実証受入条件は [FIELD_ACCEPTANCE_TEST.md](runbooks/FIELD_ACCEPTANCE_TEST.md) を参照してください。
 
 **Date (JST):** 2026-07-16  
 **Branch:** `agent/zero-operation-relay`  
@@ -16,7 +18,7 @@
 | Debug APK rebuild | **PASS** |
 | Formal WiX EXE rebuild | **BLOCKED** (WiX not installed) |
 | jpackage app-image + installDist UI | **PASS** |
-| PC smoke (health, UI, public UNVERIFIED, CSV, pair, admin key) | **PASS** |
+| PC smoke (health, UI, public UNVERIFIED, CSV, pair, legacy admin key) | **HISTORICAL_ONLY** |
 | Firewall script | **BLOCKED** (admin required) |
 | Autostart script | **BLOCKED** (admin required) |
 | Android device | **NOT_RUN** (adb OK, 0 devices) |

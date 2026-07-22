@@ -1,5 +1,6 @@
 package com.example.relay.gateway
 
+import com.example.relay.BuildConfig
 import com.example.relay.domain.DeliveryReceipt
 import com.example.relay.domain.MessagePayload
 import com.example.relay.domain.RelayMessage
@@ -59,7 +60,7 @@ class HttpGatewayBridgeClient(
     private suspend fun execute(settings: GatewaySettings, token: String, method: String, path: String, body: String?): String =
         withContext(Dispatchers.IO) {
             val bodyBytes = body?.toByteArray(Charsets.UTF_8)
-            val connection = (URL("http://${settings.host}:${settings.port}$path").openConnection() as HttpURLConnection).apply {
+            val connection = (URL("${gatewayScheme(settings.scheme)}://${settings.host}:${settings.port}$path").openConnection() as HttpURLConnection).apply {
                 requestMethod = method; connectTimeout = 5_000; readTimeout = 10_000; setRequestProperty("Authorization", "Bearer $token"); setRequestProperty("X-Bridge-Id", settings.bridgeId)
                 if (bodyBytes != null) {
                     doOutput = true
@@ -77,10 +78,10 @@ class HttpGatewayBridgeClient(
             } finally {
                 connection.disconnect()
             }
-        }
+    }
     private suspend fun executePublic(gateway: DiscoveredGateway, body: String): String = withContext(Dispatchers.IO) {
         val bodyBytes = body.toByteArray(Charsets.UTF_8)
-        val connection = (URL("http://${gateway.host}:${gateway.port}/api/public/sync/messages").openConnection() as HttpURLConnection).apply {
+        val connection = (URL("${gatewayScheme(gateway.scheme)}://${gateway.host}:${gateway.port}/api/public/sync/messages").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 5_000
             readTimeout = 10_000
@@ -121,3 +122,12 @@ class HttpGatewayBridgeClient(
 @kotlinx.serialization.Serializable data class PairResponse(val paired: Boolean, val token: String? = null, val reason: String? = null)
 
 class GatewayHttpException(val status: Int, detail: String) : IllegalStateException("gateway HTTP $status: $detail")
+
+/** HTTP Gateway compatibility is intentionally compiled into debug/localDev only. */
+class InsecureGatewayTransportException : IllegalStateException("cleartext Gateway transport is disabled in this build")
+
+private fun gatewayScheme(raw: String): String = when (raw.trim().lowercase()) {
+    "https" -> "https"
+    "http" -> if (BuildConfig.ALLOW_HTTP_GATEWAY) "http" else throw InsecureGatewayTransportException()
+    else -> throw IllegalArgumentException("unsupported Gateway scheme")
+}

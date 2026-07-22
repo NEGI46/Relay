@@ -1,5 +1,7 @@
 # Current validation report
 
+> This is a pre-production-hardening validation record. Its command results do not validate the 2026-07-22 municipal-pilot safety changes; those changes require a fresh successful Gradle run and the field acceptance evidence listed in `docs/runbooks/FIELD_ACCEPTANCE_TEST.md`.
+
 Audit date: 2026-07-19
 Validation rule: only a command that completed successfully at the current code state is `PASS`. A skipped optional dependency, unavailable scanner, unhealthy emulator, or pre-test host failure is `BLOCKED`; it is never folded into PASS.
 

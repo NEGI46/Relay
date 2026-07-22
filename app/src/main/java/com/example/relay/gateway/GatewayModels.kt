@@ -14,6 +14,8 @@ data class GatewaySettings(
     val lastDiscoveredGatewayIp: String? = null,
     val lastDiscoveryResult: String? = null,
     val lastDeliveryResult: String? = null,
+    /** HTTPS is required in release/pilotRelease; HTTP remains a debug/localDev compatibility path. */
+    val scheme: String = "https",
 )
 
 sealed interface GatewaySyncResult {

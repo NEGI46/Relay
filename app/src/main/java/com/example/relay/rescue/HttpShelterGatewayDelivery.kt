@@ -1,5 +1,7 @@
 package com.example.relay.rescue
 
+import com.example.relay.BuildConfig
+import com.example.relay.gateway.DiscoveredGateway
 import com.example.relay.gateway.GatewayDiscovery
 import com.example.relay.gateway.UdpGatewayDiscovery
 import java.net.HttpURLConnection
@@ -22,9 +24,14 @@ class HttpShelterGatewayDelivery(
     ): GatewayDeliveryResult = withContext(Dispatchers.IO) {
         val gateway = discovery.discoverForShelter(envelope.destinationShelterId)
             ?: return@withContext GatewayDeliveryResult.GatewayNotFound
+        val scheme = gateway.scheme.trim().lowercase()
+        if (scheme !in setOf("http", "https")) return@withContext GatewayDeliveryResult.InsecureTransportBlocked
+        if (scheme == "http" && !BuildConfig.ALLOW_HTTP_GATEWAY) {
+            return@withContext GatewayDeliveryResult.InsecureTransportBlocked
+        }
         val request = HttpRescueDeliveryRequest(envelope, carrierId, courierDeliveryId)
         runCatching {
-            val connection = (URL("http://${gateway.host}:${gateway.port}/api/public/rescue/deliver")
+            val connection = (URL("$scheme://${gateway.host}:${gateway.port}/api/public/rescue/deliver")
                 .openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 5_000
@@ -72,6 +79,8 @@ sealed interface GatewayDeliveryResult {
     data class Rejected(val httpStatus: Int, val reason: String) : GatewayDeliveryResult
     data object RateLimited : GatewayDeliveryResult
     data object GatewayNotReady : GatewayDeliveryResult
+    /** release/pilotRelease must never silently fall back to a cleartext LAN Gateway. */
+    data object InsecureTransportBlocked : GatewayDeliveryResult
     data object InvalidReceipt : GatewayDeliveryResult
 }
 

@@ -1,4 +1,4 @@
-name: Publish Relay release
+name: Publish Relay formal release
 
 on:
   workflow_dispatch:
@@ -8,99 +8,311 @@ on:
         required: true
         type: string
       target_ref:
-        description: Commit, branch, or tag to package
+        description: Immutable commit SHA, branch, or tag to package
         required: true
         default: agent/zero-operation-relay
         type: string
 
+# This workflow intentionally fails before publication unless organization-owned signing and
+# verification material is available. It must never turn a debug, unsigned, or locally signed
+# build into a GitHub Release.
 permissions:
   contents: write
 
+env:
+  SECURITY_MODE: block-high-critical
+
 jobs:
-  android:
-    name: Build Android APK
+  resolve-source:
+    name: Resolve immutable release source
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
+    outputs:
+      commit: ${{ steps.commit.outputs.commit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ inputs.target_ref }}
-      - uses: actions/setup-java@v4
+      - id: commit
+        name: Resolve checked-out commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse HEAD)"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo 'Unable to resolve immutable release commit.' >&2; exit 1; }
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  android:
+    name: Signed Android release APK
+    runs-on: ubuntu-latest
+    needs: resolve-source
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.resolve-source.outputs.commit }}
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
-      - name: Build debug APK
+      - name: Require organization Android signing material
+        env:
+          RELAY_ANDROID_KEYSTORE_BASE64: ${{ secrets.RELAY_ANDROID_KEYSTORE_BASE64 }}
+          RELAY_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.RELAY_ANDROID_KEYSTORE_PASSWORD }}
+          RELAY_ANDROID_KEY_ALIAS: ${{ secrets.RELAY_ANDROID_KEY_ALIAS }}
+          RELAY_ANDROID_KEY_PASSWORD: ${{ secrets.RELAY_ANDROID_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+          for required in RELAY_ANDROID_KEYSTORE_BASE64 RELAY_ANDROID_KEYSTORE_PASSWORD RELAY_ANDROID_KEY_ALIAS RELAY_ANDROID_KEY_PASSWORD; do
+            if [ -z "${!required}" ]; then
+              echo "Formal Android release BLOCKED: required organization signing secret is unavailable." >&2
+              exit 1
+            fi
+          done
+          mkdir -p "$RUNNER_TEMP/relay-release"
+          printf '%s' "$RELAY_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/relay-release/android-release.jks"
+          chmod 600 "$RUNNER_TEMP/relay-release/android-release.jks"
+      - name: Build signed release APK
+        env:
+          RELAY_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.RELAY_ANDROID_KEYSTORE_PASSWORD }}
+          RELAY_ANDROID_KEY_ALIAS: ${{ secrets.RELAY_ANDROID_KEY_ALIAS }}
+          RELAY_ANDROID_KEY_PASSWORD: ${{ secrets.RELAY_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon
-      - name: Prepare release asset
+          ./gradlew :app:assembleRelease --no-daemon \
+            -Prelay.require.release.signing=true \
+            -Prelay.release.store.file="$RUNNER_TEMP/relay-release/android-release.jks" \
+            -Prelay.release.store.password="$RELAY_ANDROID_KEYSTORE_PASSWORD" \
+            -Prelay.release.key.alias="$RELAY_ANDROID_KEY_ALIAS" \
+            -Prelay.release.key.password="$RELAY_ANDROID_KEY_PASSWORD"
+      - name: Verify APK signature and prepare asset
         run: |
+          set -euo pipefail
+          command -v apksigner >/dev/null || { echo 'Formal Android release BLOCKED: apksigner is unavailable.' >&2; exit 1; }
+          apk='app/build/outputs/apk/release/app-release.apk'
+          test -f "$apk" || { echo 'assembleRelease did not produce app-release.apk.' >&2; exit 1; }
           mkdir -p release
-          cp app/build/outputs/apk/debug/app-debug.apk release/Relay-Android-debug.apk
-      - uses: actions/upload-artifact@v4
+          apksigner verify --verbose --print-certs "$apk" > release/android-signature-verification.txt
+          cp "$apk" release/Relay-Android-release.apk
+          sha256sum release/Relay-Android-release.apk > release/Relay-Android-release.apk.sha256
+          source_commit="$(git rev-parse HEAD)"
+          [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]] || { echo 'Unable to resolve immutable build commit.' >&2; exit 1; }
+          printf '{"artifact":"Relay-Android-release.apk","sourceCommit":"%s","buildType":"release","formalSigning":"organization-secret"}\n' "$source_commit" > release/android-build-info.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: release-android
+          name: formal-release-android
           path: release/
           if-no-files-found: error
 
   windows-installer:
-    name: Build Windows PC Gateway installer
+    name: Authenticode-signed Windows installer
     runs-on: windows-latest
-    timeout-minutes: 45
+    needs: resolve-source
+    timeout-minutes: 50
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ inputs.target_ref }}
-      - uses: actions/setup-java@v4
+          ref: ${{ needs.resolve-source.outputs.commit }}
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
-      - name: Install WiX 3 packaging tools
+      - name: Require pinned packaging tools and organization Windows certificate
         shell: pwsh
+        env:
+          RELAY_WINDOWS_AUTHENTICODE_PFX_BASE64: ${{ secrets.RELAY_WINDOWS_AUTHENTICODE_PFX_BASE64 }}
+          RELAY_WINDOWS_AUTHENTICODE_PFX_PASSWORD: ${{ secrets.RELAY_WINDOWS_AUTHENTICODE_PFX_PASSWORD }}
+          RELAY_WINDOWS_TIMESTAMP_URL: ${{ secrets.RELAY_WINDOWS_TIMESTAMP_URL }}
         run: |
-          Invoke-WebRequest -Uri https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip -OutFile wix314-binaries.zip
-          Expand-Archive -LiteralPath wix314-binaries.zip -DestinationPath tools/wix314 -Force
-      - name: Build Windows installer
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in 'RELAY_WINDOWS_AUTHENTICODE_PFX_BASE64','RELAY_WINDOWS_AUTHENTICODE_PFX_PASSWORD','RELAY_WINDOWS_TIMESTAMP_URL') {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw 'Formal Windows release BLOCKED: required organization certificate/timestamp secret is unavailable.'
+            }
+          }
+          foreach ($tool in 'candle.exe','light.exe','signtool.exe') {
+            if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+              throw "Formal Windows release BLOCKED: required pre-provisioned tool is unavailable: $tool"
+            }
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'relay-authenticode.pfx'
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:RELAY_WINDOWS_AUTHENTICODE_PFX_BASE64))
+          $env:RELAY_WINDOWS_PFX_PATH = $pfxPath
+      - name: Build and sign Windows installer
         shell: pwsh
         env:
           RELEASE_TAG: ${{ inputs.tag }}
+          RELAY_WINDOWS_AUTHENTICODE_PFX_PASSWORD: ${{ secrets.RELAY_WINDOWS_AUTHENTICODE_PFX_PASSWORD }}
+          RELAY_WINDOWS_TIMESTAMP_URL: ${{ secrets.RELAY_WINDOWS_TIMESTAMP_URL }}
         run: |
+          $ErrorActionPreference = 'Stop'
           if ($env:RELEASE_TAG -notmatch '^v(?<version>\d+\.\d+\.\d+)$') {
             throw "Release tag must use vMAJOR.MINOR.PATCH format: $env:RELEASE_TAG"
           }
           ./scripts/build-pc-gateway-exe.ps1 -AppVersion $Matches.version
-      - name: Prepare release assets
+          $installer = 'artifacts/relay-pc-gateway.exe'
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Windows installer was not produced.' }
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'relay-authenticode.pfx'
+          & signtool.exe sign /fd SHA256 /f $pfxPath /p $env:RELAY_WINDOWS_AUTHENTICODE_PFX_PASSWORD /tr $env:RELAY_WINDOWS_TIMESTAMP_URL /td SHA256 $installer
+          if ($LASTEXITCODE -ne 0) { throw 'Authenticode signing failed.' }
+          & signtool.exe verify /pa /all /v $installer *> 'artifacts/windows-authenticode-verification.txt'
+          if ($LASTEXITCODE -ne 0) { throw 'Authenticode verification failed.' }
+      - name: Prepare Windows release asset
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path release | Out-Null
           Copy-Item artifacts/relay-pc-gateway.exe release/Relay-PC-Gateway-setup.exe -Force
-          Copy-Item artifacts/relay-pc-gateway.exe.sha256 release/Relay-PC-Gateway-setup.exe.sha256 -Force
-      - uses: actions/upload-artifact@v4
+          # Authenticode signing changes the installer bytes, so never reuse the pre-signing
+          # package hash created by build-pc-gateway-exe.ps1.
+          (Get-FileHash -LiteralPath release/Relay-PC-Gateway-setup.exe -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content -LiteralPath release/Relay-PC-Gateway-setup.exe.sha256 -Encoding ascii
+          Copy-Item artifacts/windows-authenticode-verification.txt release/windows-authenticode-verification.txt -Force
+          $sourceCommit = (git rev-parse HEAD).Trim()
+          if ($sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Unable to resolve immutable build commit.' }
+          "{`"artifact`":`"Relay-PC-Gateway-setup.exe`",`"sourceCommit`":`"$sourceCommit`",`"formalSigning`":`"authenticode-organization-certificate`"}" | Set-Content -LiteralPath release/windows-build-info.json -Encoding utf8
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: release-windows-installer
+          name: formal-release-windows
+          path: release/
+          if-no-files-found: error
+
+  security-attestation:
+    name: Required SBOM, vulnerability, and signature evidence
+    runs-on: ubuntu-latest
+    needs: [resolve-source, android, windows-installer]
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.resolve-source.outputs.commit }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      # Formal release evidence must be generated with the same pinned, checksum-verified
+      # scanner toolchain as Relay CI. Missing scanners remain a hard failure below.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.3'
+          cache: false
+      - name: Install pinned dependency-security scanners
+        shell: bash
+        run: bash ./scripts/install-security-tools.sh "$RUNNER_TEMP/relay-security-tools"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: formal-release-*
+          path: release
+          merge-multiple: true
+      - name: Require SBOM and dependency-vulnerability evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/run-syft.ps1 -SourcePath release -OutputPath release/release-sbom.cdx.json -SpdxOutputPath release/release-sbom.spdx.json -Mode block-high-critical -RequireTool
+          ./scripts/run-osv.ps1 -SourcePath . -OutputPath release/osv-vulnerability-report.json -Mode block-high-critical -RequireTool
+          ./scripts/run-grype.ps1 -InputPath release/release-sbom.cdx.json -OutputPath release/grype-vulnerability-report.json -Mode block-high-critical -RequireTool
+          ./scripts/verify-security-evidence.ps1 -EvidencePaths release/release-sbom.cdx.json,release/osv-vulnerability-report.json,release/grype-vulnerability-report.json -OutputPath release/dependency-security-evidence.json -RequireComplete -Mode block-high-critical
+      - name: Add source commit manifest and checksums before signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f release/Relay-Android-release.apk
+          test -f release/Relay-PC-Gateway-setup.exe
+          test -f release/android-signature-verification.txt
+          test -f release/windows-authenticode-verification.txt
+          test -f release/release-sbom.spdx.json
+          cp docs/runbooks/VERIFY_FORMAL_RELEASE.md release/RELEASE_ARTIFACT_VERIFICATION.md
+          source_commit="$(git rev-parse HEAD)"
+          [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]] || { echo 'Unable to resolve immutable build commit.' >&2; exit 1; }
+          printf '{"sourceCommit":"%s","workflow":"%s","formalRelease":true}\n' "$source_commit" "$GITHUB_WORKFLOW" > release/build-source.json
+          (
+            cd release
+            sha256sum Relay-Android-release.apk Relay-PC-Gateway-setup.exe android-build-info.json windows-build-info.json build-source.json RELEASE_ARTIFACT_VERIFICATION.md > SHA256SUMS
+          )
+      - name: Require and apply release artifact signatures
+        shell: pwsh
+        env:
+          RELAY_COSIGN_PRIVATE_KEY: ${{ secrets.RELAY_COSIGN_PRIVATE_KEY }}
+          RELAY_COSIGN_PUBLIC_KEY: ${{ secrets.RELAY_COSIGN_PUBLIC_KEY }}
+          RELAY_TUF_PRIVATE_KEY: ${{ secrets.RELAY_TUF_PRIVATE_KEY }}
+          RELAY_TUF_TRUSTED_ROOT: ${{ secrets.RELAY_TUF_TRUSTED_ROOT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in 'RELAY_COSIGN_PRIVATE_KEY','RELAY_COSIGN_PUBLIC_KEY','RELAY_TUF_PRIVATE_KEY','RELAY_TUF_TRUSTED_ROOT') {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw 'Formal release BLOCKED: required organization artifact-signing or trusted-root material is unavailable.'
+            }
+          }
+          if (-not (Get-Command cosign -ErrorAction SilentlyContinue)) { throw 'Formal release BLOCKED: cosign is unavailable.' }
+          if (-not (Get-Command syft -ErrorAction SilentlyContinue)) { throw 'Formal release BLOCKED: syft is unavailable.' }
+          $keyPath = Join-Path $env:RUNNER_TEMP 'relay-cosign.key'
+          $publicKeyPath = Join-Path $env:RUNNER_TEMP 'relay-cosign.pub'
+          $tufKeyPath = Join-Path $env:RUNNER_TEMP 'relay-tuf-private.xml'
+          $trustedRootPath = Join-Path $env:RUNNER_TEMP 'relay-tuf-trusted-root.json'
+          Set-Content -LiteralPath $keyPath -Value $env:RELAY_COSIGN_PRIVATE_KEY -NoNewline -Encoding utf8
+          Set-Content -LiteralPath $publicKeyPath -Value $env:RELAY_COSIGN_PUBLIC_KEY -NoNewline -Encoding utf8
+          Set-Content -LiteralPath $tufKeyPath -Value $env:RELAY_TUF_PRIVATE_KEY -NoNewline -Encoding utf8
+          Set-Content -LiteralPath $trustedRootPath -Value $env:RELAY_TUF_TRUSTED_ROOT -NoNewline -Encoding utf8
+          ./scripts/sign-artifacts.ps1 -PackageRoot release -MetadataRoot release/metadata/tuf -CosignKey $keyPath -TufPrivateKey $tufKeyPath
+          ./scripts/verify-distribution-signatures.ps1 -PackageRoot release -PublicKey $publicKeyPath -Offline -RequireBundles -RequireVerification -OutputPath release/signature-verification.json
+          python ./scripts/verify-tuf-metadata-chain.py release/metadata/tuf
+          foreach ($artifact in 'Relay-Android-release.apk','Relay-PC-Gateway-setup.exe') {
+            ./scripts/verify-tuf-metadata.ps1 -MetadataPath release/metadata/tuf/targets.json -ArtifactPath (Join-Path release $artifact) -TargetName $artifact -TrustedRootPath $trustedRootPath
+          }
+      - name: Finalize formal release package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f release/Relay-Android-release.apk
+          test -f release/Relay-PC-Gateway-setup.exe
+          test -f release/android-signature-verification.txt
+          test -f release/windows-authenticode-verification.txt
+          test -f release/release-sbom.spdx.json
+          test -f release/signature-verification.json
+          test -f release/RELEASE_ARTIFACT_VERIFICATION.md
+          tar -C release/metadata -czf release/Relay-TUF-metadata.tar.gz tuf
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: formal-release-complete
           path: release/
           if-no-files-found: error
 
   publish:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: [android, windows-installer]
+    needs: [resolve-source, security-attestation]
+    timeout-minutes: 15
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: release-*
+          name: formal-release-complete
           path: release
-          merge-multiple: true
-      - name: Create or update release
+      - name: Refuse incomplete or debug publication
+        run: |
+          set -euo pipefail
+          test -f release/Relay-Android-release.apk
+          test -f release/Relay-PC-Gateway-setup.exe
+          test -f release/SHA256SUMS
+          test -f release/release-sbom.spdx.json
+          test -f release/signature-verification.json
+          test -f release/Relay-TUF-metadata.tar.gz
+          if find release -type f -iname '*debug*' | grep -q .; then
+            echo 'Formal release BLOCKED: debug-named artifact/evidence found.' >&2
+            exit 1
+          fi
+      - name: Create or update formal release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
-          TARGET_REF: ${{ inputs.target_ref }}
+          TARGET_COMMIT: ${{ needs.resolve-source.outputs.commit }}
         run: |
+          set -euo pipefail
+          mapfile -d '' assets < <(find release -maxdepth 1 -type f -print0)
+          test "${#assets[@]}" -gt 0
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"; then
-            gh release upload "$RELEASE_TAG" release/* --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$RELEASE_TAG" release/* --repo "$GITHUB_REPOSITORY" --target "$TARGET_REF" --title "Relay $RELEASE_TAG" --generate-notes
+            gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$TARGET_COMMIT" --title "Relay $RELEASE_TAG" --generate-notes
           fi

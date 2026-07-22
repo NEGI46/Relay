@@ -55,6 +55,7 @@ class AnonymousIngressTest {
 
     @Test fun `public ingress stores without token but returns only unverified receipt and admin remains protected`() = testApplication {
         val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
             dbPath = Files.createTempFile("relay-anonymous", ".db").toString(),
             gatewayId = "gateway-test",
             adminKey = "admin-secret",
@@ -84,6 +85,7 @@ class AnonymousIngressTest {
 
     @Test fun `public ingress enforces per source request limit`() = testApplication {
         val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
             dbPath = Files.createTempFile("relay-anonymous-limit", ".db").toString(),
             maxAnonymousRequestsPerMinute = 1,
         )
@@ -101,7 +103,7 @@ class AnonymousIngressTest {
     }
 
     @Test fun `public ingress stores same batch status change as unverified without applying it`() = testApplication {
-        val config = GatewayConfig(dbPath = Files.createTempFile("relay-anonymous-status", ".db").toString())
+        val config = GatewayConfig(profile = GatewayProfile.DEVELOPMENT, dbPath = Files.createTempFile("relay-anonymous-status", ".db").toString())
         val store = GatewayStore(config)
         application { gatewayModule(config, store) }
         val report = message("report-1")
@@ -134,6 +136,7 @@ class AnonymousIngressTest {
 
     @Test fun `public sync response keeps store outcomes matched to message IDs after priority sorting`() = testApplication {
         val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
             dbPath = Files.createTempFile("relay-anonymous-outcome-ids", ".db").toString(),
             gatewayId = "gateway-test",
         )
@@ -179,10 +182,12 @@ class AnonymousIngressTest {
 
     @Test fun `LAN announcement contains discovery data but no admin secret`() {
         val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
             gatewayId = "gateway-test",
             shelterId = "shelter-test",
             adminKey = "do-not-advertise",
             port = 9080,
+            publicPort = 9080,
         )
         val text = GatewayLanBeacon(config, rescueTrustReady = true).announcementBytes().decodeToString()
         val announcement = GatewayJson.decodeFromString(GatewayLanAnnouncement.serializer(), text)

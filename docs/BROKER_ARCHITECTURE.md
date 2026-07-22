@@ -1,108 +1,67 @@
-# Broker Architecture — モバイル通信経由の救助要請配送
+# Broker architecture — scoped encrypted-envelope relay
 
-## 概要
-
-Brokerは、インターネットが利用可能な場合に、Android端末からPC Gatewayへ救助EnvelopeをHTTPS経由で配送する**任意の補助経路**です。既存のNearby/BLE/LAN経路を置き換えず、並行して動作します。
+The Broker is an optional delivery-assistance component for a limited-area Relay pilot. It never decrypts rescue envelopes and does not prove shelter receipt, responder dispatch, or rescue completion.
 
 ```text
-Android ──HTTPS POST──> Broker (Ktor+SQLite) <──HTTPS GET (poll)── PC Gateway
-Android <──HTTPS GET─── Broker (receipt)     <──HTTPS POST──────── PC Gateway (Receipt Outbox)
+Android ── HTTPS upload ──► TLS proxy ──► Broker (loopback HTTP + SQLite)
+Android ◄─ HTTPS receipt ── TLS proxy ◄── Gateway receipt outbox
+                                      ▲
+                        scoped credential pull / receipt upload
+                                      │
+                               PC Gateway
 ```
 
-## 設計原則
+## Runtime profiles and network boundary
 
-1. **Brokerは復号しない** — 暗号文の一時保存・重複排除・期限管理・避難所別キューのみ
-2. **hopCount不変** — Broker経路はStore-Carry-Forwardのhopではない
-3. **別Ledger管理** — `BROKER_STORED`は避難所受領(`SHELTER_*`)と混同しない
-4. **1 shelterId = 1 active Gateway** — v1は複数Gatewayの自動フェイルオーバー禁止
-5. **アップロード署名 ≠ 本人確認** — 端末鍵はアップロード元を証明するが、本人確認済みとは表示しない
-6. **at-least-once + 冪等** — Brokerは重複排除、Gateway Outboxは再送、AndroidはWorkManagerで再試行
-7. **独立経路** — Broker障害はNearby/BLE/LANに影響しない
-8. **複数運搬端末へ返送** — 同じEnvelopeをアップロードした各端末を関連付け、Receiptを元端末と中継端末へ返す
+`RELAY_BROKER_PROFILE` (or shared `RELAY_PROFILE`) selects `development`, `lab`, or `production`; the default is `production`.
 
-## API
+Core invariants: the Broker never decrypts; it does not increment relay hop count; `BROKER_STORED` is separate from shelter receipt state; routes remain independent; and deduplication plus outbox/retry behavior is at-least-once and idempotent. Android registration proves possession of the P-256 key, rather than treating an upload signature as identity verification.
 
-| Method | Path | 説明 |
-|---|---|---|
-| POST | `/v1/devices/register` | Androidが端末公開鍵と秘密鍵の所持証明を登録し、Receipt取得用capability tokenを受け取る |
-| POST | `/v1/rescue/upload` | AndroidがEnvelopeをアップロード |
-| GET | `/v1/gateways/{shelterId}/pull?cursor=&limit=` | Gatewayが未配送Envelopeを取得 |
-| POST | `/v1/gateways/{shelterId}/receipts` | Gatewayが署名Receiptをアップロード |
-| GET | `/v1/receipts?sinceSeq=` | AndroidがBearer capability tokenで自身の署名Receiptを取得 |
-| GET | `/v1/health` | ヘルスチェック |
+- `production` and `lab` must bind the Broker to loopback. A non-loopback listener stops startup.
+- TLS is not faked in this process. An externally operated reverse proxy, certificate, DNS, firewall/WAF, and hosting decision are required before any external use.
+- Android and PC Gateway reject non-HTTPS Broker URLs. Broker health exposes counts and profile only—no credential, rescue content, or personal data.
+- `RELAY_BROKER_GATEWAY_API_KEY` is a deprecated shared key. It is accepted only in `development`; its presence in `lab`/`production` stops startup.
 
-### セキュリティ
+## Gateway credentials and shelter isolation
 
-- Android / Gatewayの外部接続はHTTPS必須。Broker本体はTLS終端リバースプロキシの内側でHTTP動作
-- 登録4 KiB、Envelope/Receipt 64 KiBの`Content-Length`を本文読込前に必須化・検査
-- AndroidはAndroid KeystoreのECDSA P-256鍵を端末ごとのUUIDに登録し、登録時の秘密鍵所持証明とアップロード署名をBrokerで検証
-- 同じdevice_key_idを異なる公開鍵で再登録できず、既存tokenを第三者の鍵へ返さない
-- Receipt取得は公開のdevice_key_idではなく、Authorization Bearerで登録時に発行する推測困難なcapability tokenを使用
-- Gateway APIは`RELAY_BROKER_GATEWAY_API_KEY`未設定なら起動を拒否（明示的な開発用overrideを除く）
-- device_key_id / capability token / gatewayあたりのスライディングウィンドウレート制限
-- 衝突隔離: 同一(requestId, requestVersion)で異なるciphertext_hash → quarantine + 409
+The former shared Gateway Bearer key is replaced by a high-entropy credential scoped to exactly one `gatewayId` and `shelterId`.
 
-## Android側
-
-| コンポーネント | 役割 |
-|---|---|
-| `BrokerRescueDelivery` | HTTPS POSTでEnvelopeをBrokerへ送信（hopCount不変） |
-| `BrokerRetryWorker` | 失敗時にOneTime WorkManagerで再送（指数backoff 30s〜15min） |
-| `BrokerReceiptPoller` | 30s間隔でBrokerから署名Receiptを取得し`applyReceipt()`で検証。token失効時は再登録して回復 |
-| `UploadSigningKeyStore` | Android Keystore ECDSA P-256でアップロード署名 |
-| `BrokerLedgerEntity` / `BrokerLedgerDao` | Room DB v6の別テーブルでBroker状態を管理 |
-
-### 設定
-
-SharedPreferences `relay_broker_config` の `broker_endpoint` が空の場合はBroker配送無効。
-
-## PC Gateway側
-
-| コンポーネント | 役割 |
-|---|---|
-| `BrokerPullAgent` | BrokerからEnvelopeをpollingし`RescueIntakeService.ingest()`へ渡す |
-| `ReceiptOutbox` | 署名ReceiptをSQLite Outboxに保存し、Brokerへat-least-once配送 |
-
-### 設定
-
-| 環境変数 | デフォルト | 説明 |
-|---|---|---|
-| `RELAY_BROKER_URL` | (無効) | BrokerのHTTPS URL |
-| `RELAY_BROKER_API_KEY` | (空) | Broker側のGateway Bearer API key |
-| `RELAY_BROKER_POLL_INTERVAL_MS` | 10000 | Pull間隔 |
-
-## Brokerサーバー
-
-| 環境変数 | デフォルト | 説明 |
-|---|---|---|
-| `RELAY_BROKER_PORT` | 8443 | Broker HTTPリッスンポート（本番はTLS終端リバースプロキシの内側） |
-| `RELAY_BROKER_DB_PATH` | ./data/broker.db | SQLite DBパス |
-| `RELAY_BROKER_GATEWAY_API_KEY` | (空、開発時のみ) | Gateway Pull/Receipt APIのBearer key |
-| `RELAY_BROKER_ALLOW_INSECURE_GATEWAY` | false | `true`の場合だけAPI keyなし起動を許可。ローカル開発専用 |
-
-Envelopeの最大TTLは7日。期限切れは定期的にpurgeされる。
-
-Broker 1.2では端末登録の所持証明が必須になり、AndroidクライアントとBrokerの協調更新が必要です。旧クライアントは登録APIで拒否されるため、段階的ロールアウト時はBroker更新前に対応アプリを配布してください。
-
-## Room Migration 5→6
-
-```sql
-CREATE TABLE IF NOT EXISTS broker_ledger (
-    requestId TEXT NOT NULL,
-    requestVersion INTEGER NOT NULL,
-    brokerReceiptId TEXT,
-    brokerStatus TEXT NOT NULL DEFAULT 'PENDING',
-    uploadedAtEpochMillis INTEGER,
-    retryCount INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY(requestId, requestVersion)
-)
+```text
+broker_gateway_credentials
+  credential_id | token_hash | gateway_id | shelter_id | issued_at | expires_at | revoked_at
 ```
 
-`RescueEntity`は不変。Broker状態は別テーブルで管理し、`SHELTER_*`状態は署名Receipt経由の`applyReceipt()`でのみ遷移する。
+- Raw token entropy is 256 bits. SQLite stores only SHA-256 of the token, never a reversible secret.
+- `GET /v1/gateways/{shelterId}/pull` requires `Authorization: Bearer …` and `X-Gateway-Id` that both match the stored scope.
+- `POST /v1/gateways/{shelterId}/receipts` additionally requires the payload’s `gatewayId` to match that scope.
+- Expired, revoked, unknown, malformed, wrong-Gateway, and wrong-shelter credentials are rejected. A credential leaked from one shelter cannot pull or upload for another.
+- The local Broker operator command prints a raw credential only at issuance:
 
-## 残課題（v2以降）
+```text
+broker issue-gateway-credential --gateway-id <gateway> --shelter-id <shelter> --expires-at <epoch-millis>
+broker revoke-gateway-credential --credential-id <credential-id>
+```
 
-- 実TLS証明書（Let's Encryptまたは自治体CA）
-- Android Keystore key attestation（任意の強化）
-- 複数Gatewayフェイルオーバー
-- Broker水平スケーリング / HA
+Capture the issuance output in the approved secret-delivery channel, not a shell history, ticket, log, or repository. Set it on the matching Gateway as `RELAY_BROKER_CREDENTIAL`; it is not written to its outbox/cursor database or health/audit output.
+
+## API and data behavior
+
+| Method | Path | Boundary |
+|---|---|---|
+| `POST` | `/v1/devices/register` | Android device public-key registration and capability token issue |
+| `POST` | `/v1/rescue/upload` | HTTPS encrypted-envelope upload, structural/signature validation, dedupe/collision isolation |
+| `GET` | `/v1/gateways/{shelterId}/pull` | scoped Gateway/shelter credential only |
+| `POST` | `/v1/gateways/{shelterId}/receipts` | scoped Gateway/shelter credential only |
+| `GET` | `/v1/receipts?token=&sinceSeq=` | device capability token only |
+| `GET` | `/v1/health` | profile and aggregate non-sensitive queue counts |
+
+The Broker enforces body-size checks, per-device/Gateway rate limits, TTL purge, ciphertext collision quarantine, a composite pull cursor, and receipt sequence cursors. Those controls reduce accidental or cross-shelter exposure; they do not establish sender identity or operational rescue validity.
+
+## Still external / not claimed
+
+- Reverse-proxy TLS configuration and certificate lifecycle
+- HA, horizontal scaling, backup/restore testing, load testing, and incident drills
+- Regional directory/root-key issuance and Gateway credential governance
+- Legal retention/deletion policy, personal-data processing agreement, and incident response ownership
+
+See [production Gateway deployment](runbooks/PRODUCTION_GATEWAY_DEPLOYMENT.md) and [external decision blockers](readiness/BLOCKED_BY_EXTERNAL_DECISIONS.md).

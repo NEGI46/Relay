@@ -2,7 +2,10 @@
 
 The Gateway database is protected at rest by the host filesystem and must be
 exported only as a Litestream replica encrypted with `age`. Never copy a raw
-SQLite database into `distribution/` or attach it to an issue.
+SQLite database into `distribution/` or attach it to an issue. A database
+backup is **not** a key or credential backup: do not include rescue private-key
+files, bootstrap secrets, staff passwords, Broker credentials, age identities,
+or reverse-proxy/TLS private keys in the archive.
 
 ## Backup
 
@@ -52,5 +55,8 @@ skipped rather than faked when the external binary is unavailable.
 - Keep the age identity offline and separate from the backup destination.
 - Use at least two recipients for an operational backup when policy permits.
 - Test a restore periodically on an isolated copy.
+- Restore only the database. Re-provision rescue keys and Broker credentials
+  through their controlled procedures; never recover them from a database
+  backup.
 - Do not log database paths containing secrets, age identities, or plaintext
   payloads.

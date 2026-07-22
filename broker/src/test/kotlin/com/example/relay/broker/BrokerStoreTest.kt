@@ -33,6 +33,16 @@ class BrokerStoreTest {
         dbFile.delete()
     }
 
+    @Test(expected = IllegalArgumentException::class)
+    fun `production broker refuses a direct non-loopback listener`() {
+        BrokerConfig(profile = BrokerProfile.PRODUCTION, host = "0.0.0.0")
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `production broker refuses the legacy shared gateway key`() {
+        BrokerConfig(profile = BrokerProfile.PRODUCTION, legacyGatewayApiKey = "legacy-shared-key")
+    }
+
     private fun testEnvelope(
         envelopeId: String = "env-001",
         requestId: String = "req-001",
@@ -262,6 +272,30 @@ class BrokerStoreTest {
     @Test
     fun `invalid capability token returns null`() {
         assertNull(store.deviceForCapabilityToken("nonexistent-token"))
+    }
+
+    @Test
+    fun `scoped gateway credential is hashed and becomes unusable after revocation`() {
+        val now = System.currentTimeMillis()
+        val issued = store.issueGatewayCredential("gateway-a", "fuchu-01", now + 60_000, now)
+
+        val authenticated = store.authenticateGatewayCredential(issued.token, now + 1)
+        assertNotNull(authenticated)
+        assertEquals("gateway-a", authenticated!!.gatewayId)
+        assertEquals("fuchu-01", authenticated.shelterId)
+
+        DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}").use { connection ->
+            connection.prepareStatement("SELECT token_hash FROM broker_gateway_credentials WHERE credential_id=?").use { query ->
+                query.setString(1, issued.credentialId)
+                query.executeQuery().use { result ->
+                    assertTrue(result.next())
+                    assertFalse(result.getString(1).contains(issued.token))
+                }
+            }
+        }
+
+        assertTrue(store.revokeGatewayCredential(issued.credentialId, now + 2))
+        assertNull(store.authenticateGatewayCredential(issued.token, now + 3))
     }
 
     @Test

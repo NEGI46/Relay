@@ -3,6 +3,7 @@ package com.example.relay.rescue
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import java.net.URI
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.Dispatchers
@@ -81,8 +82,8 @@ class BrokerRescueDelivery(
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
 
     init {
-        require(normalizedEndpoint.isBlank() || normalizedEndpoint.startsWith("https://")) {
-            "Broker endpoint must use HTTPS (got: $normalizedEndpoint)"
+        require(normalizedEndpoint.isBlank() || isSafeBrokerBaseEndpoint(normalizedEndpoint)) {
+            "Broker endpoint must use HTTPS without embedded credentials"
         }
     }
 
@@ -134,8 +135,10 @@ class BrokerRescueDelivery(
 
         val signature = try {
             signingKeyStore.sign(envelope)
-        } catch (e: Exception) {
-            return@withContext BrokerDeliveryResult.Failed("signing_failed:${e.message}", retryable = false)
+        } catch (_: Exception) {
+            // Keystore/provider messages can reveal implementation detail; expose only a stable
+            // diagnosis to UI and persisted retry state.
+            return@withContext BrokerDeliveryResult.Failed("signing_failed", retryable = false)
         }
 
         val request = BrokerUploadRequest(
@@ -179,8 +182,8 @@ class BrokerRescueDelivery(
             } finally {
                 connection.disconnect()
             }
-        }.getOrElse { error ->
-            BrokerDeliveryResult.Failed("network:${error.message ?: "unknown"}", retryable = true)
+        }.getOrElse {
+            BrokerDeliveryResult.Failed("network_error", retryable = true)
         }
     }
 
@@ -220,7 +223,7 @@ class BrokerRescueDelivery(
      * Rejects non-HTTPS URLs at the connection level.
      */
     private fun openSecureConnection(url: String, method: String): HttpsURLConnection {
-        require(url.startsWith("https://")) { "HTTPS required for Broker communication" }
+        require(isSafeHttpsEndpoint(url)) { "HTTPS required for Broker communication" }
         val connection = URL(url).openConnection() as HttpsURLConnection
         connection.requestMethod = method
         // HttpsURLConnection defaults doOutput to false. Without this, both device registration
@@ -277,4 +280,17 @@ class BrokerRescueDelivery(
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
             capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
+
+    private fun isSafeHttpsEndpoint(value: String): Boolean = runCatching {
+        val uri = URI(value)
+        uri.scheme.equals("https", ignoreCase = true) &&
+            !uri.host.isNullOrBlank() &&
+            uri.userInfo == null &&
+            uri.fragment == null &&
+                (uri.port == -1 || uri.port in 1..65_535)
+    }.getOrDefault(false)
+
+    private fun isSafeBrokerBaseEndpoint(value: String): Boolean = runCatching {
+        URI(value).query == null && isSafeHttpsEndpoint(value)
+    }.getOrDefault(false)
 }

@@ -16,10 +16,12 @@ import com.example.relay.pcgateway.rescue.RescueStatusChangeResponse
 import com.example.relay.pcgateway.rescue.RescueStatusUpdateResult
 import com.example.relay.pcgateway.rescue.toOperatorRequest
 import io.ktor.http.ContentType
+import io.ktor.http.Cookie
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.application.install
@@ -27,12 +29,14 @@ import io.ktor.server.http.content.staticResources
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.receive
 import io.ktor.server.request.receiveText
+import io.ktor.server.request.uri
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import java.security.MessageDigest
 import kotlinx.serialization.Serializable
 import io.ktor.server.routing.routing
 
@@ -42,11 +46,26 @@ private const val MAX_CONTROL_BODY_BYTES = 16L * 1024
 @Serializable data class PairApproveRequest(val code: String, val bridgeId: String)
 @Serializable data class PairRejectRequest(val bridgeId: String, val code: String? = null)
 @Serializable data class PairResponse(val paired: Boolean, val token: String? = null, val reason: String? = null)
+@Serializable data class StaffLoginRequest(val username: String, val password: String)
+@Serializable data class StaffSessionResponse(
+    val username: String,
+    val role: StaffRole,
+    val expiresAtEpochMillis: Long? = null,
+)
+@Serializable data class CreateStaffAccountRequest(val username: String, val password: String, val role: StaffRole)
+@Serializable data class UpdateStaffRoleRequest(val role: StaffRole)
+@Serializable data class UpdateStaffDisabledRequest(val disabled: Boolean)
 @Serializable data class HealthResponse(
     val status: String,
     val gatewayId: String,
     val database: String,
+    val profile: String = "production",
+    val lanMode: String = "disabled",
     val anonymousIngress: Boolean = true,
+    val remoteManagementEnabled: Boolean = false,
+    val legacyAdminKeyEnabled: Boolean = false,
+    val bootstrapRequired: Boolean = true,
+    val configurationWarnings: List<String> = emptyList(),
     val lanDiscoveryPort: Int = 42888,
     /** Fail-closed until an authenticated local BLE bridge heartbeat is wired. */
     val bleBridgeStatus: String = "unavailable",
@@ -56,8 +75,10 @@ private const val MAX_CONTROL_BODY_BYTES = 16L * 1024
     val recipientKeyId: String? = null,
     val manifestFingerprint: String? = null,
     val rescueIngressReady: Boolean = false,
-    val rescueKeyPath: String? = null,
-    val runtimeUser: String = System.getProperty("user.name", "unknown"),
+    val rescueKeyStorage: String = "not_checked",
+    val rescueKeyStatus: String = "not_checked",
+    val rescueKeyExpiresAtEpochMillis: Long? = null,
+    val rescueKeyRotationStatus: String = "manual_reprovisioning_required",
 )
 
 @Serializable
@@ -84,6 +105,7 @@ fun Application.gatewayModule(
     rescueIntakeService: RescueIntakeService? = null,
     offlineMap: GsiTileCache? = null,
     officialInformation: OfficialInformationService? = null,
+    rescueKeyStatus: GatewayRescueKeyStatus = GatewayRescueKeyStatus.notChecked(),
     anonymousLimiter: AnonymousIngressRateLimiter = AnonymousIngressRateLimiter(
         config.maxAnonymousRequestsPerMinute,
         config.maxAnonymousMessagesPerMinute,
@@ -91,14 +113,33 @@ fun Application.gatewayModule(
     ),
 ) {
     install(ContentNegotiation) { json(GatewayJson) }
+    val access = store.accessStore()
     routing {
+        // Avoid presenting an operator console through a reverse proxy until remote management
+        // has been explicitly enabled. API endpoints enforce the same boundary independently.
+        intercept(ApplicationCallPipeline.Plugins) {
+            val staticOperatorPath = call.request.uri.substringBefore('?') in setOf(
+                "/", "/index.html", "/app.js", "/app.css", "/legacy",
+            )
+            if (staticOperatorPath && !config.managementSourceAllowed(call.remoteSource())) {
+                access.audit(null, null, "AUTH_REJECTED", "REMOTE_OPERATOR_UI_DISABLED", call.remoteSource())
+                call.respond(HttpStatusCode.NotFound)
+                finish()
+            }
+        }
         get("/api/health") {
             call.respond(
                 HealthResponse(
-                    status = "ok",
+                    status = if (access.bootstrapRequired()) "bootstrap_required" else "ok",
                     gatewayId = config.gatewayId,
                     database = "ready",
+                    profile = config.profile.name.lowercase(),
+                    lanMode = config.lanMode.name.lowercase(),
                     anonymousIngress = config.anonymousIngressEnabled,
+                    remoteManagementEnabled = config.remoteManagementEnabled,
+                    legacyAdminKeyEnabled = config.legacyAdminKeyEnabled,
+                    bootstrapRequired = access.bootstrapRequired(),
+                    configurationWarnings = config.configurationWarnings + listOfNotNull(rescueKeyStatus.warningCode),
                     lanDiscoveryPort = config.lanDiscoveryPort,
                     bleBridgeStatus = if (rescueBleReady) "awaiting_sidecar" else "not_ready",
                     version = config.version,
@@ -107,9 +148,41 @@ fun Application.gatewayModule(
                     recipientKeyId = config.rescueRecipientKeyId,
                     manifestFingerprint = config.rescueManifestFingerprint,
                     rescueIngressReady = rescueIntakeService != null && rescueBleReady && config.anonymousIngressEnabled,
-                    rescueKeyPath = config.rescueKeyPath,
+                    rescueKeyStorage = rescueKeyStatus.storage,
+                    rescueKeyStatus = rescueKeyStatus.status,
+                    rescueKeyExpiresAtEpochMillis = rescueKeyStatus.expiresAtEpochMillis,
                 ),
             )
+        }
+        post("/api/auth/login") {
+            if (!config.managementSourceAllowed(call.remoteSource())) {
+                access.audit(null, null, "AUTH_REJECTED", "REMOTE_MANAGEMENT_DISABLED", call.remoteSource())
+                return@post call.respond(HttpStatusCode.Forbidden, mapOf("reason" to "remote_management_disabled"))
+            }
+            val request = runCatching { call.receive<StaffLoginRequest>() }.getOrElse {
+                access.audit(null, null, "LOGIN", "MALFORMED", call.remoteSource())
+                return@post call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "malformed_login"))
+            }
+            when (val result = access.login(request.username, request.password, call.remoteSource(), config.sessionTtlMillis)) {
+                is LoginResult.Success -> {
+                    call.appendSessionCookie(config, result.session)
+                    call.respond(StaffSessionResponse(result.staff.username, result.staff.role, result.session.expiresAtEpochMillis))
+                }
+                LoginResult.InvalidCredentials,
+                LoginResult.Disabled,
+                -> call.respond(HttpStatusCode.Unauthorized, mapOf("reason" to "invalid_credentials"))
+            }
+        }
+        get("/api/auth/session") {
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
+            access.audit(staff, null, "SESSION_VIEW", "SUCCESS", call.remoteSource())
+            call.respond(StaffSessionResponse(staff.username, staff.role))
+        }
+        post("/api/auth/logout") {
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@post
+            access.revokeSession(call.request.cookies[SESSION_COOKIE_NAME], staff, call.remoteSource())
+            call.clearSessionCookie(config)
+            call.respond(HttpStatusCode.NoContent)
         }
         get("/api/public/rescue/manifest") {
             val manifest = rescueManifest ?: return@get call.respond(HttpStatusCode.NotFound)
@@ -117,9 +190,7 @@ fun Application.gatewayModule(
             call.respond(manifest)
         }
         get("/api/rescue/requests") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@get call.respond(HttpStatusCode.Unauthorized)
-            }
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
             val service = rescueIntakeService ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
             service.purgeExpiredDetails()
             val items = service.list(latestOnly = true).mapNotNull { summary ->
@@ -132,65 +203,75 @@ fun Application.gatewayModule(
                     .thenByDescending { it.receivedAtEpochMillis },
             )
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            access.audit(staff, null, "RESCUE_LIST_VIEW", "SUCCESS", call.remoteSource())
             call.respond(RescueOperatorListResponse(System.currentTimeMillis(), items = items))
         }
         get("/api/rescue/requests/{id}") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@get call.respond(HttpStatusCode.Unauthorized)
-            }
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
             val service = rescueIntakeService ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
             val id = call.parameters["id"] ?: return@get call.respond(HttpStatusCode.BadRequest)
             val version = call.request.queryParameters["version"]?.toIntOrNull()
             val detail = service.detail(id, version) ?: return@get call.respond(HttpStatusCode.NotFound)
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            access.audit(staff, id, "RESCUE_VIEW", "SUCCESS", call.remoteSource())
             call.respond(detail.toOperatorRequest())
         }
         post("/api/rescue/requests/{id}/status") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@post call.respond(HttpStatusCode.Unauthorized)
-            }
+            val staff = call.requireStaff(config, access, StaffRole.OPERATOR) ?: return@post
             val service = rescueIntakeService ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
             val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
             if (!call.requireBoundedBody(MAX_CONTROL_BODY_BYTES)) return@post
             val request = call.receive<RescueStatusChangeRequest>()
-            when (val result = service.updateStatus(id, request.status, request.operatorNodeId)) {
-                is RescueStatusUpdateResult.Updated -> call.respond(
-                    RescueStatusChangeResponse(
-                        updated = true,
-                        status = result.request.responseStatus,
-                        assignedNodeId = result.request.assignedNodeId,
-                    ),
-                )
-                RescueStatusUpdateResult.NotFound -> call.respond(
-                    HttpStatusCode.NotFound,
-                    RescueStatusChangeResponse(false, reason = "not_found"),
-                )
-                is RescueStatusUpdateResult.InvalidTransition -> call.respond(
-                    HttpStatusCode.Conflict,
-                    RescueStatusChangeResponse(false, result.current, reason = "invalid_transition"),
-                )
-                is RescueStatusUpdateResult.AssignedElsewhere -> call.respond(
-                    HttpStatusCode.Conflict,
-                    RescueStatusChangeResponse(false, assignedNodeId = result.assignedNodeId, reason = "assigned_elsewhere"),
-                )
+            // Never trust an operator name supplied by a browser.  Claim ownership is bound to
+            // the authenticated local account, and the audit record uses the same identity.
+            when (val result = service.updateStatus(id, request.status, staff.username)) {
+                is RescueStatusUpdateResult.Updated -> {
+                    val auditAction = if (
+                        request.status == com.example.relay.pcgateway.rescue.RescueResponseStatus.CONFIRMED &&
+                        result.request.assignedNodeId == staff.username
+                    ) {
+                        "RESCUE_ASSIGNMENT_START"
+                    } else {
+                        "RESCUE_STATUS_CHANGE"
+                    }
+                    access.audit(staff, id, auditAction, "SUCCESS", call.remoteSource())
+                    call.respond(
+                        RescueStatusChangeResponse(
+                            updated = true,
+                            status = result.request.responseStatus,
+                            assignedNodeId = result.request.assignedNodeId,
+                        ),
+                    )
+                }
+                RescueStatusUpdateResult.NotFound -> {
+                    access.audit(staff, id, "RESCUE_STATUS_CHANGE", "NOT_FOUND", call.remoteSource())
+                    call.respond(HttpStatusCode.NotFound, RescueStatusChangeResponse(false, reason = "not_found"))
+                }
+                is RescueStatusUpdateResult.InvalidTransition -> {
+                    access.audit(staff, id, "RESCUE_STATUS_CHANGE", "REJECTED", call.remoteSource())
+                    call.respond(HttpStatusCode.Conflict, RescueStatusChangeResponse(false, result.current, reason = "invalid_transition"))
+                }
+                is RescueStatusUpdateResult.AssignedElsewhere -> {
+                    access.audit(staff, id, "RESCUE_STATUS_CHANGE", "ASSIGNED_ELSEWHERE", call.remoteSource())
+                    call.respond(HttpStatusCode.Conflict, RescueStatusChangeResponse(false, assignedNodeId = result.assignedNodeId, reason = "assigned_elsewhere"))
+                }
             }
         }
         get("/api/map/status") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@get call.respond(HttpStatusCode.Unauthorized)
-            }
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
             val map = offlineMap ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
+            access.audit(staff, null, "MAP_STATUS_VIEW", "SUCCESS", call.remoteSource())
             call.respond(map.status())
         }
         post("/api/map/prepare") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@post call.respond(HttpStatusCode.Unauthorized)
-            }
+            val staff = call.requireStaff(config, access, StaffRole.ADMIN) ?: return@post
             val map = offlineMap ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
             map.prepare()
+            access.audit(staff, null, "MAP_PREPARE", "SUCCESS", call.remoteSource())
             call.respond(HttpStatusCode.Accepted, map.status())
         }
         get("/api/map/tiles/{z}/{x}/{y}") {
+            call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
             val map = offlineMap ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
             val z = call.parameters["z"]?.toIntOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
             val x = call.parameters["x"]?.toIntOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
@@ -201,14 +282,15 @@ fun Application.gatewayModule(
             call.respondBytes(bytes, ContentType.Image.PNG)
         }
         get("/api/official-info") {
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
             val information = officialInformation ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            access.audit(staff, null, "OFFICIAL_INFO_VIEW", "SUCCESS", call.remoteSource())
             call.respond(information.current())
         }
         get("/api/pair/code") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@get call.respond(HttpStatusCode.Unauthorized)
-            }
+            val staff = call.requireStaff(config, access, StaffRole.ADMIN) ?: return@get
+            access.audit(staff, null, "PAIR_CODE_CREATE", "SUCCESS", call.remoteSource())
             call.respond(mapOf("code" to store.createPairingCode()))
         }
         post("/api/pair/request") {
@@ -218,24 +300,22 @@ fun Application.gatewayModule(
             call.respond(if (accepted) PairResponse(true) else PairResponse(false, reason = "invalid_or_expired_code"))
         }
         post("/api/pair/approve") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@post call.respond(HttpStatusCode.Unauthorized)
-            }
+            val staff = call.requireStaff(config, access, StaffRole.ADMIN) ?: return@post
             if (!call.requireBoundedBody(MAX_CONTROL_BODY_BYTES)) return@post
             val request = call.receive<PairApproveRequest>()
             val token = store.approvePair(request.bridgeId, request.code)
+            access.audit(staff, request.bridgeId, "PAIR_APPROVE", if (token == null) "REJECTED" else "SUCCESS", call.remoteSource())
             call.respond(if (token == null) PairResponse(false, reason = "pairing_failed") else PairResponse(true, token))
         }
         post("/api/pair/reject") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@post call.respond(HttpStatusCode.Unauthorized)
-            }
+            val staff = call.requireStaff(config, access, StaffRole.ADMIN) ?: return@post
             if (!call.requireBoundedBody(MAX_CONTROL_BODY_BYTES)) return@post
             val request = call.receive<PairRejectRequest>()
             if (request.bridgeId.isBlank()) {
                 return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "bridgeId_required"))
             }
             val ok = store.rejectPair(request.bridgeId, request.code)
+            access.audit(staff, request.bridgeId, "PAIR_REJECT", if (ok) "SUCCESS" else "NOT_FOUND", call.remoteSource())
             call.respond(if (ok) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
         }
         post("/api/sync/messages") {
@@ -360,23 +440,23 @@ fun Application.gatewayModule(
             call.respond(ReceiptResponse(receipts = store.receiptsForBridge(bridgeId)))
         }
         get("/api/bridges") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@get call.respond(HttpStatusCode.Unauthorized)
-            }
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
+            access.audit(staff, null, "BRIDGE_LIST_VIEW", "SUCCESS", call.remoteSource())
             call.respond(store.summaries())
         }
-        /** Public local snapshot for the operator console (no payload bodies). */
+        /** Operator snapshot intentionally requires the same viewer boundary as the detailed views. */
         get("/api/dashboard") {
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
+            access.audit(staff, null, "DASHBOARD_VIEW", "SUCCESS", call.remoteSource())
             call.respond(store.dashboard(config))
         }
         get("/api/messages") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@get call.respond(HttpStatusCode.Unauthorized)
-            }
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
             val counts = store.counts()
             val trust = store.trustCounts()
             val routes = store.routeAuthenticationCounts()
             val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 300
+            access.audit(staff, null, "MESSAGE_LIST_VIEW", "SUCCESS", call.remoteSource())
             call.respond(
                 MessagesListResponse(
                     messages = counts.first,
@@ -399,20 +479,71 @@ fun Application.gatewayModule(
             )
         }
         get("/api/messages/export.csv") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@get call.respond(HttpStatusCode.Unauthorized)
-            }
+            val staff = call.requireStaff(config, access, StaffRole.ADMIN) ?: return@get
             val csv = store.exportCsv()
             call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"relay-messages.csv\"")
+            access.audit(staff, null, "MESSAGE_CSV_EXPORT", "SUCCESS", call.remoteSource())
             call.respondText(csv, ContentType.Text.CSV)
         }
         get("/api/messages/{id}") {
-            if (call.request.headers["X-Admin-Key"] != config.adminKey) {
-                return@get call.respond(HttpStatusCode.Unauthorized)
-            }
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
             val id = call.parameters["id"] ?: return@get call.respond(HttpStatusCode.BadRequest)
             val detail = store.messageDetail(id) ?: return@get call.respond(HttpStatusCode.NotFound)
+            access.audit(staff, id, "MESSAGE_VIEW", "SUCCESS", call.remoteSource())
             call.respond(detail)
+        }
+        get("/api/admin/accounts") {
+            val staff = call.requireStaff(config, access, StaffRole.ADMIN) ?: return@get
+            access.audit(staff, null, "ACCOUNT_LIST_VIEW", "SUCCESS", call.remoteSource())
+            call.respond(access.accounts())
+        }
+        post("/api/admin/accounts") {
+            val staff = call.requireStaff(config, access, StaffRole.ADMIN) ?: return@post
+            val request = runCatching { call.receive<CreateStaffAccountRequest>() }.getOrElse {
+                access.audit(staff, null, "ACCOUNT_CREATE", "MALFORMED", call.remoteSource())
+                return@post call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "malformed_account"))
+            }
+            val created = access.createAccount(staff, request.username, request.password, request.role, call.remoteSource())
+            call.respond(if (created) HttpStatusCode.Created else HttpStatusCode.UnprocessableEntity, mapOf("created" to created))
+        }
+        post("/api/admin/accounts/{username}/role") {
+            val staff = call.requireStaff(config, access, StaffRole.ADMIN) ?: return@post
+            val username = call.parameters["username"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val request = runCatching { call.receive<UpdateStaffRoleRequest>() }.getOrElse {
+                access.audit(staff, username, "ACCOUNT_ROLE_CHANGE", "MALFORMED", call.remoteSource())
+                return@post call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "malformed_role"))
+            }
+            val updated = access.updateRole(staff, username, request.role, call.remoteSource())
+            call.respond(if (updated) HttpStatusCode.OK else HttpStatusCode.Conflict, mapOf("updated" to updated))
+        }
+        post("/api/admin/accounts/{username}/disabled") {
+            val staff = call.requireStaff(config, access, StaffRole.ADMIN) ?: return@post
+            val username = call.parameters["username"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val request = runCatching { call.receive<UpdateStaffDisabledRequest>() }.getOrElse {
+                access.audit(staff, username, "ACCOUNT_DISABLE", "MALFORMED", call.remoteSource())
+                return@post call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "malformed_disable"))
+            }
+            val updated = access.setAccountDisabled(staff, username, request.disabled, call.remoteSource())
+            call.respond(if (updated) HttpStatusCode.OK else HttpStatusCode.Conflict, mapOf("updated" to updated))
+        }
+        get("/api/audit") {
+            val staff = call.requireStaff(config, access, StaffRole.ADMIN) ?: return@get
+            access.audit(staff, null, "AUDIT_LOG_VIEW", "SUCCESS", call.remoteSource())
+            call.respond(
+                access.auditRecords(
+                    action = call.request.queryParameters["action"],
+                    operator = call.request.queryParameters["operator"],
+                    targetId = call.request.queryParameters["targetId"],
+                    limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 500,
+                ),
+            )
+        }
+        get("/api/audit/export.csv") {
+            val staff = call.requireStaff(config, access, StaffRole.ADMIN) ?: return@get
+            val csv = access.exportAuditCsv(call.request.queryParameters["limit"]?.toIntOrNull() ?: 5_000)
+            call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"relay-audit-log.csv\"")
+            access.audit(staff, null, "AUDIT_CSV_EXPORT", "SUCCESS", call.remoteSource())
+            call.respondText(csv, ContentType.Text.CSV)
         }
         // Static operator console (classpath: web/)
         staticResources("/", "web") {
@@ -428,6 +559,102 @@ fun Application.gatewayModule(
             }
         }
     }
+}
+
+/** Safe key diagnostics: no key path, key identifier, certificate, or private material is exposed. */
+data class GatewayRescueKeyStatus(
+    val storage: String,
+    val status: String,
+    val expiresAtEpochMillis: Long? = null,
+    val warningCode: String? = null,
+) {
+    companion object {
+        fun notChecked() = GatewayRescueKeyStatus(storage = "not_checked", status = "not_checked")
+        fun valid(expiresAtEpochMillis: Long, warning: Boolean) = GatewayRescueKeyStatus(
+            storage = "local_file_permission_checked",
+            status = if (warning) "expiring_soon" else "valid",
+            expiresAtEpochMillis = expiresAtEpochMillis,
+            warningCode = if (warning) "rescue_key_expiring_soon_manual_reprovisioning_required" else null,
+        )
+    }
+}
+
+private const val SESSION_COOKIE_NAME = "relay_staff_session"
+
+private fun io.ktor.server.application.ApplicationCall.remoteSource(): String? =
+    request.local.remoteHost.takeIf { it.isNotBlank() }
+
+private suspend fun io.ktor.server.application.ApplicationCall.requireStaff(
+    config: GatewayConfig,
+    access: GatewayAccessStore,
+    requiredRole: StaffRole,
+): AuthenticatedStaff? {
+    val source = remoteSource()
+    if (!config.managementSourceAllowed(source)) {
+        access.audit(null, null, "AUTH_REJECTED", "REMOTE_MANAGEMENT_DISABLED", source)
+        respond(HttpStatusCode.Forbidden, mapOf("reason" to "remote_management_disabled"))
+        return null
+    }
+    val legacyHeader = request.headers["X-Admin-Key"]
+    if (legacyHeader != null) {
+        if (!config.legacyAdminKeyEnabled || config.adminKey == null) {
+            access.audit(null, null, "AUTH_REJECTED", "LEGACY_ADMIN_KEY_DISABLED", source)
+            respond(HttpStatusCode.Unauthorized, mapOf("reason" to "legacy_admin_key_disabled"))
+            return null
+        }
+        val accepted = MessageDigest.isEqual(
+            legacyHeader.toByteArray(Charsets.UTF_8),
+            config.adminKey.toByteArray(Charsets.UTF_8),
+        )
+        if (!accepted) {
+            access.audit(null, null, "AUTH_REJECTED", "INVALID_LEGACY_ADMIN_KEY", source)
+            respond(HttpStatusCode.Unauthorized, mapOf("reason" to "invalid_credentials"))
+            return null
+        }
+        val legacy = AuthenticatedStaff("legacy-development-admin", StaffRole.ADMIN, legacyDevelopmentKey = true)
+        access.audit(legacy, null, "LEGACY_ADMIN_KEY_AUTH", "SUCCESS", source)
+        return legacy
+    }
+    val staff = access.authenticateSession(request.cookies[SESSION_COOKIE_NAME])
+    if (staff == null) {
+        access.audit(null, null, "AUTH_REJECTED", "INVALID_OR_EXPIRED_SESSION", source)
+        respond(HttpStatusCode.Unauthorized, mapOf("reason" to "authentication_required"))
+        return null
+    }
+    if (!staff.role.permits(requiredRole)) {
+        access.audit(staff, null, "AUTHORIZATION_REJECTED", "INSUFFICIENT_ROLE", source)
+        respond(HttpStatusCode.Forbidden, mapOf("reason" to "insufficient_role"))
+        return null
+    }
+    return staff
+}
+
+private fun io.ktor.server.application.ApplicationCall.appendSessionCookie(config: GatewayConfig, session: GatewaySession) {
+    response.cookies.append(
+        Cookie(
+            name = SESSION_COOKIE_NAME,
+            value = session.token,
+            maxAge = (config.sessionTtlMillis / 1_000).toInt(),
+            path = "/",
+            secure = config.sessionCookieSecure,
+            httpOnly = true,
+            extensions = mapOf("SameSite" to "Strict"),
+        ),
+    )
+}
+
+private fun io.ktor.server.application.ApplicationCall.clearSessionCookie(config: GatewayConfig) {
+    response.cookies.append(
+        Cookie(
+            name = SESSION_COOKIE_NAME,
+            value = "",
+            maxAge = 0,
+            path = "/",
+            secure = config.sessionCookieSecure,
+            httpOnly = true,
+            extensions = mapOf("SameSite" to "Strict"),
+        ),
+    )
 }
 
 @Serializable

@@ -19,6 +19,8 @@ data class GatewayLanAnnouncement(
     val shelterId: String,
     val rescueIngressReady: Boolean,
     val apiPort: Int,
+    /** Public endpoint scheme; production reverse-proxy deployments advertise HTTPS only. */
+    val apiScheme: String = "http",
     val anonymousIngressPath: String = "/api/public/sync/messages",
     val receiptTrust: String = "UNVERIFIED",
 )
@@ -37,7 +39,8 @@ class GatewayLanBeacon(
             gatewayId = config.gatewayId,
             shelterId = config.shelterId,
             rescueIngressReady = config.anonymousIngressEnabled && rescueTrustReady,
-            apiPort = config.port,
+            apiPort = config.publicPort,
+            apiScheme = config.publicScheme,
         ),
     ).encodeToByteArray()
 

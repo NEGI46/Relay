@@ -171,7 +171,8 @@ object ShelterManifestProvisioningCli {
         println("Provisioned signed shelter manifest for ${signed.manifest.shelterId}; fingerprint=${signed.manifest.fingerprint()}")
         0
     }.getOrElse { error ->
-        System.err.println("Provisioning failed: ${error.message}")
+        // Root-material parsing errors may include operator-supplied paths or serialized input.
+        System.err.println("Provisioning failed (${error.javaClass.simpleName})")
         2
     }
 

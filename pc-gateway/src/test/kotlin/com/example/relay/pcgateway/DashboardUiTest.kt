@@ -78,8 +78,9 @@ class DashboardUiTest {
     }
 
     @Test
-    fun `dashboard and static console are available without admin key`() = testApplication {
+    fun `dashboard requires authorization while static console stays public`() = testApplication {
         val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
             dbPath = Files.createTempFile("relay-ui", ".db").toString(),
             adminKey = "admin-secret",
             gatewayId = "gw-ui",
@@ -88,7 +89,8 @@ class DashboardUiTest {
             store.ingestUnregistered(listOf(message()), 2_000)
             application { gatewayModule(config, store) }
 
-            val dash = client.get("/api/dashboard")
+            assertEquals(HttpStatusCode.Unauthorized, client.get("/api/dashboard").status)
+            val dash = client.get("/api/dashboard") { header("X-Admin-Key", "admin-secret") }
             assertEquals(HttpStatusCode.OK, dash.status)
             val body = dash.bodyAsText()
             assertTrue(body.contains("\"gatewayId\":\"gw-ui\""))
@@ -113,6 +115,7 @@ class DashboardUiTest {
     @Test
     fun `message detail and csv require admin key`() = testApplication {
         val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
             dbPath = Files.createTempFile("relay-ui2", ".db").toString(),
             adminKey = "admin-secret",
         )
@@ -141,6 +144,7 @@ class DashboardUiTest {
     @Test
     fun `filtered messages endpoint accepts trust query`() = testApplication {
         val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
             dbPath = Files.createTempFile("relay-ui3", ".db").toString(),
             adminKey = "admin-secret",
         )
@@ -158,6 +162,7 @@ class DashboardUiTest {
     @Test
     fun `paired route is separately filterable while content remains unverified`() = testApplication {
         val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
             dbPath = Files.createTempFile("relay-ui-route", ".db").toString(),
             adminKey = "admin-secret",
         )

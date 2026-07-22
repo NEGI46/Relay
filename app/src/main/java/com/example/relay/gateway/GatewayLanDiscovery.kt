@@ -22,6 +22,7 @@ private data class AndroidGatewayLanAnnouncement(
     val shelterId: String? = null,
     val rescueIngressReady: Boolean? = null,
     val apiPort: Int = 8080,
+    val apiScheme: String = "http",
     val anonymousIngressPath: String = "/api/public/sync/messages",
     val receiptTrust: String = "UNVERIFIED",
 )
@@ -93,6 +94,7 @@ class UdpGatewayDiscovery(
                             announcement.discoveryVersion != 1 ||
                             announcement.protocolVersion != GATEWAY_PROTOCOL_VERSION ||
                             announcement.apiPort !in 1..65_535 ||
+                            announcement.apiScheme !in setOf("http", "https") ||
                             announcement.gatewayId.isBlank() ||
                             announcement.shelterId?.let { it.isBlank() || it.length > 128 } == true ||
                             announcement.anonymousIngressPath != "/api/public/sync/messages"
@@ -103,6 +105,7 @@ class UdpGatewayDiscovery(
                             host = host,
                             port = announcement.apiPort,
                             gatewayId = announcement.gatewayId,
+                            scheme = announcement.apiScheme,
                             shelterId = announcement.shelterId,
                             rescueIngressReady = announcement.rescueIngressReady,
                         )

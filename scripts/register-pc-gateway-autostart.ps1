@@ -2,11 +2,18 @@
 param(
     [string]$Executable = "$env:ProgramFiles\RelayPcGateway\RelayPcGateway.exe",
     [string]$TaskName = 'Relay PC Gateway',
-    [string]$HostBind = '0.0.0.0',
+    [ValidateSet('production', 'lab', 'development')]
+    [string]$Profile = 'production',
+    [ValidateSet('disabled', 'closed-network', 'tls-reverse-proxy')]
+    [string]$LanMode = 'disabled',
+    [string]$HostBind = '127.0.0.1',
     [ValidateRange(1, 65535)]
     [int]$Port = 8080,
     [string]$GatewayId = 'pc-gateway-local',
-    [string]$AdminKey = '',
+    [switch]$EnableAnonymousIngress,
+    [switch]$EnableLanDiscovery,
+    [switch]$EnableRemoteManagement,
+    [switch]$SessionCookieSecure,
     [string]$DbPath = '',
     [string]$RescueKeyFile = "$env:ProgramData\RelayPcGateway\rescue-keys.json",
     [string]$SignedManifestFile = "$env:ProgramData\RelayPcGateway\rescue-manifest.json",
@@ -26,6 +33,10 @@ function ConvertTo-SingleQuotedLiteral([string]$Value) {
     return "'" + $Value.Replace("'", "''") + "'"
 }
 
+function Test-LoopbackAddress([Net.IPAddress]$Address) {
+    return [Net.IPAddress]::IsLoopback($Address)
+}
+
 if (-not (Test-IsAdministrator)) {
     throw 'Run this script from an elevated Administrator PowerShell.'
 }
@@ -42,52 +53,60 @@ $parsedAddress = $null
 if (-not [Net.IPAddress]::TryParse($HostBind, [ref]$parsedAddress)) {
     throw 'HostBind must be a valid IP address.'
 }
+$isLoopback = Test-LoopbackAddress $parsedAddress
+
+if ($LanMode -eq 'tls-reverse-proxy' -and -not $isLoopback) {
+    throw 'TLS reverse-proxy mode must bind Relay itself to loopback; expose only the separately operated proxy.'
+}
+if ($Profile -ne 'development' -and -not $isLoopback -and $LanMode -eq 'disabled') {
+    throw 'Production/lab non-loopback binding requires -LanMode closed-network or tls-reverse-proxy.'
+}
+if ($Profile -ne 'development' -and ($EnableAnonymousIngress -or $EnableLanDiscovery) -and $LanMode -eq 'disabled') {
+    throw 'Production/lab anonymous ingress or LAN discovery requires an explicit LAN mode.'
+}
+if ($EnableLanDiscovery -and -not $EnableAnonymousIngress) {
+    throw 'LAN discovery advertises anonymous sync; enable anonymous ingress too or leave discovery disabled.'
+}
+if ($EnableRemoteManagement -and $LanMode -ne 'tls-reverse-proxy') {
+    throw 'Remote browser management requires -LanMode tls-reverse-proxy.'
+}
+if ($EnableRemoteManagement -and -not $SessionCookieSecure) {
+    throw 'Remote browser management requires -SessionCookieSecure.'
+}
 
 $Executable = [IO.Path]::GetFullPath($Executable)
 $RunnerPath = [IO.Path]::GetFullPath($RunnerPath)
 $RescueKeyFile = [IO.Path]::GetFullPath($RescueKeyFile)
 $SignedManifestFile = [IO.Path]::GetFullPath($SignedManifestFile)
 $RegionalRootBundleFile = [IO.Path]::GetFullPath($RegionalRootBundleFile)
-$rescueDirectory = Split-Path -Parent $RescueKeyFile
-New-Item -ItemType Directory -Path $rescueDirectory -Force | Out-Null
-if (Test-Path -LiteralPath $RescueKeyFile -PathType Leaf) {
-    & icacls.exe $RescueKeyFile /inheritance:r /grant:r 'Administrators:F' 'SYSTEM:F' | Out-Null
-}
-$relayDir = Join-Path $env:USERPROFILE '.relay'
+$relayDir = Split-Path -Parent $RunnerPath
 New-Item -ItemType Directory -Path $relayDir -Force | Out-Null
-$adminKeyFile = Join-Path $relayDir 'admin.key'
-
-# The secret is stored in a file and never embedded in task arguments or runner source.
-if ([string]::IsNullOrWhiteSpace($AdminKey)) {
-    if (-not (Test-Path -LiteralPath $adminKeyFile -PathType Leaf) -or
-        [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $adminKeyFile -Raw))) {
-        [guid]::NewGuid().ToString() | Set-Content -LiteralPath $adminKeyFile -Encoding ascii
-        Write-Output "Generated admin key file: $adminKeyFile"
-    }
-} else {
-    $AdminKey.Trim() | Set-Content -LiteralPath $adminKeyFile -Encoding ascii
-}
-
 if ([string]::IsNullOrWhiteSpace($DbPath)) {
     $DbPath = Join-Path $relayDir 'relay-gateway.db'
 }
 $DbPath = [IO.Path]::GetFullPath($DbPath)
 
+# Do not create an admin key or a default password. The first local administrator is created
+# once with RelayPcGateway.exe bootstrap-admin --username <id>, using an interactive console or
+# RELAY_GATEWAY_BOOTSTRAP_CLI_SECRET only for that command.
 $runnerDirectory = Split-Path -Parent $RunnerPath
 New-Item -ItemType Directory -Path $runnerDirectory -Force | Out-Null
 $executableDirectory = Split-Path -Parent $Executable
 $runnerLines = @(
     "`$ErrorActionPreference = 'Stop'"
+    "`$env:RELAY_PROFILE = $(ConvertTo-SingleQuotedLiteral $Profile)"
+    "`$env:RELAY_GATEWAY_LAN_MODE = $(ConvertTo-SingleQuotedLiteral $LanMode)"
     "`$env:RELAY_GATEWAY_HOST = $(ConvertTo-SingleQuotedLiteral $HostBind)"
     "`$env:RELAY_GATEWAY_PORT = $(ConvertTo-SingleQuotedLiteral $Port.ToString())"
     "`$env:RELAY_GATEWAY_ID = $(ConvertTo-SingleQuotedLiteral $GatewayId)"
     "`$env:RELAY_GATEWAY_DB = $(ConvertTo-SingleQuotedLiteral $DbPath)"
-    "`$env:RELAY_GATEWAY_ADMIN_KEY_FILE = $(ConvertTo-SingleQuotedLiteral $adminKeyFile)"
     "`$env:RELAY_RESCUE_KEY_FILE = $(ConvertTo-SingleQuotedLiteral $RescueKeyFile)"
     "`$env:RELAY_RESCUE_SIGNED_MANIFEST_FILE = $(ConvertTo-SingleQuotedLiteral $SignedManifestFile)"
     "`$env:RELAY_RESCUE_REGIONAL_ROOT_BUNDLE_FILE = $(ConvertTo-SingleQuotedLiteral $RegionalRootBundleFile)"
-    "`$env:RELAY_GATEWAY_ANONYMOUS_INGRESS = 'true'"
-    "`$env:RELAY_GATEWAY_LAN_DISCOVERY = 'true'"
+    "`$env:RELAY_GATEWAY_ANONYMOUS_INGRESS = '$(if ($EnableAnonymousIngress) { 'true' } else { 'false' })'"
+    "`$env:RELAY_GATEWAY_LAN_DISCOVERY = '$(if ($EnableLanDiscovery) { 'true' } else { 'false' })'"
+    "`$env:RELAY_GATEWAY_REMOTE_MANAGEMENT = '$(if ($EnableRemoteManagement) { 'true' } else { 'false' })'"
+    "`$env:RELAY_GATEWAY_SESSION_COOKIE_SECURE = '$(if ($SessionCookieSecure) { 'true' } else { 'false' })'"
     "Set-Location -LiteralPath $(ConvertTo-SingleQuotedLiteral $executableDirectory)"
     "& $(ConvertTo-SingleQuotedLiteral $Executable)"
     '# Treat every unexpected gateway exit as a task failure so Task Scheduler restarts it.'
@@ -131,10 +150,9 @@ Register-ScheduledTask `
     -Principal $principal `
     -Force | Out-Null
 
-Write-Output "Registered supervised automatic startup task: $TaskName"
-Write-Output "  Executable: $Executable"
-Write-Output "  Runner: $RunnerPath"
+Write-Output "Registered supervised Gateway task: $TaskName"
+Write-Output "  Profile: $Profile  LAN mode: $LanMode"
 Write-Output "  Host: $HostBind  Port: $Port"
 Write-Output "  DB: $DbPath"
-Write-Output "  Admin key file: $adminKeyFile (key value not printed)"
-Write-Output "  Rescue key file: $RescueKeyFile (existing file preserved)"
+Write-Output "  Anonymous ingress: $([bool]$EnableAnonymousIngress)  LAN discovery: $([bool]$EnableLanDiscovery)"
+Write-Output '  No shared admin key was created. Bootstrap a named local administrator before operator use.'

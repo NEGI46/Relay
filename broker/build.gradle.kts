@@ -9,6 +9,7 @@ kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation(project(":shared"))
+    implementation(platform(libs.netty.bom))
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.content.negotiation)

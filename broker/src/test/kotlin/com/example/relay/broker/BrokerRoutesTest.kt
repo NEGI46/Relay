@@ -20,6 +20,7 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -202,13 +203,17 @@ class BrokerRoutesTest {
 
     @Test
     fun `pull returns envelopes for shelter`() = testApplication {
-        application { brokerModule(store, gatewayApiKey = null) } // no auth in test
+        application { brokerModule(store, BrokerConfig(profile = BrokerProfile.PRODUCTION)) }
         registerDevice()
         client.post("/v1/rescue/upload") {
             contentType(ContentType.Application.Json)
             setBody(uploadJson(testEnvelope()))
         }
-        val response = client.get("/v1/gateways/fuchu-01/pull")
+        val credential = store.issueGatewayCredential("gateway-fuchu", "fuchu-01", System.currentTimeMillis() + 60_000)
+        val response = client.get("/v1/gateways/fuchu-01/pull") {
+            header("Authorization", "Bearer ${credential.token}")
+            header("X-Gateway-Id", "gateway-fuchu")
+        }
         assertEquals(HttpStatusCode.OK, response.status)
         val body = response.bodyAsText()
         assertTrue(body.contains("env-001"))
@@ -216,25 +221,75 @@ class BrokerRoutesTest {
 
     @Test
     fun `pull returns empty for unknown shelter`() = testApplication {
-        application { brokerModule(store, gatewayApiKey = null) }
-        val response = client.get("/v1/gateways/unknown-shelter/pull")
+        application { brokerModule(store, BrokerConfig(profile = BrokerProfile.PRODUCTION)) }
+        val credential = store.issueGatewayCredential("gateway-unknown", "unknown-shelter", System.currentTimeMillis() + 60_000)
+        val response = client.get("/v1/gateways/unknown-shelter/pull") {
+            header("Authorization", "Bearer ${credential.token}")
+            header("X-Gateway-Id", "gateway-unknown")
+        }
         assertEquals(HttpStatusCode.OK, response.status)
         assertTrue(response.bodyAsText().contains("\"envelopes\":[]"))
     }
 
     @Test
-    fun `pull requires auth when api key is set`() = testApplication {
-        application { brokerModule(store, gatewayApiKey = "secret-key") }
+    fun `pull requires scoped credential`() = testApplication {
+        application { brokerModule(store, BrokerConfig(profile = BrokerProfile.PRODUCTION)) }
         val response = client.get("/v1/gateways/fuchu-01/pull")
         assertEquals(HttpStatusCode.Unauthorized, response.status)
     }
 
     @Test
+    fun `credential cannot pull another shelter queue`() = testApplication {
+        application { brokerModule(store, BrokerConfig(profile = BrokerProfile.PRODUCTION)) }
+        val credential = store.issueGatewayCredential("gateway-a", "fuchu-01", System.currentTimeMillis() + 60_000)
+        val response = client.get("/v1/gateways/other-shelter/pull") {
+            header("Authorization", "Bearer ${credential.token}")
+            header("X-Gateway-Id", "gateway-a")
+        }
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        assertTrue(response.bodyAsText().contains("gateway_scope_mismatch"))
+    }
+
+    @Test
+    fun `credential cannot upload receipt for another shelter`() = testApplication {
+        application { brokerModule(store, BrokerConfig(profile = BrokerProfile.PRODUCTION)) }
+        val credential = store.issueGatewayCredential("gateway-a", "fuchu-01", System.currentTimeMillis() + 60_000)
+        val receipt = BrokerReceiptUpload(
+            receipt = com.example.relay.rescue.SignedShelterReceipt(
+                receipt = com.example.relay.rescue.UnsignedShelterReceipt(
+                    receiptId = "receipt-cross-shelter",
+                    envelopeId = "unknown-envelope",
+                    requestId = "request-cross-shelter",
+                    requestVersion = 1,
+                    ciphertextSha256Hex = "a".repeat(64),
+                    shelterId = "other-shelter",
+                    receivedAtEpochMillis = System.currentTimeMillis(),
+                    status = com.example.relay.rescue.ShelterReceiptStatus.ACCEPTED,
+                ),
+                signerKeyId = "signer",
+                signatureBase64 = "D".repeat(88),
+            ),
+            gatewayId = "gateway-a",
+        )
+        val response = client.post("/v1/gateways/other-shelter/receipts") {
+            header("Authorization", "Bearer ${credential.token}")
+            header("X-Gateway-Id", "gateway-a")
+            contentType(ContentType.Application.Json)
+            setBody(brokerJson.encodeToString(BrokerReceiptUpload.serializer(), receipt))
+        }
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+    }
+
+    @Test
     fun `health returns status`() = testApplication {
         application { brokerModule(store) }
+        val credential = store.issueGatewayCredential("health-gateway", "health-shelter", System.currentTimeMillis() + 60_000)
         val response = client.get("/v1/health")
         assertEquals(HttpStatusCode.OK, response.status)
-        assertTrue(response.bodyAsText().contains("\"status\":\"ok\""))
+        val body = response.bodyAsText()
+        assertTrue(body.contains("\"status\":\"ok\""))
+        assertFalse(body.contains(credential.token))
+        assertFalse(body.contains("health-gateway"))
     }
 
     @Test
