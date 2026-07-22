@@ -129,8 +129,14 @@ class GoogleNearbyPlatform(
     }
 }
 
+/** A cancelled Google Play services task is a failed Nearby operation, not cancellation of the
+ * caller's long-lived transport coroutine. */
+private class NearbyTaskCancelledException : Exception("Nearby operation was cancelled")
+
 private suspend fun Task<Void>.awaitUnit(): Unit = suspendCancellableCoroutine { continuation ->
     addOnSuccessListener { if (continuation.isActive) continuation.resume(Unit) }
     addOnFailureListener { error -> if (continuation.isActive) continuation.resumeWithException(error) }
-    addOnCanceledListener { continuation.cancel() }
+    addOnCanceledListener {
+        if (continuation.isActive) continuation.resumeWithException(NearbyTaskCancelledException())
+    }
 }
