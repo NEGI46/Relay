@@ -1,5 +1,14 @@
 # Relay v1 — 広島県安芸郡府中町パイロット
 
+> [!IMPORTANT]
+> **Current implementation status (2026-07-22):** durable sender-session restoration,
+> update, cancellation, and verified receipt display are implemented, but periodic/background
+> location tracking is **not** implemented in this branch. The UI reports that location updates
+> are stopped. BLE Gateway trust code exists, but the official Regional Root and Root-signed
+> Directory have not been supplied, so Phase 0B is blocked and real BLE trust is unverified.
+> This notice overrides any older wording below that implies continuous GPS updates or a completed
+> official BLE trust rollout. See the [durability audit](audits/RESCUE_DURABILITY_INITIAL_AUDIT.md).
+
 Relay v1 は、通信障害時の救助依頼をスマートフォンから暗号化して自動中継し、府中町の救助拠点PCで対応するパイロット版です。
 
 ## 利用者の流れ

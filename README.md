@@ -14,6 +14,57 @@
 
 </div>
 
+## Rescue durability and BLE trust status (2026-07-22)
+
+This repository contains the **Phase 0A trust infrastructure** and durable sender-session code,
+but it does **not** contain an official Fuchu Regional Root, a Root-signed Regional Shelter
+Directory, or any Regional Root private key.
+
+- Android loads public-only Regional Root bundles per build variant and re-verifies persisted,
+  signed directories before BLE Gateway delivery. With no approved Root or current directory, BLE
+  Gateway delivery fails closed; Nearby, LAN, and Broker routes are not disabled merely for that
+  reason.
+- No unsigned bundled shelter manifest or debug TOFU enrollment is used by application startup.
+  A sender must first receive an explicitly verified public shelter identity through the supported
+  enrollment path.
+- Test roots are generated only in test memory. They are not Fuchu trust anchors and are not
+  included in `release` or `pilotRelease` APK assets.
+- The sender's active rescue session is stored in Room with a separate Android Keystore AES-GCM
+  recovery key. Rescue text, people count, conditions, and location are not stored as plaintext
+  session columns. After normal process death or a user-launched restart, the app can restore the
+  session and continue update/cancel operations. A terminal result remains visible until the
+  sender acknowledges it; acknowledgement removes the encrypted recovery row.
+- Continuous background location tracking is deliberately **not implemented in this change**.
+  The UI reports that location updates are stopped. Phase 5 requires a separate review/commit for
+  user consent and Android 14+ location-FGS constraints.
+
+Automated evidence on 2026-07-22: shared JVM 20/20, Android JVM 201/201, PC Gateway 57/57, and
+Broker JVM 28/28 tests passed; Android instrumentation source compiled but did not run on an
+emulator or physical device. `verifyNoTestTrustArtifactsInReleaseApks` built and inspected `release` and
+`pilotRelease` APKs; no test asset, `TEST ONLY` trust content, or private-Root JSON field was
+present.
+
+Phase 0B is blocked pending the following **public** artifacts from the authorized offline
+operator: RegionalRootBundle JSON, Root-signed directory JSON, Gateway recipient public key,
+Gateway receipt-signing public key, region/generation/validity metadata, and operator-confirmed
+fingerprints. The Root private key must never be supplied to this repository, Android, a running
+PC Gateway, or a release artifact.
+
+The offline-only PC operator CLI is available as:
+
+```powershell
+.\gradlew.bat :pc-gateway:regionalTrustProvisioning --args="generate-regional-root ..."
+```
+
+Supported commands are `generate-regional-root`, `export-regional-root-bundle`,
+`sign-regional-directory`, `verify-regional-directory`, and `print-public-fingerprints`. It
+refuses Git-worktree paths for private root material and never prints private keys. It does not
+make any generated Root an official municipal production Root.
+
+See [the durability audit](docs/audits/RESCUE_DURABILITY_INITIAL_AUDIT.md) for confirmed,
+automated-test, device-test, blocked, and not-run evidence. Physical-device validation remains
+required; this repository does not claim that it has been completed.
+
 ## まず結論
 
 Relayは、災害時の救助要請をAndroidで暗号化し、利用可能な経路を並行して使って避難所PCへ届ける、**ローカル優先の救助情報中継システム**です。
@@ -68,12 +119,12 @@ Releaseが未作成の場合は、Actionsの **Publish Relay release** を手動
 3. 命の危険がある場合は、ホームの赤いSOSを2秒長押しする。
 4. それ以外は「状況を入力して救助を依頼」から人数と状態を選ぶ。
 5. GPS位置、取得時刻、位置精度を含む本文が暗号化される。
-6. Nearby / BLE / LAN / 設定済みBrokerの利用可能な経路で自動配送される。
-7. 自分の依頼カードから状況・人数の更新、取消、避難所の受領・対応中・完了を確認する。
+6. Nearby / LAN / 設定済みBrokerの利用可能な経路で自動配送される。BLE Gateway配送は、承認済みのRegional Rootと有効な署名済みDirectoryが端末にある場合だけ利用される。
+7. 自分の依頼カードから状況・人数の更新、取消、避難所の署名済み確認・対応中・完了を確認する。中継完了やBrokerの一時保管は避難所確認として表示しない。
 
 SOSは人数不明・命の危険として作成されます。通常依頼は人数必須で、「命の危険・けが/体調不良・移動困難・支援が必要」から1つ以上を選びます。自由記述と補足タグは任意です。
 
-SOS作成と端末内保存にWi-Fiやモバイル通信は必要ありません。府中町v1の公開鍵はアプリへ同梱され、オフラインでも暗号化して保存できます。PC GatewayやBrokerへ接続できない場合も、SOS作成とNearby/BLE中継は止まりません。
+SOS作成と端末内保存にWi-Fiやモバイル通信は必要ありません。ただし、このリポジトリには府中町の正式な公開Root/署名済みDirectoryが未提供のため、正式な受信先公開鍵を明示的にEnrollmentしていない端末では新規依頼を安全に開始しません。PC GatewayやBrokerへ接続できない場合も、保存済みの暗号化依頼は利用可能なNearby/LAN/Broker経路で再試行されます。BLE Gateway配送は承認済みの信頼情報がある場合だけ行われます。
 
 ## 配送経路
 
@@ -234,7 +285,7 @@ adb emu geo fix 132.504 34.392
 
 ## English summary
 
-Relay v1 is a local-first rescue-request relay for the Fuchu Town pilot in Hiroshima, Japan. Android users can create a two-second SOS or a normal GPS-backed rescue request. The request is encrypted before storage and can travel through Nearby/BLE Store–Carry–Forward, a local PC Gateway path, and an optional HTTPS Broker path in parallel.
+Relay v1 is a local-first rescue-request relay for the Fuchu Town pilot in Hiroshima, Japan. Android users can create a two-second SOS or a normal GPS-backed rescue request. The request is encrypted before storage and can travel through Nearby Store–Carry–Forward, a local PC Gateway path, and an optional HTTPS Broker path in parallel. BLE Gateway delivery is enabled only when an approved Regional Root and current signed Directory have been provisioned.
 
 The Broker never decrypts rescue content. Devices register per-device ECDSA P-256 public keys, uploads are signature-verified, receipt polling uses an unguessable capability token, Gateway APIs support Bearer authentication, and persistent cursors/outboxes provide restart-safe at-least-once delivery. The Broker itself is intended to run behind a TLS-terminating reverse proxy.
 
