@@ -11,6 +11,7 @@ import com.example.relay.location.FixedLocationProvider
 import com.example.relay.location.GeoFix
 import com.example.relay.rescue.RescueCondition
 import com.example.relay.rescue.RescueUrgency
+import com.example.relay.rescue.session.testSessionCoordinator
 import java.lang.reflect.Modifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -46,8 +47,12 @@ class RescueViewModelTest {
     fun `request creation fails closed when shelter public key is unavailable`() = runBlocking {
         val repository = InMemoryRescueEnvelopeRepository()
         val viewModel = RescueViewModel(
+            coordinator = testSessionCoordinator(
+                repository,
+                ShelterPublicKeyProvider { null },
+                nowEpochMillis = { TEST_NOW },
+            ),
             repository = repository,
-            shelterKeyProvider = ShelterPublicKeyProvider { null },
             nowEpochMillis = { TEST_NOW },
         )
         viewModel.onNavigate(RescueScreen.REQUEST_FORM)
@@ -75,8 +80,12 @@ class RescueViewModelTest {
         val repository = InMemoryRescueEnvelopeRepository()
         val keys = ShelterPublicKeys("shelter-1", recipient.publicKey, signer.publicKey)
         val viewModel = RescueViewModel(
+            coordinator = testSessionCoordinator(
+                repository,
+                ShelterPublicKeyProvider { keys },
+                nowEpochMillis = { TEST_NOW },
+            ),
             repository = repository,
-            shelterKeyProvider = ShelterPublicKeyProvider { keys },
             nowEpochMillis = { TEST_NOW },
         )
         val draft = requireNotNull(viewModel.state.value.draft).copy(
@@ -111,9 +120,13 @@ class RescueViewModelTest {
         val repository = InMemoryRescueEnvelopeRepository()
         val keys = ShelterPublicKeys("fuchu-area", recipient.publicKey, signer.publicKey)
         val viewModel = RescueViewModel(
+            coordinator = testSessionCoordinator(
+                repository,
+                ShelterPublicKeyProvider { keys },
+                locationProvider = FixedLocationProvider(GeoFix(34.392, 132.504, 7f, TEST_NOW)),
+                nowEpochMillis = { TEST_NOW },
+            ),
             repository = repository,
-            shelterKeyProvider = ShelterPublicKeyProvider { keys },
-            locationProvider = FixedLocationProvider(GeoFix(34.392, 132.504, 7f, TEST_NOW)),
             nowEpochMillis = { TEST_NOW },
         )
 
@@ -131,10 +144,57 @@ class RescueViewModelTest {
     }
 
     @Test
+    fun `restored request update is committed through the coordinator without ViewModel version allocation`() = runBlocking {
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val signer = RescueCryptography.generateShelterSigningKeyPair()
+        val repository = InMemoryRescueEnvelopeRepository()
+        val coordinator = testSessionCoordinator(
+            repository,
+            ShelterPublicKeyProvider { ShelterPublicKeys("shelter-1", recipient.publicKey, signer.publicKey) },
+            nowEpochMillis = { TEST_NOW },
+        )
+        val first = RescueViewModel(coordinator, repository, nowEpochMillis = { TEST_NOW })
+        first.onNavigate(RescueScreen.REQUEST_FORM)
+        first.onDraftChange(
+            requireNotNull(first.state.value.draft).copy(
+                personCount = 1,
+                conditions = setOf(RescueCondition.INJURED_OR_UNWELL),
+                freeText = PRIVATE_NOTE,
+            ),
+        )
+        first.onSubmitRequest()
+        withTimeout(ASYNC_TIMEOUT_MILLIS) { first.state.first { it.ownRequest?.requestVersion == 1 } }
+
+        // Simulates Activity/ViewModel recreation: only coordinator/store state survives.
+        val recreated = RescueViewModel(coordinator, repository, nowEpochMillis = { TEST_NOW + 1_000 })
+        val restored = withTimeout(ASYNC_TIMEOUT_MILLIS) {
+            recreated.state.first { it.ownRequest?.requestVersion == 1 }
+        }
+        recreated.onPrepareUpdate()
+        val edit = withTimeout(ASYNC_TIMEOUT_MILLIS) {
+            recreated.state.first { it.screen == RescueScreen.REQUEST_FORM && it.draft?.requestId == restored.ownRequest!!.requestId }
+        }
+        // The form retains the durable version; only the coordinator reserves version 2.
+        assertEquals(1, edit.draft!!.requestVersion)
+        recreated.onDraftChange(edit.draft.copy(personCount = 2, freeText = "updated private details"))
+        recreated.onSubmitRequest()
+
+        withTimeout(ASYNC_TIMEOUT_MILLIS) { recreated.state.first { it.ownRequest?.requestVersion == 2 } }
+        val stored = repository.all().single()
+        assertEquals(2, stored.envelope.requestVersion)
+        assertEquals(2, RescueCryptography.decrypt(stored.envelope, recipient.privateKey).personCount)
+    }
+
+    @Test
     fun `rescue language starts in Japanese and toggles without changing the draft`() {
+        val repository = InMemoryRescueEnvelopeRepository()
         val viewModel = RescueViewModel(
-            repository = InMemoryRescueEnvelopeRepository(),
-            shelterKeyProvider = ShelterPublicKeyProvider { null },
+            coordinator = testSessionCoordinator(
+                repository,
+                ShelterPublicKeyProvider { null },
+                nowEpochMillis = { TEST_NOW },
+            ),
+            repository = repository,
             nowEpochMillis = { TEST_NOW },
         )
         val draftId = requireNotNull(viewModel.state.value.draft).requestId
@@ -154,8 +214,12 @@ class RescueViewModelTest {
         val repository = InMemoryRescueEnvelopeRepository()
         val keys = ShelterPublicKeys("shelter-1", recipient.publicKey, signer.publicKey)
         val memberViewModel = RescueViewModel(
+            coordinator = testSessionCoordinator(
+                repository,
+                ShelterPublicKeyProvider { keys },
+                nowEpochMillis = { TEST_NOW },
+            ),
             repository = repository,
-            shelterKeyProvider = ShelterPublicKeyProvider { keys },
             nowEpochMillis = { TEST_NOW },
         )
         memberViewModel.onDraftChange(
@@ -171,8 +235,12 @@ class RescueViewModelTest {
         }
 
         val courierViewModel = RescueViewModel(
+            coordinator = testSessionCoordinator(
+                repository,
+                ShelterPublicKeyProvider { null },
+                nowEpochMillis = { TEST_NOW + 1_000 },
+            ),
             repository = repository,
-            shelterKeyProvider = ShelterPublicKeyProvider { null },
             nowEpochMillis = { TEST_NOW + 1_000 },
         )
         courierViewModel.onNavigate(RescueScreen.COURIER_INVENTORY)

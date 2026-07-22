@@ -2,50 +2,43 @@ package com.example.relay.ui.rescue
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.relay.location.LocationProvider
 import com.example.relay.rescue.CourierRescuePresenter
 import com.example.relay.rescue.RescueCondition
-import com.example.relay.rescue.RescueCreationResult
 import com.example.relay.rescue.RescueEnvelopeRepository
-import com.example.relay.rescue.RescueLocation
 import com.example.relay.rescue.RescueRequestAction
-import com.example.relay.rescue.RescueRequestCreator
 import com.example.relay.rescue.RescueRequestDraft
 import com.example.relay.rescue.RescueSubmissionStatus
 import com.example.relay.rescue.RescueUrgency
-import com.example.relay.rescue.ShelterPublicKeyProvider
+import com.example.relay.rescue.session.ActiveRescueSessionCoordinator
+import com.example.relay.rescue.session.RecoveredRescueSession
+import com.example.relay.rescue.session.RescueSessionOperationResult
+import com.example.relay.rescue.session.RescueSessionRestoreResult
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/**
+ * UI adapter only. Sender state, request-version allocation, encryption, and persistence belong to
+ * [ActiveRescueSessionCoordinator] so activity recreation and process death do not lose them.
+ */
 class RescueViewModel(
+    private val coordinator: ActiveRescueSessionCoordinator,
     private val repository: RescueEnvelopeRepository,
-    private val shelterKeyProvider: ShelterPublicKeyProvider,
-    /** Starts persistent automatic transport after a request is stored. */
-    private val onRescueAutomationRequired: () -> Unit = {},
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
-    /** Non-null in production. A missing/disabled fix fails closed for rescue requests. */
-    private val locationProvider: LocationProvider? = null,
     private val senderDeviceId: String = "request-${UUID.randomUUID()}",
-    /** Debug local-Gateway enrollment may still be in flight when a member opens the form. */
-    private val shelterKeyWaitMillis: Long = 0,
-    private val trackingIntervalMillis: Long = 60_000,
 ) : ViewModel(), RescueCallbacks {
-    private val creator = RescueRequestCreator(repository)
     private val presenter = CourierRescuePresenter(repository)
     private val _state = MutableStateFlow(RescueUiState(draft = newDraft()))
     val state: StateFlow<RescueUiState> = _state.asStateFlow()
-    private var activeDraft: RescueRequestDraft? = null
-    private var trackingJob: Job? = null
 
-    init { refreshCourierItems() }
+    init {
+        refreshCourierItems()
+        viewModelScope.launch(Dispatchers.IO) { restoreSession() }
+    }
 
     override fun onToggleLanguage() {
         _state.update { current ->
@@ -61,11 +54,21 @@ class RescueViewModel(
     }
 
     override fun onNavigate(screen: RescueScreen) {
+        // A live sender session must be restored and updated through the coordinator; do not open
+        // a competing new-request form. `onPrepareUpdate` enters this screen directly after it
+        // has reloaded the encrypted recovery data.
+        if (screen == RescueScreen.REQUEST_FORM && _state.value.ownRequest?.terminalStatus == null &&
+            _state.value.ownRequest != null
+        ) {
+            setFormMessage(
+                "既に保存されている救助依頼があります。状況の更新を選んでください。",
+                "A saved rescue request is already active. Choose Update situation instead.",
+            )
+            return
+        }
         if (screen == RescueScreen.COURIER_INVENTORY) refreshCourierItems()
         if (screen == RescueScreen.HOME || screen == RescueScreen.BROADCASTING) onRefreshStatus()
-        _state.update { current ->
-            current.copy(screen = screen, draft = current.draft ?: newDraft(), formMessage = null)
-        }
+        _state.update { current -> current.copy(screen = screen, draft = current.draft ?: newDraft(), formMessage = null) }
     }
 
     override fun onDraftChange(draft: RescueRequestDraft) {
@@ -75,14 +78,19 @@ class RescueViewModel(
     override fun onSubmitRequest() {
         val draft = (_state.value.draft ?: return).withInferredConditions()
         if (draft.personCount !in 1..1_000) {
-            setFormMessage("助けが必要な人数を入力してください。", "Enter the number of people who need help.")
+            setFormMessage("人数を確認してください。", "Enter the number of people who need help.")
             return
         }
         if (draft.conditions.isEmpty()) {
-            setFormMessage("現在の状態を1つ以上選んでください。", "Select at least one current condition.")
+            setFormMessage("現在の状況を1つ以上選んでください。", "Select at least one current condition.")
             return
         }
-        submit(draft.withLegacyConditionFlags(), isSos = false)
+        val updateRequestId = _state.value.ownRequest
+            ?.takeIf { active ->
+                active.requestId == draft.requestId && active.terminalStatus == null && !active.isCancelled
+            }
+            ?.requestId
+        submit(draft.withLegacyConditionFlags(), isSos = false, updateRequestId = updateRequestId)
     }
 
     override fun onSendSos() {
@@ -101,44 +109,74 @@ class RescueViewModel(
     }
 
     override fun onPrepareUpdate() {
-        val current = activeDraft ?: return
-        val now = nowEpochMillis()
-        _state.update {
-            it.copy(
-                screen = RescueScreen.REQUEST_FORM,
-                draft = current.copy(
-                    requestVersion = current.requestVersion + 1,
-                    createdAtEpochMillis = now,
-                    expiresAtEpochMillis = now + REQUEST_LIFETIME_MILLIS,
-                    action = RescueRequestAction.ACTIVE,
-                ),
-                formMessage = it.language.text("変更内容を確認して送信してください。", "Review the changes, then send the update."),
-            )
+        val requestId = _state.value.ownRequest?.requestId ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val result = coordinator.prepareUpdate(requestId)) {
+                is RescueSessionRestoreResult.Restored -> {
+                    if (result.value.session.terminalStatus != null ||
+                        result.value.recovery.draft.action != RescueRequestAction.ACTIVE
+                    ) {
+                        setFormMessage("この依頼は更新できません。", "This request can no longer be updated.")
+                        return@launch
+                    }
+                    _state.update { current ->
+                        current.copy(
+                            screen = RescueScreen.REQUEST_FORM,
+                            // This is UI input only.  The coordinator allocates the next version
+                            // and timestamps after its durable compare-and-swap check.
+                            draft = result.value.recovery.draft.copy(action = RescueRequestAction.ACTIVE),
+                            formMessage = current.language.text(
+                                "変更を確認してから更新を送ってください。",
+                                "Review the changes, then send the update.",
+                            ),
+                        )
+                    }
+                }
+                is RescueSessionRestoreResult.Corrupt -> showRecoveryFailure()
+                RescueSessionRestoreResult.None -> setFormMessage("保存された依頼が見つかりません。", "No saved request was found.")
+            }
         }
     }
 
     override fun onCancelRequest() {
-        val current = activeDraft ?: return
-        val now = nowEpochMillis()
-        submit(
-            current.copy(
-                requestVersion = current.requestVersion + 1,
-                createdAtEpochMillis = now,
-                expiresAtEpochMillis = now + REQUEST_LIFETIME_MILLIS,
-                action = RescueRequestAction.CANCELLED,
-            ),
-            isSos = current.urgency == RescueUrgency.IMMEDIATE,
-        )
+        val requestId = _state.value.ownRequest?.requestId ?: return
+        _state.update { it.copy(isRequestSubmitting = true, formMessage = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            handleOperation(coordinator.cancel(requestId), isSos = false)
+        }
+    }
+
+    override fun onAcknowledgeTerminalResult() {
+        val requestId = _state.value.ownRequest
+            ?.takeIf { it.terminalStatus != null }
+            ?.requestId ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            if (coordinator.acknowledgeTerminalResult(requestId)) {
+                _state.update { current ->
+                    current.copy(
+                        screen = RescueScreen.HOME,
+                        ownRequest = null,
+                        broadcast = RescueBroadcastUiState(),
+                        formMessage = current.language.text(
+                            "結果を確認しました。端末に保存していた救助依頼の内容を削除しました。",
+                            "Result acknowledged. The saved rescue-request details were removed from this device.",
+                        ),
+                    )
+                }
+            } else {
+                onRefreshStatus()
+            }
+        }
     }
 
     override fun onRefreshStatus() {
-        val own = _state.value.ownRequest ?: return
-        val latest = repository.all()
-            .filter { it.envelope.requestId == own.requestId }
-            .maxByOrNull { it.envelope.requestVersion }
-            ?: return
-        _state.update {
-            it.copy(ownRequest = it.ownRequest?.copy(submissionStatus = latest.state.submissionStatus))
+        val requestId = _state.value.ownRequest?.requestId ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val restored = coordinator.restore(requestId)) {
+                is RescueSessionRestoreResult.Restored -> showRecovered(restored.value)
+                is RescueSessionRestoreResult.Corrupt -> showRecoveryFailure()
+                RescueSessionRestoreResult.None -> Unit
+            }
         }
     }
 
@@ -146,141 +184,142 @@ class RescueViewModel(
         _state.update { current -> current.copy(screen = RescueScreen.HOME) }
     }
 
-    private fun submit(source: RescueRequestDraft, isSos: Boolean) {
+    private fun submit(
+        source: RescueRequestDraft,
+        isSos: Boolean,
+        updateRequestId: String? = null,
+    ) {
         if (_state.value.isRequestSubmitting) return
         _state.update { it.copy(isRequestSubmitting = true, formMessage = null) }
         viewModelScope.launch(Dispatchers.IO) {
-            val keys = awaitShelterKeys()
-            if (keys == null) {
-                failSubmission(
-                    "府中町の救助受信情報を取得できません。通信状態を確認してください。",
-                    "Fuchu Town rescue receiver information is unavailable. Check the connection.",
-                )
-                return@launch
-            }
-            val located = attachCurrentLocation(source.copy(destinationShelterId = keys.shelterId))
-            if (located == null) {
-                failSubmission(
-                    "GPS位置を取得できません。位置情報をONにして、空が見える場所で再試行してください。",
-                    "GPS location is unavailable. Turn on Location and try again with a clear view of the sky.",
-                )
-                return@launch
-            }
-            val result = runCatching {
-                creator.create(located, keys.recipientKey, UUID.randomUUID().toString())
-            }.getOrElse {
-                failSubmission("救助要請を端末に保存できませんでした。", "The rescue request could not be saved on this device.")
-                return@launch
-            }
-            when (result) {
-                is RescueCreationResult.Stored -> {
-                    activeDraft = located
-                    val record = result.record
-                    _state.update { current ->
-                        current.copy(
-                            screen = RescueScreen.BROADCASTING,
-                            isRequestSubmitting = false,
-                            draft = newDraft(keys.shelterId),
-                            ownRequest = located.toOwnRequest(record.state.submissionStatus),
-                            broadcast = RescueBroadcastUiState(
-                                isActive = located.action == RescueRequestAction.ACTIVE,
-                                transferCount = record.state.submissionCount,
-                                statusMessage = current.language.text(
-                                    when {
-                                        located.action == RescueRequestAction.CANCELLED -> "取消情報を自動で届けています。"
-                                        isSos -> "命の危険があるSOSを最優先で自動送信しています。"
-                                        else -> "救助要請を自動送信しています。操作は不要です。"
-                                    },
-                                    when {
-                                        located.action == RescueRequestAction.CANCELLED -> "Relaying the cancellation automatically."
-                                        isSos -> "Relaying the life-threatening SOS at highest priority."
-                                        else -> "Relaying the rescue request automatically. No action is needed."
-                                    },
-                                ),
-                            ),
-                            courierAutomation = CourierAutomationUiState(
-                                isEnabled = true,
-                                statusMessage = current.language.text(
-                                    "受信・中継・避難所への提出は自動です",
-                                    "Receiving, relaying, and shelter delivery are automatic.",
-                                ),
-                            ),
-                        )
-                    }
-                    onRescueAutomationRequired()
-                    if (located.action == RescueRequestAction.CANCELLED) {
-                        trackingJob?.cancel()
-                    } else {
-                        startLocationTracking()
-                    }
-                    refreshCourierItemsNow()
-                }
-                is RescueCreationResult.NotStored -> failSubmission(
-                    "保存できませんでした: ${result.reason.name}",
-                    "Could not save: ${result.reason.name}",
-                )
-            }
+            val result = updateRequestId?.let { coordinator.update(it, source) } ?: coordinator.create(source)
+            handleOperation(result, isSos)
         }
     }
 
-    private suspend fun attachCurrentLocation(draft: RescueRequestDraft): RescueRequestDraft? {
-        val provider = locationProvider ?: return draft
-        val fix = runCatching { provider.currentFix(8_000) }.getOrNull() ?: return null
-        return draft.copy(
-            location = RescueLocation(
-                latitude = fix.latitude,
-                longitude = fix.longitude,
-                accuracyMeters = fix.accuracyMeters,
-                description = draft.location?.description.orEmpty(),
-                capturedAtEpochMillis = fix.capturedAtEpochMillis,
-            ),
-        )
+    private fun handleOperation(result: RescueSessionOperationResult, isSos: Boolean) {
+        when (result) {
+            is RescueSessionOperationResult.Stored -> {
+                _state.update { current ->
+                    current.copy(
+                        isRequestSubmitting = false,
+                        screen = RescueScreen.BROADCASTING,
+                        draft = newDraft(),
+                        ownRequest = result.value.toOwnRequest(),
+                        broadcast = RescueBroadcastUiState(
+                            isActive = result.value.recovery.draft.action == RescueRequestAction.ACTIVE,
+                            transferCount = result.record.state.submissionCount,
+                            statusMessage = current.language.text(
+                                if (result.value.recovery.draft.action == RescueRequestAction.CANCELLED) {
+                                    "取消を端末に保存しました。周囲のRelay端末へ中継します。"
+                                } else if (isSos) {
+                                    "SOSを端末に保存しました。周囲のRelay端末へ中継します。"
+                                } else {
+                                    "依頼を端末に保存しました。周囲のRelay端末へ中継します。"
+                                },
+                                if (result.value.recovery.draft.action == RescueRequestAction.CANCELLED) {
+                                    "Cancellation saved on this device and relaying through nearby Relay devices."
+                                } else if (isSos) {
+                                    "SOS saved on this device and relaying through nearby Relay devices."
+                                } else {
+                                    "Request saved on this device and relaying through nearby Relay devices."
+                                },
+                            ),
+                        ),
+                        courierAutomation = CourierAutomationUiState(
+                            isEnabled = true,
+                            statusMessage = current.language.text(
+                                "配送と確認の受信を続けます。",
+                                "Delivery and confirmation checks continue automatically.",
+                            ),
+                        ),
+                    )
+                }
+                refreshCourierItemsNow()
+            }
+            is RescueSessionOperationResult.ActiveSessionExists -> {
+                showRecovered(result.value)
+                setFormMessage(
+                    "保存されている救助依頼を表示しています。",
+                    "Showing the saved rescue request instead.",
+                )
+            }
+            RescueSessionOperationResult.ShelterUnavailable -> failSubmission(
+                "救助の受信先情報を確認できません。接続を確認してください。",
+                "Rescue receiver information is unavailable. Check the connection.",
+            )
+            RescueSessionOperationResult.LocationUnavailable -> failSubmission(
+                "現在地を取得できません。位置情報を有効にして、空が見える場所で再試行してください。",
+                "GPS location is unavailable. Turn on Location and try again with a clear view of the sky.",
+            )
+            RescueSessionOperationResult.Expired -> failSubmission(
+                "この依頼の有効期限が切れています。",
+                "This rescue request has expired.",
+            )
+            RescueSessionOperationResult.Terminal -> failSubmission(
+                "この依頼はすでに終了しています。",
+                "This rescue request is already closed.",
+            )
+            RescueSessionOperationResult.Corrupt -> showRecoveryFailure()
+            RescueSessionOperationResult.CancelledAlready -> failSubmission(
+                "取消の中継中です。避難所からの確認をお待ちください。",
+                "Cancellation is being relayed. Wait for shelter confirmation.",
+            )
+            RescueSessionOperationResult.Conflict -> failSubmission(
+                "依頼の状態が更新されました。もう一度お試しください。",
+                "The request changed. Please try again.",
+            )
+            RescueSessionOperationResult.StorageFailure -> failSubmission(
+                "端末に安全に保存できなかったため、送信を開始していません。",
+                "The request was not safely saved on this device, so delivery did not start.",
+            )
+        }
     }
 
-    private fun startLocationTracking() {
-        if (locationProvider == null) return
-        trackingJob?.cancel()
-        trackingJob = viewModelScope.launch(Dispatchers.IO) {
-            while (isActive) {
-                delay(trackingIntervalMillis.coerceAtLeast(10_000))
-                val current = activeDraft ?: break
-                if (current.action == RescueRequestAction.CANCELLED) break
-                val updated = attachCurrentLocation(current) ?: continue
-                if (!locationChanged(current.location, updated.location)) continue
-                val keys = awaitShelterKeys() ?: continue
-                val now = nowEpochMillis()
-                val next = updated.copy(
-                    requestVersion = current.requestVersion + 1,
-                    destinationShelterId = keys.shelterId,
-                    createdAtEpochMillis = now,
-                    expiresAtEpochMillis = now + REQUEST_LIFETIME_MILLIS,
-                )
-                val result = runCatching {
-                    creator.create(next, keys.recipientKey, UUID.randomUUID().toString())
-                }.getOrNull()
-                if (result is RescueCreationResult.Stored) {
-                    activeDraft = next
-                    _state.update {
-                        it.copy(
-                            ownRequest = next.toOwnRequest(result.record.state.submissionStatus),
-                            broadcast = it.broadcast.copy(
-                                statusMessage = it.language.text(
-                                    "現在地を更新しながら自動送信しています。",
-                                    "Relaying automatically while updating your location.",
-                                ),
-                            ),
-                        )
-                    }
-                    onRescueAutomationRequired()
-                }
-            }
+    private fun restoreSession() {
+        when (val restored = coordinator.restoreLatest()) {
+            is RescueSessionRestoreResult.Restored -> showRecovered(restored.value)
+            is RescueSessionRestoreResult.Corrupt -> showRecoveryFailure()
+            RescueSessionRestoreResult.None -> Unit
+        }
+    }
+
+    private fun showRecovered(recovered: RecoveredRescueSession) {
+        _state.update { current ->
+            current.copy(
+                screen = RescueScreen.BROADCASTING,
+                isRequestSubmitting = false,
+                recoveryFailure = false,
+                ownRequest = recovered.toOwnRequest(),
+                broadcast = current.broadcast.copy(
+                    isActive = recovered.recovery.draft.action == RescueRequestAction.ACTIVE &&
+                        recovered.session.terminalStatus == null,
+                    statusMessage = current.language.text(
+                        "保存された救助依頼の状態を復元しました。",
+                        "Restored the saved rescue request status.",
+                    ),
+                ),
+            )
+        }
+    }
+
+    private fun showRecoveryFailure() {
+        _state.update { current ->
+            current.copy(
+                screen = RescueScreen.BROADCASTING,
+                isRequestSubmitting = false,
+                ownRequest = null,
+                recoveryFailure = true,
+                formMessage = current.language.text(
+                    "保存された救助依頼を安全に読み出せません。新しい依頼を自動作成していません。",
+                    "The saved rescue request cannot be safely recovered. A new request was not created automatically.",
+                ),
+            )
         }
     }
 
     private fun failSubmission(japanese: String, english: String) {
-        _state.update {
-            it.copy(isRequestSubmitting = false, formMessage = it.language.text(japanese, english))
-        }
+        _state.update { it.copy(isRequestSubmitting = false, formMessage = it.language.text(japanese, english)) }
     }
 
     private fun setFormMessage(japanese: String, english: String) {
@@ -289,16 +328,6 @@ class RescueViewModel(
 
     private fun refreshCourierItems() {
         viewModelScope.launch(Dispatchers.IO) { refreshCourierItemsNow() }
-    }
-
-    private suspend fun awaitShelterKeys() = shelterKeyProvider.load() ?: run {
-        val deadline = nowEpochMillis() + shelterKeyWaitMillis.coerceIn(0, 15_000)
-        var keys: com.example.relay.rescue.ShelterPublicKeys?
-        do {
-            delay(250)
-            keys = shelterKeyProvider.load()
-        } while (keys == null && nowEpochMillis() < deadline)
-        keys
     }
 
     private fun refreshCourierItemsNow() {
@@ -313,12 +342,12 @@ class RescueViewModel(
         }
     }
 
-    private fun newDraft(shelterId: String = shelterKeyProvider.load()?.shelterId.orEmpty()): RescueRequestDraft {
+    private fun newDraft(): RescueRequestDraft {
         val now = nowEpochMillis()
         return RescueRequestDraft(
             requestId = UUID.randomUUID().toString(),
             senderDeviceId = senderDeviceId,
-            destinationShelterId = shelterId,
+            destinationShelterId = "",
             createdAtEpochMillis = now,
             expiresAtEpochMillis = now + REQUEST_LIFETIME_MILLIS,
             urgency = RescueUrgency.URGENT,
@@ -344,37 +373,30 @@ class RescueViewModel(
         return copy(conditions = inferred)
     }
 
-    private fun RescueRequestDraft.toOwnRequest(status: RescueSubmissionStatus): OwnRescueRequestUiState {
-        val fix = location
+    private fun RecoveredRescueSession.toOwnRequest(): OwnRescueRequestUiState {
+        val draft = recovery.draft
+        val fix = draft.location
+        val durableStatus = repository.all()
+            .asSequence()
+            .filter { it.envelope.requestId == draft.requestId }
+            .maxByOrNull { it.envelope.requestVersion }
+            ?.state
+            ?.submissionStatus ?: submissionStatus
         return OwnRescueRequestUiState(
-            requestId = requestId,
-            requestVersion = requestVersion,
-            urgency = urgency,
-            personCount = personCount,
+            requestId = draft.requestId,
+            requestVersion = session.latestVersion,
+            urgency = draft.urgency,
+            personCount = draft.personCount,
             latitude = fix?.latitude ?: 0.0,
             longitude = fix?.longitude ?: 0.0,
             accuracyMeters = fix?.accuracyMeters,
-            locationCapturedAtEpochMillis = fix?.capturedAtEpochMillis ?: createdAtEpochMillis,
-            createdAtEpochMillis = createdAtEpochMillis,
-            submissionStatus = status,
-            isCancelled = action == RescueRequestAction.CANCELLED,
+            locationCapturedAtEpochMillis = fix?.capturedAtEpochMillis ?: draft.createdAtEpochMillis,
+            createdAtEpochMillis = session.createdAtEpochMillis,
+            submissionStatus = durableStatus,
+            isCancelled = draft.action == RescueRequestAction.CANCELLED,
+            trackingEnabled = session.trackingMode != com.example.relay.rescue.session.ActiveRescueSession.TRACKING_DISABLED,
+            terminalStatus = session.terminalStatus,
         )
-    }
-
-    private fun locationChanged(before: RescueLocation?, after: RescueLocation?): Boolean {
-        val beforeLatitude = before?.latitude ?: return true
-        val beforeLongitude = before.longitude ?: return true
-        val afterLatitude = after?.latitude ?: return true
-        val afterLongitude = after.longitude ?: return true
-        val coordinateDelta = kotlin.math.abs(beforeLatitude - afterLatitude) +
-            kotlin.math.abs(beforeLongitude - afterLongitude)
-        val age = (after.capturedAtEpochMillis ?: 0) - (before.capturedAtEpochMillis ?: 0)
-        return coordinateDelta >= 0.00005 || age >= 5 * 60_000
-    }
-
-    override fun onCleared() {
-        trackingJob?.cancel()
-        super.onCleared()
     }
 
     private companion object {

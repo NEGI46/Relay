@@ -8,8 +8,10 @@ import com.example.relay.rescue.RescuePublicKey
 import com.example.relay.rescue.RescueRequestAction
 import com.example.relay.rescue.RescueSupportNeed
 import com.example.relay.rescue.RescueUrgency
+import kotlinx.serialization.Serializable
 
 /** Plaintext exists only at this creation boundary and is never passed to the repository. */
+@Serializable
 data class RescueRequestDraft(
     val requestId: String,
     val requestVersion: Int = 1,
@@ -63,7 +65,7 @@ class RescueRequestCreator(
     }
 }
 
-private fun RescueRequestDraft.toPayload(): RescuePayload = RescuePayload(
+internal fun RescueRequestDraft.toPayload(): RescuePayload = RescuePayload(
     requestId = requestId,
     requestVersion = requestVersion,
     senderDeviceId = senderDeviceId,

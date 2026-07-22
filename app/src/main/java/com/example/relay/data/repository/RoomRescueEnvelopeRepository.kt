@@ -44,6 +44,18 @@ class RoomRescueEnvelopeRepository(
     override fun store(
         envelope: EncryptedRescueEnvelope,
         receivedAtEpochMillis: Long,
+    ): RescueStoreResult = database.runInTransaction<RescueStoreResult> {
+        storeInTransaction(envelope, receivedAtEpochMillis)
+    }
+
+    /**
+     * Session updates call this while holding the same Room transaction that updates the recovery
+     * record. `allowPruning=false` rejects rather than evicting another active sender's envelope.
+     */
+    internal fun storeInTransaction(
+        envelope: EncryptedRescueEnvelope,
+        receivedAtEpochMillis: Long,
+        allowPruning: Boolean = true,
     ): RescueStoreResult {
         if (envelope.validate() != RescueValidationResult.Valid ||
             !RescueCryptography.verifyEnvelopeFraming(envelope) ||
@@ -59,31 +71,56 @@ class RoomRescueEnvelopeRepository(
             return RescueStoreResult.Rejected(RescueStoreRejection.EXCEEDS_BYTE_LIMIT)
         }
 
-        return database.runInTransaction<RescueStoreResult> {
-            dao.deleteExpired(receivedAtEpochMillis)
-            val key = RescueRequestKey(envelope.requestId, envelope.requestVersion)
-            dao.find(key.requestId, key.requestVersion)?.let { existing ->
-                return@runInTransaction RescueStoreResult.Rejected(
-                    if (existing.ciphertextSha256Hex == envelope.ciphertextSha256Hex) {
-                        RescueStoreRejection.DUPLICATE
-                    } else {
-                        RescueStoreRejection.COLLISION
-                    },
-                )
-            }
-            if (dao.hasNewerVersion(key.requestId, key.requestVersion)) {
-                return@runInTransaction RescueStoreResult.Rejected(
-                    RescueStoreRejection.SUPERSEDED_BY_NEWER_VERSION,
-                )
-            }
-
-            val superseded = dao.olderVersions(key.requestId, key.requestVersion).map { it.key() }
-            dao.deleteOlderVersions(key.requestId, key.requestVersion)
-            val record = StoredRescueRecord(envelope, RescueEnvelopeState(receivedAtEpochMillis))
-            dao.insert(record.toEntity(sizeBytes))
-            val pruned = pruneForCapacity(key)
-            RescueStoreResult.Stored(record, superseded + pruned)
+        dao.deleteExpired(receivedAtEpochMillis)
+        val key = RescueRequestKey(envelope.requestId, envelope.requestVersion)
+        dao.find(key.requestId, key.requestVersion)?.let { existing ->
+            return RescueStoreResult.Rejected(
+                if (existing.ciphertextSha256Hex == envelope.ciphertextSha256Hex) {
+                    RescueStoreRejection.DUPLICATE
+                } else {
+                    RescueStoreRejection.COLLISION
+                },
+            )
         }
+        if (dao.hasNewerVersion(key.requestId, key.requestVersion)) {
+            return RescueStoreResult.Rejected(
+                RescueStoreRejection.SUPERSEDED_BY_NEWER_VERSION,
+            )
+        }
+
+        val activeSessionKeys = database.activeRescueSessionDao().activeEnvelopeKeys(receivedAtEpochMillis)
+            .mapTo(mutableSetOf()) { RescueRequestKey(it.requestId, it.latestVersion) }
+        if (allowPruning && activeSessionKeys.any { it.requestId == key.requestId && it.requestVersion < key.requestVersion }) {
+            return RescueStoreResult.Rejected(RescueStoreRejection.ACTIVE_SESSION_PROTECTED)
+        }
+
+        val olderEntities = dao.olderVersions(key.requestId, key.requestVersion)
+        val superseded = olderEntities.map { it.key() }
+        val projectedCount = dao.count() - olderEntities.size + 1
+        val projectedBytes = dao.totalStorageSizeBytes() - olderEntities.sumOf { it.storageSizeBytes } + sizeBytes
+        val protectedKeys = activeSessionKeys.also { it += key }
+        if (!canFitAfterPruning(
+                projectedCount = projectedCount,
+                projectedBytes = projectedBytes,
+                olderKeys = superseded.toSet(),
+                protectedKeys = protectedKeys,
+                allowPruning = allowPruning,
+            )
+        ) {
+            // Check capacity before deleting a prior version or inserting the new one.  A rejection
+            // therefore leaves a sender session and its envelope unchanged in the enclosing Room
+            // transaction.
+            return RescueStoreResult.Rejected(RescueStoreRejection.EXCEEDS_BYTE_LIMIT)
+        }
+        dao.deleteOlderVersions(key.requestId, key.requestVersion)
+        val record = StoredRescueRecord(envelope, RescueEnvelopeState(receivedAtEpochMillis))
+        dao.insert(record.toEntity(sizeBytes))
+        val pruned = if (allowPruning) {
+            pruneForCapacity(protectedKeys)
+        } else {
+            emptyList()
+        }
+        return RescueStoreResult.Stored(record, superseded + pruned)
     }
 
     override fun get(key: RescueRequestKey): StoredRescueRecord? =
@@ -125,12 +162,21 @@ class RoomRescueEnvelopeRepository(
         signedReceipt: SignedShelterReceipt,
         shelterSigningPublicKey: RescuePublicKey,
     ): ReceiptApplicationResult = database.runInTransaction<ReceiptApplicationResult> {
+        applyReceiptInTransaction(key, signedReceipt, shelterSigningPublicKey)
+    }
+
+    /** Must be called from the encompassing Room transaction when a session mirrors receipt state. */
+    internal fun applyReceiptInTransaction(
+        key: RescueRequestKey,
+        signedReceipt: SignedShelterReceipt,
+        shelterSigningPublicKey: RescuePublicKey,
+    ): ReceiptApplicationResult {
         val entity = dao.find(key.requestId, key.requestVersion)
-            ?: return@runInTransaction ReceiptApplicationResult.RECORD_NOT_FOUND
+            ?: return ReceiptApplicationResult.RECORD_NOT_FOUND
         val current = entity.toRecordOrNull()
-            ?: return@runInTransaction ReceiptApplicationResult.RECORD_NOT_FOUND
+            ?: return ReceiptApplicationResult.RECORD_NOT_FOUND
         if (!RescueCryptography.verifyReceipt(signedReceipt, shelterSigningPublicKey)) {
-            return@runInTransaction ReceiptApplicationResult.INVALID_SIGNATURE
+            return ReceiptApplicationResult.INVALID_SIGNATURE
         }
         val receipt = signedReceipt.receipt
         val envelope = current.envelope
@@ -140,27 +186,50 @@ class RoomRescueEnvelopeRepository(
             receipt.ciphertextSha256Hex != envelope.ciphertextSha256Hex ||
             receipt.shelterId != envelope.destinationShelterId
         ) {
-            return@runInTransaction ReceiptApplicationResult.RECEIPT_MISMATCH
+            return ReceiptApplicationResult.RECEIPT_MISMATCH
         }
         val status = receipt.status.toSubmissionStatus()
         if (status.rank() <= current.state.submissionStatus.rank()) {
-            return@runInTransaction ReceiptApplicationResult.ALREADY_APPLIED
+            return ReceiptApplicationResult.ALREADY_APPLIED
         }
         val updated = current.copy(
             state = current.state.copy(submissionStatus = status, signedReceipt = signedReceipt),
         )
-        if (dao.update(updated.toEntity(updated.envelope.storageSizeBytes())) == 1) {
+        return if (dao.update(updated.toEntity(updated.envelope.storageSizeBytes())) == 1) {
             ReceiptApplicationResult.APPLIED
         } else {
             ReceiptApplicationResult.RECORD_NOT_FOUND
         }
     }
 
-    private fun pruneForCapacity(protectedKey: RescueRequestKey): List<RescueRequestKey> {
+    /** Performs the capacity decision before this transaction mutates an older version. */
+    private fun canFitAfterPruning(
+        projectedCount: Int,
+        projectedBytes: Long,
+        olderKeys: Set<RescueRequestKey>,
+        protectedKeys: Set<RescueRequestKey>,
+        allowPruning: Boolean,
+    ): Boolean {
+        if (projectedCount <= maxRecordCount && projectedBytes <= maxStoredBytes) return true
+        if (!allowPruning) return false
+        var remainingCount = projectedCount
+        var remainingBytes = projectedBytes
+        for (candidate in dao.pruningCandidates()) {
+            if (candidate.key() in olderKeys || candidate.key() in protectedKeys) continue
+            if (remainingCount <= maxRecordCount && remainingBytes <= maxStoredBytes) return true
+            remainingCount -= 1
+            remainingBytes -= candidate.storageSizeBytes
+        }
+        return remainingCount <= maxRecordCount && remainingBytes <= maxStoredBytes
+    }
+
+    private fun pruneForCapacity(protectedKeys: Set<RescueRequestKey>): List<RescueRequestKey> {
         val pruned = mutableListOf<RescueRequestKey>()
         while (dao.count() > maxRecordCount || dao.totalStorageSizeBytes() > maxStoredBytes) {
-            val victim = dao.pruningCandidate(protectedKey.requestId, protectedKey.requestVersion)
-                ?: error("Incoming rescue envelope was checked against capacity before insertion")
+            val victim = dao.pruningCandidates().firstOrNull { it.key() !in protectedKeys }
+                // [canFitAfterPruning] ran before the transaction changed rows. If this ever
+                // occurs, fail closed and roll back the enclosing Room transaction.
+                ?: throw IllegalStateException("No eligible rescue envelope is available for pruning")
             dao.delete(victim.requestId, victim.requestVersion)
             pruned += victim.key()
         }

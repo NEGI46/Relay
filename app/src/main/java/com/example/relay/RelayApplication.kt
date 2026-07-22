@@ -41,15 +41,24 @@ import com.example.relay.service.RescueDeliveryService
 import com.example.relay.rescue.RescueShelterKeyStore
 import com.example.relay.rescue.ReportSigningKeyStore
 import com.example.relay.rescue.UploadSigningKeyStore
-import com.example.relay.rescue.DebugShelterManifestBootstrap
-import com.example.relay.rescue.BundledShelterManifestBootstrap
 import com.example.relay.rescue.HttpShelterManifestClient
 import com.example.relay.rescue.ShelterManifestEnrollment
 import com.example.relay.rescue.RegionalShelterDirectoryResolver
+import com.example.relay.rescue.SignedRegionalShelterDirectory
 import com.example.relay.rescue.ble.AndroidShelterBleClient
 import com.example.relay.rescue.ble.SharedPreferencesCourierDeliveryIdStore
 import com.example.relay.rescue.ble.ShelterDeliveryCoordinator
 import com.example.relay.rescue.nearby.RescueNearbyCoordinator
+import com.example.relay.rescue.session.ActiveRescueSessionCoordinator
+import com.example.relay.rescue.session.AesGcmRecoveryPayloadCipher
+import com.example.relay.rescue.session.AndroidKeystoreSessionSecretKeyProvider
+import com.example.relay.rescue.session.RescueDeliveryNotifier
+import com.example.relay.rescue.session.RoomActiveRescueSessionStore
+import com.example.relay.rescue.trust.AssetRegionalRootLoader
+import com.example.relay.rescue.trust.DirectoryStoreAcceptance
+import com.example.relay.rescue.trust.RegionalTrustRuntime
+import com.example.relay.rescue.trust.RoomRegionalDirectoryPersistence
+import com.example.relay.rescue.trust.VerifiedRegionalDirectoryStore
 import com.google.android.gms.nearby.connection.ConnectionsClient
 import java.util.UUID
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
@@ -74,7 +83,15 @@ class RelayApplication : Application() {
         PlaintextDatabaseMigration.migrateIfNeeded(this, DATABASE_NAME, passphrase)
         Room.databaseBuilder(this, RelayDatabase::class.java, DATABASE_NAME)
             .openHelperFactory(SupportOpenHelperFactory(passphrase))
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+            )
             .build()
     }
     val messageRepository: RoomMessageRepository by lazy { RoomMessageRepository(database) }
@@ -82,6 +99,26 @@ class RelayApplication : Application() {
     val rescueShelterKeyStore: RescueShelterKeyStore by lazy { RescueShelterKeyStore(this) }
     val reportSigningKeyStore: ReportSigningKeyStore by lazy { ReportSigningKeyStore() }
     val uploadSigningKeyStore: UploadSigningKeyStore by lazy { UploadSigningKeyStore(this) }
+    val activeRescueSessionStore: RoomActiveRescueSessionStore by lazy {
+        RoomActiveRescueSessionStore(database, rescueRepository)
+    }
+    /** Separate AES-GCM key alias from the SQLCipher passphrase protection. */
+    val activeRescueSessionCoordinator: ActiveRescueSessionCoordinator by lazy {
+        ActiveRescueSessionCoordinator(
+            store = activeRescueSessionStore,
+            recoveryCipher = AesGcmRecoveryPayloadCipher(AndroidKeystoreSessionSecretKeyProvider()),
+            shelterKeyProvider = rescueShelterKeyStore,
+            locationProvider = locationProvider,
+            nowEpochMillis = SystemClock::nowMillis,
+            shelterKeyWaitMillis = if (BuildConfig.DEBUG) 8_000 else 0,
+            deliveryNotifier = RescueDeliveryNotifier {
+                // Commit has already succeeded when this is called.  The persisted service flag
+                // and transport notification therefore cannot precede a durable envelope/session.
+                RescueDeliveryService.enableAndStart(this)
+                notifyRescueStoreChanged()
+            },
+        )
+    }
 
     /**
      * Broker endpoint resolution order:
@@ -107,10 +144,28 @@ class RelayApplication : Application() {
     val shelterManifestEnrollment: ShelterManifestEnrollment by lazy {
         ShelterManifestEnrollment(HttpShelterManifestClient(), rescueShelterKeyStore)
     }
-    /** Populated by signed regional provisioning; empty configuration fails closed. */
-    val regionalShelterDirectoryResolver: RegionalShelterDirectoryResolver by lazy {
-        RegionalShelterDirectoryResolver(emptyList())
+    /**
+     * Loads only an approved public root bundle for this variant, then re-verifies persisted signed
+     * directories. An absent/malformed root or directory leaves BLE Gateway delivery unavailable
+     * without disabling LAN, Nearby, or Broker paths.
+     */
+    val regionalTrustRuntime: RegionalTrustRuntime by lazy {
+        RegionalTrustRuntime(
+            rootLoader = AssetRegionalRootLoader(
+                this,
+                BuildConfig.REGIONAL_ROOT_BUNDLE_ASSET,
+                BuildConfig.REGIONAL_ROOT_BUNDLE_ENVIRONMENTS,
+            ),
+            directoryStore = VerifiedRegionalDirectoryStore(RoomRegionalDirectoryPersistence(database)),
+            nowEpochMillis = SystemClock::nowMillis,
+        )
     }
+    val regionalShelterDirectoryResolver: RegionalShelterDirectoryResolver
+        get() = regionalTrustRuntime.resolver
+
+    /** Integration point for a future signed-directory import channel. */
+    suspend fun acceptRegionalDirectoryCandidate(candidate: SignedRegionalShelterDirectory): DirectoryStoreAcceptance =
+        regionalTrustRuntime.acceptCandidate(candidate)
     val rescueDeliveryCoordinator: ShelterDeliveryCoordinator by lazy {
         ShelterDeliveryCoordinator(
             client = AndroidShelterBleClient(this),
@@ -119,6 +174,9 @@ class RelayApplication : Application() {
             carrierId = deviceId,
             deliveryIds = SharedPreferencesCourierDeliveryIdStore(this),
             onRepositoryChanged = { rescueNearbyCoordinator?.onLocalStoreChanged() },
+            receiptApplier = { key, receipt, publicKey ->
+                activeRescueSessionStore.applyVerifiedReceipt(key, receipt, publicKey, SystemClock.nowMillis())
+            },
         )
     }
 
@@ -152,6 +210,9 @@ class RelayApplication : Application() {
                 transport = nearbyTransport,
                 nowEpochMillis = SystemClock::nowMillis,
                 shelterKeyProvider = rescueShelterKeyStore,
+                receiptApplier = { key, receipt, publicKey ->
+                    activeRescueSessionStore.applyVerifiedReceipt(key, receipt, publicKey, SystemClock.nowMillis())
+                },
             )
         }.getOrNull()
     }
@@ -222,24 +283,24 @@ class RelayApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // SOS must be creatable before Wi-Fi or LAN discovery is available. Seed only the
-        // public pilot manifest; the PC Gateway keeps the corresponding private keys locally.
-        BundledShelterManifestBootstrap(
-            context = this,
-            saveManifest = rescueShelterKeyStore::saveVerifiedManifest,
-        ).seedIfMissing(rescueShelterKeyStore::load)
-        if (BuildConfig.DEBUG) {
-            applicationScope.launch {
-                DebugShelterManifestBootstrap(
-                    discovery = gatewayDiscovery,
-                    client = HttpShelterManifestClient(),
-                    loadExisting = rescueShelterKeyStore::load,
-                    saveManifest = rescueShelterKeyStore::saveVerifiedManifest,
-                ).enrollFromLocalTestGateway()
-            }
+        // Root asset parsing is safe on the main thread. Persisted-directory revalidation performs
+        // Room I/O below; until that finishes BLE remains fail-closed with an empty resolver.
+        regionalTrustRuntime
+        applicationScope.launch {
+            regionalTrustRuntime.reloadAcceptedDirectories()
         }
+        // Test/pilot identities must be supplied explicitly through the enrollment path. Neither a
+        // bundled unsigned manifest nor LAN discovery is allowed to auto-approve a Gateway.
         // A process restart must not require a courier to open a transfer screen.
         RescueDeliveryService.startIfEnabled(this)
+        // Covers the narrow interval between the atomic Room commit and a foreground-service
+        // start. This is not a location service and is not used to self-start after force-stop.
+        applicationScope.launch {
+            val hasLiveSession = activeRescueSessionStore.all().any { session ->
+                session.terminalStatus == null && session.expiresAtEpochMillis > SystemClock.nowMillis()
+            }
+            if (hasLiveSession) RescueDeliveryService.enableAndStart(this@RelayApplication)
+        }
     }
 
     private companion object {
@@ -304,7 +365,7 @@ private val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
-private val MIGRATION_5_6 = object : Migration(5, 6) {
+internal val MIGRATION_5_6 = object : Migration(5, 6) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE IF NOT EXISTS broker_ledger (
@@ -316,6 +377,59 @@ private val MIGRATION_5_6 = object : Migration(5, 6) {
                 retryCount INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(requestId, requestVersion)
             )""",
+        )
+    }
+}
+
+/** Public signed directory state; no private root material is ever persisted here. */
+internal val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS regional_shelter_directories (
+                regionId TEXT NOT NULL,
+                generation INTEGER NOT NULL,
+                directoryDigest TEXT NOT NULL,
+                directoryJson TEXT NOT NULL,
+                acceptedAtEpochMillis INTEGER NOT NULL,
+                PRIMARY KEY(regionId)
+            )""",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_regional_shelter_directories_generation " +
+                "ON regional_shelter_directories(generation)",
+        )
+    }
+}
+
+/** Session recovery ciphertext is kept separate from route envelopes and from the SQLCipher key. */
+internal val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS active_rescue_sessions (
+                requestId TEXT NOT NULL,
+                latestVersion INTEGER NOT NULL,
+                sealedRecoveryPayload BLOB NOT NULL,
+                recoveryNonce BLOB NOT NULL,
+                trackingMode TEXT NOT NULL,
+                latestSubmissionStatus TEXT NOT NULL,
+                createdAtEpochMillis INTEGER NOT NULL,
+                updatedAtEpochMillis INTEGER NOT NULL,
+                expiresAtEpochMillis INTEGER NOT NULL,
+                terminalStatus TEXT,
+                PRIMARY KEY(requestId)
+            )""",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_active_rescue_sessions_updatedAtEpochMillis " +
+                "ON active_rescue_sessions(updatedAtEpochMillis)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_active_rescue_sessions_expiresAtEpochMillis " +
+                "ON active_rescue_sessions(expiresAtEpochMillis)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_active_rescue_sessions_terminalStatus " +
+                "ON active_rescue_sessions(terminalStatus)",
         )
     }
 }

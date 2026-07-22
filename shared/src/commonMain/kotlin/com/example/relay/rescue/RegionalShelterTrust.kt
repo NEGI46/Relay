@@ -92,6 +92,23 @@ fun SignedShelterManifest.signedManifestFingerprint(): String =
 fun SignedShelterManifest.beaconFingerprintBytes(): ByteArray =
     signedManifestFingerprint().hexToBytes()
 
+/**
+ * Stable digest for persistence and rollback protection of a complete signed directory.
+ *
+ * The directory signature alone is not used as an identity: two differently encoded signed
+ * documents must never be treated as interchangeable merely because they have the same
+ * generation.  This value includes every signed field and the detached signature.
+ */
+fun SignedRegionalShelterDirectory.signedDirectoryFingerprint(): String =
+    RescueCryptography.sha256Hex(
+        trustCanonicalBytes(
+            directory.signingBytes().decodeToString(),
+            signerKeyId,
+            signatureAlgorithm,
+            signatureBase64,
+        ),
+    )
+
 @Serializable
 data class UnsignedRegionalShelterDirectory(
     val protocolVersion: Int = REGIONAL_SHELTER_TRUST_PROTOCOL_VERSION,
@@ -164,9 +181,12 @@ fun signShelterManifest(
 fun verifyShelterManifest(
     signed: SignedShelterManifest,
     root: RegionalRootBundle,
-    nowEpochMillis: Long,
+    nowEpochMillis: Long? = null,
 ): Boolean = verifyTrustSignature(
-    signed.validate(nowEpochMillis) == RescueValidationResult.Valid && signed.regionId == root.regionId,
+    signed.validate(nowEpochMillis) == RescueValidationResult.Valid &&
+        signed.regionId == root.regionId &&
+        signed.manifest.recipientPublicKey.isUsablePublicKey() &&
+        signed.manifest.receiptSigningPublicKey.isUsablePublicKey(),
     signed.signerKeyId,
     signed.signatureBase64,
     signed.signingBytes(),
@@ -186,9 +206,11 @@ fun signRegionalShelterDirectory(
 fun verifyRegionalShelterDirectory(
     signed: SignedRegionalShelterDirectory,
     root: RegionalRootBundle,
-    nowEpochMillis: Long,
+    nowEpochMillis: Long? = null,
 ): Boolean = verifyTrustSignature(
-    signed.validate(nowEpochMillis) == RescueValidationResult.Valid && signed.directory.regionId == root.regionId,
+    signed.validate(nowEpochMillis) == RescueValidationResult.Valid &&
+        signed.directory.regionId == root.regionId &&
+        root.rootSigningPublicKey.isUsablePublicKey(),
     signed.signerKeyId,
     signed.signatureBase64,
     signed.directory.signingBytes(),
@@ -197,6 +219,8 @@ fun verifyRegionalShelterDirectory(
 
 sealed interface DirectoryAcceptance {
     data class Accepted(val directory: SignedRegionalShelterDirectory) : DirectoryAcceptance
+    /** The exact already-accepted document was supplied again; no durable write is required. */
+    data object AlreadyAccepted : DirectoryAcceptance
     data object Stale : DirectoryAcceptance
     data object Invalid : DirectoryAcceptance
 }
@@ -211,19 +235,52 @@ data class ResolvedShelterKeys(
 
 /** In-memory monotonic directory cache used by Android provisioning and delivery services. */
 class RegionalShelterDirectoryResolver(rootBundles: Collection<RegionalRootBundle>) {
-    private val roots = rootBundles.associateBy { it.regionId }.also { require(it.size == rootBundles.size) { "duplicate_root_region" } }
+    private val roots = rootBundles.associateBy { it.regionId }.also { resolved ->
+        require(resolved.size == rootBundles.size) { "duplicate_root_region" }
+        require(rootBundles.all { it.validate() == RescueValidationResult.Valid }) { "invalid_root_bundle" }
+        require(rootBundles.map { it.rootSigningPublicKey.keyId }.distinct().size == rootBundles.size) {
+            "duplicate_root_key_id"
+        }
+    }
     private val accepted = mutableMapOf<String, SignedRegionalShelterDirectory>()
 
+    @Synchronized
     fun accept(candidate: SignedRegionalShelterDirectory, nowEpochMillis: Long): DirectoryAcceptance {
         val root = roots[candidate.directory.regionId] ?: return DirectoryAcceptance.Invalid
-        if (root.validate() != RescueValidationResult.Valid || !verifyRegionalShelterDirectory(candidate, root, nowEpochMillis)) return DirectoryAcceptance.Invalid
+        if (root.validate() != RescueValidationResult.Valid ||
+            !root.rootSigningPublicKey.isUsablePublicKey() ||
+            !verifyRegionalShelterDirectory(candidate, root, nowEpochMillis)
+        ) return DirectoryAcceptance.Invalid
+        // The directory signature authenticates membership, but each member remains an
+        // independently signed manifest.  Never trust a re-signed directory carrying an altered
+        // recipient key, receipt key, or BLE identity whose manifest signature no longer verifies.
+        if (candidate.directory.shelters.any {
+                !verifyShelterManifest(it, root, nowEpochMillis) ||
+                    !it.manifest.recipientPublicKey.isUsablePublicKey() ||
+                    !it.manifest.receiptSigningPublicKey.isUsablePublicKey()
+            }
+        ) {
+            return DirectoryAcceptance.Invalid
+        }
         val current = accepted[candidate.directory.regionId]
         if (current != null && candidate.directory.generation < current.directory.generation) return DirectoryAcceptance.Stale
-        if (current != null && candidate.directory.generation == current.directory.generation && candidate.signatureBase64 != current.signatureBase64) return DirectoryAcceptance.Invalid
+        if (current != null && candidate.directory.generation == current.directory.generation) {
+            return if (candidate.signedDirectoryFingerprint() == current.signedDirectoryFingerprint()) {
+                DirectoryAcceptance.AlreadyAccepted
+            } else {
+                DirectoryAcceptance.Invalid
+            }
+        }
         accepted[candidate.directory.regionId] = candidate
         return DirectoryAcceptance.Accepted(candidate)
     }
 
+    /** Public digest only; never exposes key or payload material. */
+    @Synchronized
+    fun acceptedDirectoryDigest(regionId: String): String? =
+        accepted[regionId]?.signedDirectoryFingerprint()
+
+    @Synchronized
     fun resolveForNewRequest(regionId: String, shelterId: String, nowEpochMillis: Long): ResolvedShelterKeys? =
         accepted[regionId]
             ?.takeIf { it.directory.validate(nowEpochMillis) == RescueValidationResult.Valid }
@@ -234,6 +291,7 @@ class RegionalShelterDirectoryResolver(rootBundles: Collection<RegionalRootBundl
             ?.maxWithOrNull(compareBy<SignedShelterManifest> { it.manifest.generation }.thenBy { it.manifest.recipientPublicKey.keyId })
             ?.toResolvedKeys()
 
+    @Synchronized
     fun resolveForEnvelope(regionId: String, shelterId: String, recipientKeyId: String, nowEpochMillis: Long): ResolvedShelterKeys? =
         accepted[regionId]
             ?.takeIf { it.directory.validate(nowEpochMillis) == RescueValidationResult.Valid }
@@ -246,6 +304,7 @@ class RegionalShelterDirectoryResolver(rootBundles: Collection<RegionalRootBundl
             }
             ?.toResolvedKeys()
 
+    @Synchronized
     fun verifyAdvertisedManifest(signed: SignedShelterManifest, nowEpochMillis: Long): Boolean {
         val root = roots[signed.regionId] ?: return false
         if (root.validate() != RescueValidationResult.Valid || !verifyShelterManifest(signed, root, nowEpochMillis)) return false
@@ -254,6 +313,7 @@ class RegionalShelterDirectoryResolver(rootBundles: Collection<RegionalRootBundl
     }
 
     /** Resolves the legacy-advertisement-safe signed-manifest fingerprint prefix. */
+    @Synchronized
     fun resolveBeaconIdentity(
         signedManifestFingerprintPrefix: ByteArray,
         nowEpochMillis: Long,
@@ -279,6 +339,12 @@ private fun SignedShelterManifest.toResolvedKeys() = ResolvedShelterKeys(regionI
 private fun String.hexToBytes(): ByteArray = ByteArray(length / 2) { index ->
     substring(index * 2, index * 2 + 2).toInt(16).toByte()
 }
+
+/** Rejects malformed, private-key, or key-id-mismatched public material without exposing it. */
+private fun RescuePublicKey.isUsablePublicKey(): Boolean = runCatching {
+    RescueCryptography.importPublicKey(keyId, algorithm, encodedBase64)
+    true
+}.getOrDefault(false)
 
 private fun verifyTrustSignature(valid: Boolean, signerKeyId: String, signatureBase64: String, canonicalBytes: ByteArray, root: RegionalRootBundle): Boolean {
     if (!valid || root.validate() != RescueValidationResult.Valid || signerKeyId != root.rootSigningPublicKey.keyId) return false

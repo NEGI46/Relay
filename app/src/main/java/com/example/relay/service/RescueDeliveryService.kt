@@ -137,10 +137,11 @@ class RescueDeliveryService : Service() {
                     is GatewayDeliveryResult.Accepted -> {
                         val keys = app.rescueShelterKeyStore.load()
                         if (keys != null) {
-                            val applied = app.rescueRepository.applyReceipt(
+                            val applied = app.activeRescueSessionStore.applyVerifiedReceipt(
                                 RescueRequestKey(candidate.envelope.requestId, candidate.envelope.requestVersion),
                                 result.receipt,
                                 keys.receiptSigningKey,
+                                System.currentTimeMillis(),
                             )
                             if (applied == com.example.relay.rescue.ReceiptApplicationResult.APPLIED) {
                                 app.rescueNearbyCoordinator?.onLocalStoreChanged()

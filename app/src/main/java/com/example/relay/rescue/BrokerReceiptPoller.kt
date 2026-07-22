@@ -56,10 +56,11 @@ class BrokerReceiptPoller(
         val keys = app.rescueShelterKeyStore.load() ?: return
 
         for (receipt in batch.receipts) {
-            val result = app.rescueRepository.applyReceipt(
+            val result = app.activeRescueSessionStore.applyVerifiedReceipt(
                 RescueRequestKey(receipt.receipt.requestId, receipt.receipt.requestVersion),
                 receipt,
                 keys.receiptSigningKey,
+                System.currentTimeMillis(),
             )
             if (result == ReceiptApplicationResult.APPLIED) {
                 app.rescueNearbyCoordinator?.onLocalStoreChanged()

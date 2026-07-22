@@ -171,17 +171,35 @@ private fun OwnRequestCard(request: OwnRescueRequestUiState, language: RescueLan
                 if (request.isCancelled) language.text("自分の救助依頼（取消送信中）", "My rescue request (cancelling)") else language.text("自分の救助依頼", "My rescue request"),
                 style = MaterialTheme.typography.titleLarge,
             )
-            Text(request.submissionStatus.statusLabel(language), style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (request.terminalStatus == "EXPIRED") {
+                    language.text("この救助依頼の有効期限が切れています。", "This rescue request has expired.")
+                } else {
+                    request.submissionStatus.statusLabel(language)
+                },
+                style = MaterialTheme.typography.titleMedium,
+            )
             Text(language.text("依頼 → 自動中継 → 避難所受信 → 対応中 → 完了", "Request → Relay → Shelter → Responding → Complete"))
             MiniLocationMap(request.urgency == RescueUrgency.IMMEDIATE)
             Text("GPS: %.5f, %.5f".format(request.latitude, request.longitude))
             Text(language.text("位置更新", "Location updated") + ": ${formatRescueTime(request.locationCapturedAtEpochMillis)}${request.accuracyMeters?.let { language.text("（精度 約${it.toInt()}m）", " (accuracy about ${it.toInt()} m)") }.orEmpty()}")
-            if (!request.isCancelled) {
+            Text(
+                if (request.trackingEnabled) {
+                    language.text("現在地を継続して更新中です。", "Location updates are active.")
+                } else {
+                    language.text("現在地の更新は停止しています。", "Location updates are stopped.")
+                },
+            )
+            if (!request.isCancelled && request.terminalStatus == null) {
                 Button(onClick = callbacks::onPrepareUpdate, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
                     Text(language.text("状況・人数を更新", "Update situation or group size"))
                 }
                 OutlinedButton(onClick = callbacks::onCancelRequest, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
                     Text(language.text("救助依頼を取り消す", "Cancel rescue request"))
+                }
+            } else if (request.terminalStatus != null) {
+                OutlinedButton(onClick = callbacks::onAcknowledgeTerminalResult, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                    Text(language.text("結果を確認しました", "I have reviewed this result"))
                 }
             }
         }

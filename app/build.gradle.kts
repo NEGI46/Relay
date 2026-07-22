@@ -1,4 +1,6 @@
 import java.time.Instant
+import java.util.Collections
+import java.util.zip.ZipFile
 
 plugins {
     alias(libs.plugins.android.application)
@@ -20,6 +22,12 @@ android {
         versionCode = 2
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Production/pilot variants deliberately ship no trust anchor until the operator supplies
+        // an approved public bundle. A variant may opt into a public-only asset by overriding this.
+        buildConfigField("String", "REGIONAL_ROOT_BUNDLE_ASSET", "\"\"")
+        // A test Root is never a release/pilot trust anchor, even if a misconfigured asset is
+        // accidentally packaged. Debug/local development may explicitly allow TEST fixtures.
+        buildConfigField("String", "REGIONAL_ROOT_BUNDLE_ENVIRONMENTS", "\"PILOT,PRODUCTION\"")
     }
 
     buildFeatures {
@@ -34,6 +42,12 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            // Optional local developer asset; it is absent by default and must never contain a
+            // private key. Release-derived variants inherit the empty production setting.
+            buildConfigField("String", "REGIONAL_ROOT_BUNDLE_ASSET", "\"relay-regional-roots.debug.json\"")
+            buildConfigField("String", "REGIONAL_ROOT_BUNDLE_ENVIRONMENTS", "\"TEST,PILOT\"")
+        }
         create("localDev") { initWith(getByName("debug")); matchingFallbacks += listOf("debug") }
         create("pilotRelease") { initWith(getByName("release")); matchingFallbacks += listOf("release") }
     }
@@ -45,10 +59,53 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+
+    sourceSets {
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
 }
 
 kotlin {
     jvmToolchain(17)
+}
+
+/**
+ * Packaging guardrail for Phase 0A. A future approved public Root may legitimately be packaged,
+ * but test fixtures and private Root material must never cross into release-derived APKs.
+ */
+tasks.register("verifyNoTestTrustArtifactsInReleaseApks") {
+    dependsOn("assembleRelease", "assemblePilotRelease")
+    doLast {
+        val apks = fileTree(layout.buildDirectory.dir("outputs/apk").get().asFile) {
+            include("release/*.apk", "pilotRelease/*.apk")
+        }.files
+        check(apks.size >= 2) { "Expected release and pilotRelease APKs for trust-artifact inspection" }
+        apks.forEach { apk ->
+            ZipFile(apk).use { archive ->
+                Collections.list(archive.entries())
+                    .asSequence()
+                    .filter { entry -> !entry.isDirectory && entry.name.startsWith("assets/") }
+                    .forEach { entry ->
+                        check(!entry.name.contains("test", ignoreCase = true)) {
+                            "Test asset must not be packaged in ${apk.name}: ${entry.name}"
+                        }
+                        if (entry.size in 1L..(512L * 1024)) {
+                            val content = archive.getInputStream(entry).use { input ->
+                                input.readBytes().toString(Charsets.UTF_8)
+                            }
+                            check(!content.contains("TEST ONLY", ignoreCase = true)) {
+                                "Test trust material must not be packaged in ${apk.name}: ${entry.name}"
+                            }
+                            check(!content.contains("rootSigningPrivateKey") &&
+                                !content.contains("privateKey", ignoreCase = true)
+                            ) {
+                                "Private Root material must not be packaged in ${apk.name}: ${entry.name}"
+                            }
+                        }
+                    }
+            }
+        }
+    }
 }
 
 ksp {

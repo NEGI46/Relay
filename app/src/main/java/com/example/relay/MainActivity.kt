@@ -9,7 +9,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.relay.ui.RelayApp
 import com.example.relay.ui.RelayViewModel
 import com.example.relay.ui.rescue.RescueViewModel
-import com.example.relay.service.RescueDeliveryService
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,15 +34,9 @@ class MainActivity : ComponentActivity() {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
                     RescueViewModel(
+                        coordinator = app.activeRescueSessionCoordinator,
                         repository = app.rescueRepository,
-                        shelterKeyProvider = app.rescueShelterKeyStore,
-                        onRescueAutomationRequired = {
-                            RescueDeliveryService.enableAndStart(app)
-                            app.notifyRescueStoreChanged()
-                        },
-                        locationProvider = app.locationProvider,
                         senderDeviceId = app.deviceId,
-                        shelterKeyWaitMillis = if (BuildConfig.DEBUG) 8_000 else 0,
                     ) as T
             })
             RelayApp(relayViewModel, rescueViewModel)

@@ -45,6 +45,8 @@ enum class RescueStoreRejection {
     EXPIRED,
     MALFORMED_PACKET,
     SUPERSEDED_BY_NEWER_VERSION,
+    /** A courier/peer must not replace a sender-owned active request outside its coordinator. */
+    ACTIVE_SESSION_PROTECTED,
     EXCEEDS_BYTE_LIMIT,
 }
 

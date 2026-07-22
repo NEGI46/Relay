@@ -48,6 +48,8 @@ class ShelterDeliveryCoordinator(
     private val sessionDeadlineMillis: Long = 30_000,
     private val maxEnvelopeBytes: Int = MAX_ENVELOPE_BYTES,
     private val onRepositoryChanged: suspend () -> Unit = {},
+    /** Lets sender-owned sessions mirror only a verified shelter receipt in the same DB transaction. */
+    private val receiptApplier: (RescueRequestKey, SignedShelterReceipt, com.example.relay.rescue.RescuePublicKey) -> ReceiptApplicationResult = repository::applyReceipt,
 ) {
     private val mutex = Mutex()
     private var job: Job? = null
@@ -71,7 +73,7 @@ class ShelterDeliveryCoordinator(
     private suspend fun deliverTo(advertisement: ShelterAdvertisement) {
         try {
             withTimeout(sessionDeadlineMillis) {
-                client.connect(advertisement).use { deliverSession(it) }
+                client.connect(advertisement).use { deliverSession(advertisement.identity, it) }
             }
         } catch (_: TimeoutCancellationException) {
             _state.value = ShelterDeliveryState.WaitingToRetry("BLE delivery timed out")
@@ -81,8 +83,11 @@ class ShelterDeliveryCoordinator(
         }
     }
 
-    private suspend fun deliverSession(session: ShelterBleSession) {
-        val manifest = resolveTrustedManifest(session) ?: return
+    private suspend fun deliverSession(
+        advertisedIdentity: ShelterBleIdentity?,
+        session: ShelterBleSession,
+    ) {
+        val manifest = resolveTrustedManifest(advertisedIdentity, session) ?: return
         val candidate = selectCandidate(manifest.manifest.shelterId) ?: return
         val encoded = encodeCandidate(candidate) ?: return
         _state.value = ShelterDeliveryState.Delivering(manifest.manifest.shelterId)
@@ -91,10 +96,18 @@ class ShelterDeliveryCoordinator(
         applyShelterReceipt(candidate, receipt, keys)
     }
 
-    private suspend fun resolveTrustedManifest(session: ShelterBleSession): SignedShelterManifest? {
+    private suspend fun resolveTrustedManifest(
+        advertisedIdentity: ShelterBleIdentity?,
+        session: ShelterBleSession,
+    ): SignedShelterManifest? {
         // The bridge exposes the same compact identity in its advertisement and read
-        // characteristic. Resolve it only against the already verified local directory.
+        // characteristic. Do not rely solely on a platform client to compare them: a fake,
+        // replacement, or future client must fail closed here as well.
         val identity = session.readIdentity()
+        if (advertisedIdentity == null || !advertisedIdentity.sameWireIdentity(identity)) {
+            _state.value = ShelterDeliveryState.WaitingToRetry("BLE identity changed after advertisement")
+            return null
+        }
         val now = clock()
         val manifest = directoryResolver.resolveBeaconIdentity(identity.signedManifestFingerprint, now)
         if (manifest == null || !directoryResolver.verifyAdvertisedManifest(manifest, now)) {
@@ -153,7 +166,7 @@ class ShelterDeliveryCoordinator(
         receipt: SignedShelterReceipt,
         keys: ResolvedShelterKeys,
     ) {
-        when (repository.applyReceipt(candidate.key, receipt, keys.receiptSigningPublicKey)) {
+        when (receiptApplier(candidate.key, receipt, keys.receiptSigningPublicKey)) {
             ReceiptApplicationResult.APPLIED -> {
                 onRepositoryChanged()
                 finishReceipt(candidate.key, receipt)

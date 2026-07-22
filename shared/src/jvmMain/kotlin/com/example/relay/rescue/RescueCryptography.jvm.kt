@@ -44,6 +44,7 @@ actual object RescueCryptography {
     actual fun importPublicKey(keyId: String, algorithm: RescueKeyAlgorithm, encodedBase64: String): RescuePublicKey = guarded("invalid_public_key") {
         requireValidKeyId(keyId)
         val decoded = decode(encodedBase64)
+        require(sha256Hex(decoded) == keyId) { "public_key_id_mismatch" }
         validatePublicKey(algorithm, keyFactory(algorithm).generatePublic(X509EncodedKeySpec(decoded)))
         RescuePublicKey(keyId, algorithm, encode(decoded))
     }
@@ -222,7 +223,11 @@ actual object RescueCryptography {
         RescueKeyPair(RescuePublicKey(keyId, algorithm, encode(pair.public.encoded)), RescuePrivateKey(keyId, algorithm, encode(pair.private.encoded)))
     }
 
-    private fun parsePublic(key: RescuePublicKey): PublicKey = keyFactory(key.algorithm).generatePublic(X509EncodedKeySpec(decode(key.encodedBase64))).also { validatePublicKey(key.algorithm, it) }
+    private fun parsePublic(key: RescuePublicKey): PublicKey {
+        val encoded = decode(key.encodedBase64)
+        require(sha256Hex(encoded) == key.keyId) { "public_key_id_mismatch" }
+        return keyFactory(key.algorithm).generatePublic(X509EncodedKeySpec(encoded)).also { validatePublicKey(key.algorithm, it) }
+    }
     private fun parsePrivate(key: RescuePrivateKey): PrivateKey = keyFactory(key.algorithm).generatePrivate(PKCS8EncodedKeySpec(decode(key.encodedBase64))).also { validatePrivateKey(key.algorithm, it) }
     private fun validatePublicKey(algorithm: RescueKeyAlgorithm, key: PublicKey) {
         when (algorithm) {
