@@ -34,6 +34,8 @@ class RescueNearbyCoordinator(
     private val maxInventoryEntries: Int = 64,
     private val maxRequestedEntries: Int = 32,
     private val shelterKeyProvider: ShelterPublicKeyProvider? = null,
+    /** Starts durable onward delivery when this device becomes a courier for a new envelope. */
+    private val onEnvelopeStored: () -> Unit = {},
     /** Sender sessions receive receipt state only after the existing signature checks succeed. */
     private val receiptApplier: (RescueRequestKey, SignedShelterReceipt, com.example.relay.rescue.RescuePublicKey) -> ReceiptApplicationResult = repository::applyReceipt,
 ) {
@@ -156,7 +158,13 @@ class RescueNearbyCoordinator(
                 }
             }
         }
-        if (storeResult is RescueStoreResult.Stored) refreshConnectedPeers(excludingPeerId = peerId)
+        if (storeResult is RescueStoreResult.Stored) {
+            // A receiving device can be the only one with a working LAN or Internet path. Start
+            // its durable delivery owner immediately; previously only the creating device did
+            // this, so a successfully stored envelope could remain stranded on a courier.
+            onEnvelopeStored()
+            refreshConnectedPeers(excludingPeerId = peerId)
+        }
     }
 
     private fun handleAck(peerId: String, packet: RescueNearbyPacket.Ack) {
