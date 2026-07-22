@@ -67,7 +67,7 @@ class RescueViewModel(
             return
         }
         if (screen == RescueScreen.COURIER_INVENTORY) refreshCourierItems()
-        if (screen == RescueScreen.HOME || screen == RescueScreen.BROADCASTING) onRefreshStatus()
+        if (screen == RescueScreen.BROADCASTING) onRefreshStatus()
         _state.update { current -> current.copy(screen = screen, draft = current.draft ?: newDraft(), formMessage = null) }
     }
 

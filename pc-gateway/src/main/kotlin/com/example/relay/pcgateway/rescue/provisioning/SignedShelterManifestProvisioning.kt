@@ -223,7 +223,7 @@ internal fun restrictOwnerOnly(target: Path) {
 
 /** Private root material is an offline operator artifact and must never live in a Git worktree. */
 internal fun requireOfflinePrivatePath(path: Path) {
-    var parent: Path? = path.toAbsolutePath().parent
+    var parent: Path? = path.toRealPath().parent
     while (parent != null) {
         require(!Files.exists(parent.resolve(".git"))) { "private material may not be stored under a Git worktree" }
         parent = parent.parent
