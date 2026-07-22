@@ -67,6 +67,29 @@ class BrokerStoreTest {
         ciphertextSha256Hex = ciphertextHash,
     )
 
+    private fun testReceipt(
+        receiptId: String = "rcpt-001",
+        envelopeId: String = "env-001",
+        requestId: String = "req-001",
+        requestVersion: Int = 1,
+        ciphertextHash: String = "a".repeat(64),
+        shelterId: String = "fuchu-01",
+        receivedAt: Long = System.currentTimeMillis(),
+    ) = SignedShelterReceipt(
+        receipt = UnsignedShelterReceipt(
+            receiptId = receiptId,
+            envelopeId = envelopeId,
+            requestId = requestId,
+            requestVersion = requestVersion,
+            ciphertextSha256Hex = ciphertextHash,
+            shelterId = shelterId,
+            receivedAtEpochMillis = receivedAt,
+            status = ShelterReceiptStatus.ACCEPTED,
+        ),
+        signerKeyId = "signer-001",
+        signatureBase64 = "D".repeat(88),
+    )
+
     @Test
     fun `put stores new envelope`() {
         val envelope = testEnvelope()
@@ -81,9 +104,79 @@ class BrokerStoreTest {
     fun `put returns Duplicate for same envelope`() {
         val envelope = testEnvelope()
         val now = System.currentTimeMillis()
-        store.put(envelope, "device-key-1", now)
+        val stored = store.put(envelope, "device-key-1", now) as BrokerPutResult.Stored
         val result = store.put(envelope, "device-key-1", now + 1000)
         assertTrue(result is BrokerPutResult.Duplicate)
+        assertEquals(stored.response, (result as BrokerPutResult.Duplicate).response)
+    }
+
+    @Test
+    fun `same envelope id with different logical request cannot return false stored`() {
+        val now = System.currentTimeMillis()
+        store.put(testEnvelope(), "device-key-1", now)
+
+        val result = store.put(
+            testEnvelope(requestId = "req-other", ciphertextHash = "b".repeat(64)),
+            "device-key-2",
+            now + 1,
+        )
+
+        assertTrue(result is BrokerPutResult.Collision)
+        assertEquals("env-001", (result as BrokerPutResult.Collision).existingEnvelopeId)
+        assertEquals(1, store.countPendingEnvelopes(now))
+    }
+
+    @Test
+    fun `legacy database migration preserves a stable duplicate acknowledgement`() {
+        val envelope = testEnvelope()
+        val storedAt = System.currentTimeMillis()
+        store.close()
+        dbFile.delete()
+        DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}").use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    """
+                    CREATE TABLE broker_envelopes(
+                      envelope_id TEXT PRIMARY KEY,
+                      request_id TEXT NOT NULL,
+                      request_version INTEGER NOT NULL,
+                      sender_device_id TEXT NOT NULL,
+                      shelter_id TEXT NOT NULL,
+                      expires_at INTEGER NOT NULL,
+                      ciphertext_hash TEXT NOT NULL,
+                      envelope_json TEXT NOT NULL,
+                      device_key_id TEXT NOT NULL,
+                      stored_at INTEGER NOT NULL,
+                      UNIQUE(request_id, request_version, ciphertext_hash)
+                    )
+                    """.trimIndent(),
+                )
+            }
+            connection.prepareStatement(
+                """INSERT INTO broker_envelopes
+                   (envelope_id, request_id, request_version, sender_device_id, shelter_id,
+                    expires_at, ciphertext_hash, envelope_json, device_key_id, stored_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            ).use { statement ->
+                statement.setString(1, envelope.envelopeId)
+                statement.setString(2, envelope.requestId)
+                statement.setInt(3, envelope.requestVersion)
+                statement.setString(4, envelope.senderDeviceId)
+                statement.setString(5, envelope.destinationShelterId)
+                statement.setLong(6, envelope.expiresAtEpochMillis)
+                statement.setString(7, envelope.ciphertextSha256Hex)
+                statement.setString(8, brokerJson.encodeToString(EncryptedRescueEnvelope.serializer(), envelope))
+                statement.setString(9, "legacy-device")
+                statement.setLong(10, storedAt)
+                statement.executeUpdate()
+            }
+        }
+
+        store = BrokerStore(dbFile.absolutePath)
+        val duplicate = store.put(envelope, "courier-device", storedAt + 1) as BrokerPutResult.Duplicate
+
+        assertEquals(envelope.envelopeId, duplicate.response.brokerReceiptId)
+        assertEquals(storedAt, duplicate.response.storedAtEpochMillis)
     }
 
     @Test
@@ -159,6 +252,17 @@ class BrokerStoreTest {
     }
 
     @Test
+    fun `device registration never returns a token for a different public key`() {
+        store.registerDevice("device-uuid-1", "pubkey-base64", System.currentTimeMillis())
+        try {
+            store.registerDevice("device-uuid-1", "other-public-key", System.currentTimeMillis() + 1)
+            throw AssertionError("expected DeviceKeyConflictException")
+        } catch (error: DeviceKeyConflictException) {
+            assertTrue(error.message!!.contains("device_key_conflict"))
+        }
+    }
+
+    @Test
     fun `capability token resolves to device`() {
         val result = store.registerDevice("device-uuid-1", "pubkey-base64", System.currentTimeMillis())
         val resolved = store.deviceForCapabilityToken(result.capabilityToken)
@@ -198,22 +302,19 @@ class BrokerStoreTest {
     fun `saveReceipt stores receipt for existing envelope`() {
         val now = System.currentTimeMillis()
         store.put(testEnvelope(envelopeId = "env-001"), "dk1", now)
-
-        val receipt = SignedShelterReceipt(
-            receipt = UnsignedShelterReceipt(
-                receiptId = "rcpt-001",
-                envelopeId = "env-001",
-                requestId = "req-001",
-                requestVersion = 1,
-                ciphertextSha256Hex = "a".repeat(64),
-                shelterId = "fuchu-01",
-                receivedAtEpochMillis = now,
-                status = ShelterReceiptStatus.ACCEPTED,
-            ),
-            signerKeyId = "signer-001",
-            signatureBase64 = "D".repeat(88),
-        )
+        val receipt = testReceipt(receivedAt = now)
         assertTrue(store.saveReceipt("fuchu-01", receipt, now))
+    }
+
+    @Test(expected = IllegalStateException::class)
+    fun `saveReceipt rejects immutable envelope binding mismatch`() {
+        val now = System.currentTimeMillis()
+        store.put(testEnvelope(), "dk1", now)
+        store.saveReceipt(
+            "fuchu-01",
+            testReceipt(requestId = "different-request"),
+            now,
+        )
     }
 
     @Test(expected = IllegalStateException::class)
@@ -261,6 +362,20 @@ class BrokerStoreTest {
         // Invalid token returns empty
         val emptyBatch = store.receiptsForDevice("invalid-token", 0)
         assertTrue(emptyBatch.receipts.isEmpty())
+    }
+
+    @Test
+    fun `receipt reaches both the original uploader and a duplicate carrying courier`() {
+        val now = System.currentTimeMillis()
+        val origin = store.registerDevice("origin", "origin-key", now)
+        val courier = store.registerDevice("courier", "courier-key", now)
+        val envelope = testEnvelope()
+        assertTrue(store.put(envelope, "origin", now) is BrokerPutResult.Stored)
+        assertTrue(store.put(envelope, "courier", now + 1) is BrokerPutResult.Duplicate)
+        store.saveReceipt("fuchu-01", testReceipt(receivedAt = now + 2), now + 2)
+
+        assertEquals(1, store.receiptsForDevice(origin.capabilityToken, 0).receipts.size)
+        assertEquals(1, store.receiptsForDevice(courier.capabilityToken, 0).receipts.size)
     }
 
     @Test

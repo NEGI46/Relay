@@ -56,6 +56,31 @@ class UdpGatewayDiscoveryTest {
     }
 
     @Test
+    fun `shelter discovery skips a valid beacon for a different shelter`() = runBlocking {
+        val port = freeUdpPort()
+        val discovery = UdpGatewayDiscovery(port = port)
+        val waiter = async { discovery.discoverForShelter("shelter-target", timeoutMs = 3_000) }
+        delay(150)
+        DatagramSocket().use { sender ->
+            val wrong = """{"service":"relay-pc-gateway","discoveryVersion":1,"protocolVersion":1,"gatewayId":"gw-wrong","shelterId":"shelter-wrong","rescueIngressReady":true,"apiPort":8081,"anonymousIngressPath":"/api/public/sync/messages"}"""
+                .toByteArray()
+            sender.send(DatagramPacket(wrong, wrong.size, InetAddress.getByName("127.0.0.1"), port))
+            delay(100)
+            val target = """{"service":"relay-pc-gateway","discoveryVersion":1,"protocolVersion":1,"gatewayId":"gw-target","shelterId":"shelter-target","rescueIngressReady":true,"apiPort":8082,"anonymousIngressPath":"/api/public/sync/messages"}"""
+                .toByteArray()
+            repeat(5) {
+                sender.send(DatagramPacket(target, target.size, InetAddress.getByName("127.0.0.1"), port))
+                delay(100)
+            }
+        }
+        val found = waiter.await()
+        assertNotNull(found)
+        assertEquals("gw-target", found!!.gatewayId)
+        assertEquals("shelter-target", found.shelterId)
+        assertEquals(8082, found.port)
+    }
+
+    @Test
     fun `multicast lock is closed after successful discovery`() = runBlocking {
         val port = freeUdpPort()
         val lock = RecordingLock()

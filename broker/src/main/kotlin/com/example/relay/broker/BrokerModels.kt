@@ -28,6 +28,8 @@ data class BrokerUploadResponse(
 data class BrokerDeviceRegisterRequest(
     val deviceKeyId: String,
     val publicKeyBase64: String,
+    /** ECDSA-P256 proof that the caller holds the private key being registered. */
+    val registrationSignatureBase64: String,
 )
 
 /** Device registration response with unguessable capability token for receipt polling. */
@@ -73,7 +75,7 @@ data class BrokerHealthResponse(
     val pendingReceipts: Int,
     /** Configuration posture only; no token, credential, personal, or envelope data is exposed. */
     val profile: String = "production",
-    val version: String = "1.1.0",
+    val version: String = "1.2.0",
 )
 
 /** Internal ledger status for Broker-side tracking. Separate from shelter receipt statuses. */

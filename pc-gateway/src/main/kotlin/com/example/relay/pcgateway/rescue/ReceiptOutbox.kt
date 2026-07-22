@@ -51,6 +51,7 @@ class ReceiptOutbox(
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
 ) {
     init {
+        require(flushIntervalMs > 0) { "flushIntervalMs must be positive" }
         createTable()
     }
 

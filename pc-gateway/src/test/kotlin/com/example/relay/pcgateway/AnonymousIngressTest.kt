@@ -181,12 +181,40 @@ class AnonymousIngressTest {
     }
 
     @Test fun `LAN announcement contains discovery data but no admin secret`() {
-        val config = GatewayConfig(profile = GatewayProfile.DEVELOPMENT, gatewayId = "gateway-test", adminKey = "do-not-advertise", port = 9080)
-        val text = GatewayLanBeacon(config).announcementBytes().decodeToString()
+        val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
+            gatewayId = "gateway-test",
+            shelterId = "shelter-test",
+            adminKey = "do-not-advertise",
+            port = 9080,
+        )
+        val text = GatewayLanBeacon(config, rescueTrustReady = true).announcementBytes().decodeToString()
         val announcement = GatewayJson.decodeFromString(GatewayLanAnnouncement.serializer(), text)
         assertEquals("gateway-test", announcement.gatewayId)
+        assertEquals("shelter-test", announcement.shelterId)
+        assertTrue(announcement.rescueIngressReady)
         assertEquals(9080, announcement.apiPort)
         assertEquals("UNVERIFIED", announcement.receiptTrust)
         assertFalse(text.contains("do-not-advertise"))
+    }
+
+    @Test fun `LAN announcement is fail closed when rescue trust or ingress is disabled`() {
+        val untrusted = GatewayConfig(gatewayId = "gateway-untrusted", shelterId = "shelter-test")
+        val untrustedAnnouncement = GatewayJson.decodeFromString(
+            GatewayLanAnnouncement.serializer(),
+            GatewayLanBeacon(untrusted, rescueTrustReady = false).announcementBytes().decodeToString(),
+        )
+        assertFalse(untrustedAnnouncement.rescueIngressReady)
+
+        val disabled = GatewayConfig(
+            gatewayId = "gateway-disabled",
+            shelterId = "shelter-test",
+            anonymousIngressEnabled = false,
+        )
+        val disabledAnnouncement = GatewayJson.decodeFromString(
+            GatewayLanAnnouncement.serializer(),
+            GatewayLanBeacon(disabled, rescueTrustReady = true).announcementBytes().decodeToString(),
+        )
+        assertFalse(disabledAnnouncement.rescueIngressReady)
     }
 }

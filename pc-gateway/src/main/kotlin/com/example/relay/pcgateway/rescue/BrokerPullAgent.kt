@@ -43,6 +43,12 @@ class BrokerPullAgent(
     private val pollIntervalMs: Long = 10_000L,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
+    init {
+        require(pollIntervalMs in 1_000L..300_000L) {
+            "pollIntervalMs must be between 1000 and 300000"
+        }
+    }
+
     private var cursor: String? = loadCursor()
     private var consecutiveFailures = 0
 

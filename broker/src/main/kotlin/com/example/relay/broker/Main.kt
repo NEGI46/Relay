@@ -4,10 +4,13 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /** Purge interval: check for expired envelopes every 10 minutes. */
 private const val PURGE_INTERVAL_MS = 10L * 60 * 1000
@@ -55,6 +58,7 @@ fun main(args: Array<String>) {
             brokerModule(store, config)
         }.start(wait = true)
     } finally {
+        runBlocking { scope.coroutineContext[Job]?.cancelAndJoin() }
         store.close()
     }
 }

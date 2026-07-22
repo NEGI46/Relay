@@ -147,7 +147,8 @@ data class GatewayConfig(
     /** Deprecated shared Broker key; accepted only by development-profile compatibility wiring. */
     val brokerLegacyApiKey: String? = System.getenv("RELAY_BROKER_API_KEY")?.trim()?.takeIf { it.isNotEmpty() }
         ?: System.getenv("RELAY_BROKER_GATEWAY_API_KEY")?.trim()?.takeIf { it.isNotEmpty() },
-    val brokerPollIntervalMs: Long = (System.getenv("RELAY_BROKER_POLL_INTERVAL_MS") ?: "10000").toLongOrNull() ?: 10_000L,
+    val brokerPollIntervalMs: Long = (System.getenv("RELAY_BROKER_POLL_INTERVAL_MS") ?: "10000")
+        .toLongOrNull()?.takeIf { it in 1_000L..300_000L } ?: 10_000L,
 ) {
     /** Non-sensitive diagnostics surfaced by health; never contains host paths, keys, or tokens. */
     val configurationWarnings: List<String> = buildList {

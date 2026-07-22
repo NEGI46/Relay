@@ -3,6 +3,7 @@ package com.example.relay.broker
 import com.example.relay.rescue.EncryptedRescueEnvelope
 import com.example.relay.rescue.RescueUrgency
 import com.example.relay.rescue.authenticatedHeaderBytes
+import com.example.relay.rescue.brokerDeviceRegistrationBytes
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -58,6 +59,32 @@ class BrokerRoutesTest {
         sig.initSign(deviceKeyPair.private)
         sig.update(dataToSign)
         return Base64.getEncoder().encodeToString(sig.sign())
+    }
+
+    private fun registrationSignature(
+        keyPair: java.security.KeyPair,
+        keyId: String,
+        publicKeyBase64: String,
+    ): String {
+        val sig = Signature.getInstance("SHA256withECDSA")
+        sig.initSign(keyPair.private)
+        sig.update(brokerDeviceRegistrationBytes(keyId, publicKeyBase64))
+        return Base64.getEncoder().encodeToString(sig.sign())
+    }
+
+    private fun registrationJson(
+        keyPair: java.security.KeyPair = deviceKeyPair,
+        keyId: String = deviceKeyId,
+    ): String {
+        val publicKeyBase64 = Base64.getEncoder().encodeToString(keyPair.public.encoded)
+        return brokerJson.encodeToString(
+            BrokerDeviceRegisterRequest.serializer(),
+            BrokerDeviceRegisterRequest(
+                keyId,
+                publicKeyBase64,
+                registrationSignature(keyPair, keyId, publicKeyBase64),
+            ),
+        )
     }
 
     private fun testEnvelope(
@@ -121,7 +148,7 @@ class BrokerRoutesTest {
         application { brokerModule(store) }
         registerDevice()
         val body = uploadJson(testEnvelope())
-        client.post("/v1/rescue/upload") {
+        val first = client.post("/v1/rescue/upload") {
             contentType(ContentType.Application.Json)
             setBody(body)
         }
@@ -130,6 +157,7 @@ class BrokerRoutesTest {
             setBody(body)
         }
         assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(first.bodyAsText(), response.bodyAsText())
     }
 
     @Test
@@ -267,7 +295,9 @@ class BrokerRoutesTest {
     @Test
     fun `receipts returns 401 for invalid token so Android can re-register`() = testApplication {
         application { brokerModule(store) }
-        val response = client.get("/v1/receipts?token=invalid-token&sinceSeq=0")
+        val response = client.get("/v1/receipts?sinceSeq=0") {
+            header("Authorization", "Bearer invalid-token")
+        }
         assertEquals(HttpStatusCode.Unauthorized, response.status)
         assertTrue(response.bodyAsText().contains("invalid_capability_token"))
     }
@@ -275,18 +305,78 @@ class BrokerRoutesTest {
     @Test
     fun `device registration returns capability token`() = testApplication {
         application { brokerModule(store) }
-        val publicKeyBase64 = Base64.getEncoder().encodeToString(deviceKeyPair.public.encoded)
-        val registerBody = brokerJson.encodeToString(
-            BrokerDeviceRegisterRequest.serializer(),
-            BrokerDeviceRegisterRequest(deviceKeyId, publicKeyBase64),
-        )
         val response = client.post("/v1/devices/register") {
             contentType(ContentType.Application.Json)
-            setBody(registerBody)
+            setBody(registrationJson())
         }
         assertEquals(HttpStatusCode.OK, response.status)
         val body = response.bodyAsText()
         assertTrue(body.contains("capabilityToken"))
         assertTrue(body.contains(deviceKeyId))
+    }
+
+    @Test
+    fun `device registration rejects malformed EC public key`() = testApplication {
+        application { brokerModule(store) }
+        val response = client.post("/v1/devices/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                brokerJson.encodeToString(
+                    BrokerDeviceRegisterRequest.serializer(),
+                    BrokerDeviceRegisterRequest(deviceKeyId, "not-base64", "not-a-signature"),
+                ),
+            )
+        }
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertTrue(response.bodyAsText().contains("invalid_public_key"))
+    }
+
+    @Test
+    fun `device token recovery requires proof from the registered private key`() = testApplication {
+        application { brokerModule(store) }
+        val validBody = registrationJson()
+        assertEquals(
+            HttpStatusCode.OK,
+            client.post("/v1/devices/register") {
+                contentType(ContentType.Application.Json)
+                setBody(validBody)
+            }.status,
+        )
+        val publicKeyBase64 = Base64.getEncoder().encodeToString(deviceKeyPair.public.encoded)
+        val attacker = KeyPairGenerator.getInstance("EC").apply {
+            initialize(ECGenParameterSpec("secp256r1"))
+        }.generateKeyPair()
+        val forged = BrokerDeviceRegisterRequest(
+            deviceKeyId,
+            publicKeyBase64,
+            registrationSignature(attacker, deviceKeyId, publicKeyBase64),
+        )
+        val response = client.post("/v1/devices/register") {
+            contentType(ContentType.Application.Json)
+            setBody(brokerJson.encodeToString(BrokerDeviceRegisterRequest.serializer(), forged))
+        }
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertTrue(response.bodyAsText().contains("invalid_registration_proof"))
+    }
+
+    @Test
+    fun `device registration rejects a different key for an existing identity`() = testApplication {
+        application { brokerModule(store) }
+        assertEquals(
+            HttpStatusCode.OK,
+            client.post("/v1/devices/register") {
+                contentType(ContentType.Application.Json)
+                setBody(registrationJson())
+            }.status,
+        )
+        val replacement = KeyPairGenerator.getInstance("EC").apply {
+            initialize(ECGenParameterSpec("secp256r1"))
+        }.generateKeyPair()
+        val response = client.post("/v1/devices/register") {
+            contentType(ContentType.Application.Json)
+            setBody(registrationJson(replacement, deviceKeyId))
+        }
+        assertEquals(HttpStatusCode.Conflict, response.status)
+        assertTrue(response.bodyAsText().contains("device_key_conflict"))
     }
 }

@@ -59,12 +59,17 @@ class HttpGatewayBridgeClient(
     }
     private suspend fun execute(settings: GatewaySettings, token: String, method: String, path: String, body: String?): String =
         withContext(Dispatchers.IO) {
+            val bodyBytes = body?.toByteArray(Charsets.UTF_8)
             val connection = (URL("${gatewayScheme(settings.scheme)}://${settings.host}:${settings.port}$path").openConnection() as HttpURLConnection).apply {
                 requestMethod = method; connectTimeout = 5_000; readTimeout = 10_000; setRequestProperty("Authorization", "Bearer $token"); setRequestProperty("X-Bridge-Id", settings.bridgeId)
-                if (body != null) { doOutput = true; setRequestProperty("Content-Type", "application/json") }
+                if (bodyBytes != null) {
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    setFixedLengthStreamingMode(bodyBytes.size)
+                }
             }
             try {
-                body?.let { connection.outputStream.use { output -> output.write(it.toByteArray(Charsets.UTF_8)) } }
+                bodyBytes?.let { connection.outputStream.use { output -> output.write(it) } }
                 val status = connection.responseCode
                 val stream = if (status in 200..299) connection.inputStream else connection.errorStream
                 val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
@@ -75,15 +80,17 @@ class HttpGatewayBridgeClient(
             }
     }
     private suspend fun executePublic(gateway: DiscoveredGateway, body: String): String = withContext(Dispatchers.IO) {
+        val bodyBytes = body.toByteArray(Charsets.UTF_8)
         val connection = (URL("${gatewayScheme(gateway.scheme)}://${gateway.host}:${gateway.port}/api/public/sync/messages").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 5_000
             readTimeout = 10_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
+            setFixedLengthStreamingMode(bodyBytes.size)
         }
         try {
-            connection.outputStream.use { output -> output.write(body.toByteArray(Charsets.UTF_8)) }
+            connection.outputStream.use { output -> output.write(bodyBytes) }
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()

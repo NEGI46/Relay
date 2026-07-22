@@ -16,6 +16,8 @@ data class GatewayLanAnnouncement(
     val discoveryVersion: Int = 1,
     val protocolVersion: Int = GATEWAY_PROTOCOL_VERSION,
     val gatewayId: String,
+    val shelterId: String,
+    val rescueIngressReady: Boolean,
     val apiPort: Int,
     /** Public endpoint scheme; production reverse-proxy deployments advertise HTTPS only. */
     val apiScheme: String = "http",
@@ -26,6 +28,7 @@ data class GatewayLanAnnouncement(
 /** Sends on the limited broadcast and every usable IPv4 interface broadcast. */
 class GatewayLanBeacon(
     private val config: GatewayConfig,
+    private val rescueTrustReady: Boolean,
     private val broadcastAddress: String = "255.255.255.255",
 ) : AutoCloseable {
     @Volatile private var running = false
@@ -34,6 +37,8 @@ class GatewayLanBeacon(
     fun announcementBytes(): ByteArray = GatewayJson.encodeToString(
         GatewayLanAnnouncement(
             gatewayId = config.gatewayId,
+            shelterId = config.shelterId,
+            rescueIngressReady = config.anonymousIngressEnabled && rescueTrustReady,
             apiPort = config.publicPort,
             apiScheme = config.publicScheme,
         ),

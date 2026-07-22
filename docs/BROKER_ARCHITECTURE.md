@@ -15,6 +15,8 @@ Android ◄─ HTTPS receipt ── TLS proxy ◄── Gateway receipt outbox
 
 `RELAY_BROKER_PROFILE` (or shared `RELAY_PROFILE`) selects `development`, `lab`, or `production`; the default is `production`.
 
+Core invariants: the Broker never decrypts; it does not increment relay hop count; `BROKER_STORED` is separate from shelter receipt state; routes remain independent; and deduplication plus outbox/retry behavior is at-least-once and idempotent. Android registration proves possession of the P-256 key, rather than treating an upload signature as identity verification.
+
 - `production` and `lab` must bind the Broker to loopback. A non-loopback listener stops startup.
 - TLS is not faked in this process. An externally operated reverse proxy, certificate, DNS, firewall/WAF, and hosting decision are required before any external use.
 - Android and PC Gateway reject non-HTTPS Broker URLs. Broker health exposes counts and profile only—no credential, rescue content, or personal data.

@@ -52,6 +52,10 @@ sealed interface SyncDebugEvent {
     data class MessageStored(val messageId: String, val duplicate: Boolean) : SyncDebugEvent
 }
 
+// Nearby BYTES payloads are capped at 32 KiB. Keep manifest/request pages below that transport
+// limit even when both lists contain maximum-length identifiers.
+private const val NEARBY_PAGE_SIZE = 64
+
 @OptIn(FlowPreview::class)
 class SyncCoordinator(
     private val deviceId: String,
@@ -170,8 +174,10 @@ class SyncCoordinator(
 
     private suspend fun sendManifest(peerId: String) {
         if (peerId !in transport.state.value.connectedPeerIds) return
-        val messagePages = planner.manifest().chunked(128).ifEmpty { listOf(emptyList()) }
-        val receiptPages = repository.allReceipts().map { it.receiptId }.chunked(128).ifEmpty { listOf(emptyList()) }
+        val messagePages = planner.manifest().chunked(NEARBY_PAGE_SIZE).ifEmpty { listOf(emptyList()) }
+        val receiptPages = repository.allReceipts().map { it.receiptId }
+            .chunked(NEARBY_PAGE_SIZE)
+            .ifEmpty { listOf(emptyList()) }
         repeat(maxOf(messagePages.size, receiptPages.size)) { index ->
             if (peerId !in transport.state.value.connectedPeerIds) return
             send(
@@ -218,8 +224,21 @@ class SyncCoordinator(
             is ManifestBody -> {
                 val missing = planner.missingFromLocal(body.entries)
                 val missingReceipts = planner.missingReceipts(body.receiptIds)
-                val pages = maxOf((missing.size + 127) / 128, (missingReceipts.size + 127) / 128, 1)
-                repeat(pages) { page -> send(peerId, MessageRequestBody(missing.drop(page * 128).take(128), missingReceipts.drop(page * 128).take(128))) }
+                val pages = maxOf(
+                    (missing.size + NEARBY_PAGE_SIZE - 1) / NEARBY_PAGE_SIZE,
+                    (missingReceipts.size + NEARBY_PAGE_SIZE - 1) / NEARBY_PAGE_SIZE,
+                    1,
+                )
+                repeat(pages) { page ->
+                    val offset = page * NEARBY_PAGE_SIZE
+                    send(
+                        peerId,
+                        MessageRequestBody(
+                            missing.drop(offset).take(NEARBY_PAGE_SIZE),
+                            missingReceipts.drop(offset).take(NEARBY_PAGE_SIZE),
+                        ),
+                    )
+                }
             }
             is MessageRequestBody -> {
                 planner.messagesToSend(peerId, body.messageIds).forEach { message ->
@@ -311,6 +330,13 @@ class SyncCoordinator(
             }
             _debugEvents.tryEmit(SyncDebugEvent.PayloadTransferCompleted(peerId, itemId, encoded.size))
         } else if (transfer is SendResult.Failed) {
+            // A failed transfer consumed no link capacity. Release its reservation so a transient
+            // radio failure cannot permanently exhaust the connection's send budget.
+            accountingMutex.withLock {
+                sentBytes[peerId]?.let { currentBytes ->
+                    sentBytes[peerId] = (currentBytes - encoded.size).coerceAtLeast(0L)
+                }
+            }
             // Do not record payloadTransfers or emit completed — operator path must see a true failure.
             val reason = transfer.reason.take(160).ifBlank { "transport transfer failed" }
             _debugEvents.tryEmit(SyncDebugEvent.SendFailed(peerId, reason, itemId))
