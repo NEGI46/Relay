@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Broker endpoint. Empty = Broker delivery disabled. -->
-    <string name="broker_endpoint" translatable="false"></string>
-</resources>
