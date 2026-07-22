@@ -48,6 +48,7 @@ class RelayCommunicationService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            app.diagnostics.record("communication_stop_requested")
             activationStore(this).setEnabled(false)
             stopCommunication()
             return START_NOT_STICKY
@@ -58,12 +59,14 @@ class RelayCommunicationService : Service() {
         try {
             startForegroundSafely(notification(0))
         } catch (error: Exception) {
+            app.diagnostics.record("communication_foreground_failed_${error.javaClass.simpleName}")
             app.communicationRuntime.reportStartFailure("Foreground Serviceを開始できません: ${error.message ?: error.javaClass.simpleName}")
             stopSelf()
             return START_NOT_STICKY
         }
         val prerequisite = NearbyPrerequisiteChecker(this, app.nearbyPermissionGate).check()
         if (prerequisite !is NearbyPrerequisite.Ready) {
+            app.diagnostics.record("communication_prerequisite_not_ready")
             app.communicationRuntime.reportStartFailure(prerequisite.userMessage())
             stopForegroundCompat()
             stopSelf()
@@ -72,6 +75,7 @@ class RelayCommunicationService : Service() {
         scope.launch {
             try {
                 if (!app.communicationSupervisor.start(RelayRuntimeSettings(mode, role))) {
+                    app.diagnostics.record("communication_start_rejected")
                     stopForegroundCompat()
                     stopSelf()
                     return@launch
@@ -83,15 +87,18 @@ class RelayCommunicationService : Service() {
                     }
                 }
             } catch (error: Exception) {
+                app.diagnostics.record("communication_start_failed_${error.javaClass.simpleName}")
                 app.communicationRuntime.reportStartFailure(error.message ?: error.javaClass.simpleName)
                 stopForegroundCompat()
                 stopSelf()
             }
         }
+        app.diagnostics.record("communication_start_requested")
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
+        app.diagnostics.record("communication_service_destroyed")
         stateJob?.cancel()
         shutdownCoordinator.requestStop()
         scope.cancel()

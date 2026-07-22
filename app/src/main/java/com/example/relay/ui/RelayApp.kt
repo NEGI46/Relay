@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.relay.domain.SafetyState
 import com.example.relay.domain.SupplyKind
 import com.example.relay.permissions.AndroidNearbyPermissionGate
+import com.example.relay.RelayApplication
 import com.example.relay.service.RelayCommunicationService
 import com.example.relay.service.shouldAutoStartCommunication
 import com.example.relay.ui.rescue.RescueFlow
@@ -170,6 +171,8 @@ fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel) {
             RelayScreen.REGIONAL -> OfficialInformationScreen(viewModel::navigate)
             else -> SettingsScreen(
                 state = state,
+                diagnostics = (context.applicationContext as RelayApplication).diagnostics.recent(),
+                clearDiagnostics = { (context.applicationContext as RelayApplication).diagnostics.clear() },
                 openAppSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
                 openBluetoothSettings = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) },
                 navigate = viewModel::navigate,
@@ -382,7 +385,14 @@ internal fun gatewayStatusLabel(lastResult: String?, transportRunning: Boolean):
 }
 
 @Composable
-private fun SettingsScreen(state: RelayUiState, openAppSettings: () -> Unit, openBluetoothSettings: () -> Unit, navigate: (RelayScreen) -> Unit) {
+private fun SettingsScreen(
+    state: RelayUiState,
+    diagnostics: List<String>,
+    clearDiagnostics: () -> Unit,
+    openAppSettings: () -> Unit,
+    openBluetoothSettings: () -> Unit,
+    navigate: (RelayScreen) -> Unit,
+) {
     MainScaffold(RelayScreen.SETTINGS, navigate) { modifier ->
         LazyColumn(modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text("設定", style = MaterialTheme.typography.headlineMedium) }
@@ -420,6 +430,19 @@ private fun SettingsScreen(state: RelayUiState, openAppSettings: () -> Unit, ope
                                 Text(line, style = MaterialTheme.typography.bodySmall)
                             }
                         }
+                    }
+                }
+            }
+            item {
+                Card(Modifier.fillMaxWidth().semantics { contentDescription = "PoC diagnostics" }) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("PoC delivery diagnostics (no rescue content)", style = MaterialTheme.typography.titleSmall)
+                        if (diagnostics.isEmpty()) {
+                            Text("No recorded events yet.", style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            diagnostics.take(12).forEach { line -> Text(line, style = MaterialTheme.typography.bodySmall) }
+                        }
+                        OutlinedButton(onClick = clearDiagnostics) { Text("Clear diagnostics") }
                     }
                 }
             }

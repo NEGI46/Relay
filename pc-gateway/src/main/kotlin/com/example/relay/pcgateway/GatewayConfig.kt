@@ -118,6 +118,12 @@ data class GatewayConfig(
     ),
     /** Browser/admin access from a non-loopback peer requires an explicit topology acknowledgement. */
     val remoteManagementEnabled: Boolean = environmentBoolean("RELAY_GATEWAY_REMOTE_MANAGEMENT", default = false),
+    /**
+     * Docker Desktop rewrites a host-loopback browser request to its bridge address. This narrowly
+     * restores the local console only for the development profile with LAN mode disabled; Compose
+     * binds that mode to 127.0.0.1 so it cannot expose a remote operator console.
+     */
+    val dockerLocalOperatorEnabled: Boolean = environmentBoolean("RELAY_GATEWAY_DOCKER_LOCAL_OPERATOR", default = false),
     val maxPayloadBytes: Int = 64 * 1024,
     val maxMessagesPerRequest: Int = 128,
     val maxStoredMessages: Int = 50_000,
@@ -203,6 +209,9 @@ data class GatewayConfig(
         require(!(remoteManagementEnabled && !sessionCookieSecure)) {
             "remote management requires RELAY_GATEWAY_SESSION_COOKIE_SECURE=true"
         }
+        require(!(dockerLocalOperatorEnabled && (profile != GatewayProfile.DEVELOPMENT || lanMode != GatewayLanMode.DISABLED))) {
+            "RELAY_GATEWAY_DOCKER_LOCAL_OPERATOR is development-only and requires LAN mode disabled"
+        }
         require(!(profile != GatewayProfile.DEVELOPMENT && legacyAdminKeyEnabled)) {
             "X-Admin-Key compatibility is permitted only in the development profile"
         }
@@ -227,7 +236,7 @@ data class GatewayConfig(
      */
     fun managementSourceAllowed(remoteHost: String?): Boolean = when (lanMode) {
         GatewayLanMode.TLS_REVERSE_PROXY -> remoteManagementEnabled
-        else -> remoteManagementEnabled || isLoopbackHost(remoteHost)
+        else -> remoteManagementEnabled || dockerLocalOperatorEnabled || isLoopbackHost(remoteHost)
     }
 
     companion object {

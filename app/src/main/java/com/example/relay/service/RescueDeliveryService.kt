@@ -60,10 +60,12 @@ class RescueDeliveryService : Service() {
                 startForeground(NOTIFICATION_ID, notification())
             }
         } catch (_: SecurityException) {
+            (application as? RelayApplication)?.diagnostics?.record("rescue_foreground_security_exception")
             stopSelf(startId)
             return START_NOT_STICKY
         }
         (application as? RelayApplication)?.let { app ->
+            app.diagnostics.record("rescue_delivery_started")
             startNearbyRelayForRescue(app)
             app.rescueDeliveryCoordinator.start(serviceScope)
             startDestinationResolution(app)
@@ -76,6 +78,7 @@ class RescueDeliveryService : Service() {
     }
 
     override fun onDestroy() {
+        (application as? RelayApplication)?.diagnostics?.record("rescue_delivery_destroyed")
         (application as? RelayApplication)?.rescueDeliveryCoordinator?.stop()
         localGatewayDeliveryJob?.cancel()
         brokerDeliveryJob?.cancel()
@@ -254,6 +257,7 @@ class RescueDeliveryService : Service() {
 
                     when (val result = delivery.deliver(record.envelope)) {
                         is BrokerDeliveryResult.Stored -> {
+                            app.diagnostics.record("broker_envelope_stored")
                             dao.markUploaded(
                                 requestId = record.envelope.requestId,
                                 requestVersion = record.envelope.requestVersion,
@@ -262,6 +266,7 @@ class RescueDeliveryService : Service() {
                             )
                         }
                         is BrokerDeliveryResult.Offline -> {
+                            app.diagnostics.record("broker_offline_retry")
                             dao.markRetrying(record.envelope.requestId, record.envelope.requestVersion)
                             BrokerRetryWorker.enqueue(
                                 this@RescueDeliveryService,
@@ -270,6 +275,7 @@ class RescueDeliveryService : Service() {
                             )
                         }
                         is BrokerDeliveryResult.Failed -> {
+                            app.diagnostics.record(if (result.retryable) "broker_retryable_failure" else "broker_nonretryable_failure")
                             if (result.retryable) {
                                 dao.markRetrying(record.envelope.requestId, record.envelope.requestVersion)
                                 BrokerRetryWorker.enqueue(
@@ -281,7 +287,7 @@ class RescueDeliveryService : Service() {
                                 dao.markFailed(record.envelope.requestId, record.envelope.requestVersion)
                             }
                         }
-                        is BrokerDeliveryResult.Disabled -> { /* endpoint cleared; stop */ }
+                        is BrokerDeliveryResult.Disabled -> app.diagnostics.record("broker_disabled")
                     }
                 }
                 delay(10_000)

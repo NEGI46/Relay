@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.relay.data.local.RelayDatabase
+import com.example.relay.diagnostics.RelayDiagnosticStore
 import com.example.relay.data.local.PlaintextDatabaseMigration
 import com.example.relay.data.repository.RoomMessageRepository
 import com.example.relay.data.repository.RoomRescueEnvelopeRepository
@@ -78,6 +79,7 @@ class RelayApplication : Application() {
             }
         }
     }
+    val diagnostics: RelayDiagnosticStore by lazy { RelayDiagnosticStore(this) }
 
     val database: RelayDatabase by lazy {
         System.loadLibrary("sqlcipher")
@@ -221,6 +223,7 @@ class RelayApplication : Application() {
                 onEnvelopeStored = {
                     // A Nearby receiver is also a courier. Its delivery service owns the LAN,
                     // Broker and BLE retry loops required to carry a stored envelope onward.
+                    diagnostics.record("nearby_envelope_stored")
                     RescueDeliveryService.enableAndStart(this)
                 },
                 receiptApplier = { key, receipt, publicKey ->
@@ -304,6 +307,13 @@ class RelayApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            // Persist only the exception class and thread class; never the message or stack trace.
+            diagnostics.record("uncaught_${thread.javaClass.simpleName}_${error.javaClass.simpleName}")
+            previousHandler?.uncaughtException(thread, error)
+        }
+        diagnostics.record("application_started")
         // Root asset parsing is safe on the main thread. Persisted-directory revalidation performs
         // Room I/O below; until that finishes BLE remains fail-closed with an empty resolver.
         regionalTrustRuntime
