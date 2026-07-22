@@ -94,7 +94,7 @@ class PilotSecurityContractTest(unittest.TestCase):
         installer = read("scripts/install-security-tools.sh")
         for required in (
             'actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16',
-            "go-version: '1.24.4'",
+            "go-version: '1.26.3'",
             'github.com/anchore/syft/cmd/syft',
             'v1.20.0',
             'github.com/google/osv-scanner/v2/cmd/osv-scanner',
