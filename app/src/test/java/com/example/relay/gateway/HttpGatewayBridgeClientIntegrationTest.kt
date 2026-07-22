@@ -125,6 +125,7 @@ class HttpGatewayBridgeClientIntegrationTest {
         val settings = GatewaySettings(
             host = "127.0.0.1",
             port = port,
+            scheme = "http",
             gatewayName = "pc",
             bridgeId = "bridge-auth",
             enabled = true,
