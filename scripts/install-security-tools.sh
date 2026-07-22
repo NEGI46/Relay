@@ -11,6 +11,7 @@ readonly syft_version='v1.20.0'
 readonly osv_module='github.com/google/osv-scanner/v2/cmd/osv-scanner'
 readonly osv_version='v2.0.3'
 readonly grype_module='github.com/anchore/grype/cmd/grype'
+readonly grype_root_module="${grype_module%/cmd/grype}"
 readonly grype_version='v0.80.0'
 
 tool_dir="${1:-${RUNNER_TEMP:-/tmp}/relay-security-tools}"
@@ -29,7 +30,20 @@ mkdir -p "$GOBIN"
 
 go install "$syft_module@$syft_version"
 go install "$osv_module@$osv_version"
-go install "$grype_module@$grype_version"
+
+# Go deliberately rejects `go install package@version` when the target module has a
+# replace directive. Grype v0.80.0 has one for its version-pinned archiver dependency, so
+# download the checksum-verified module and build it as the main module instead.
+grype_source_dir="$(go env GOMODCACHE)/$grype_root_module@$grype_version"
+go mod download "$grype_root_module@$grype_version"
+if [[ ! -f "$grype_source_dir/go.mod" ]]; then
+  echo "Security scanner bootstrap BLOCKED: verified Grype source is unavailable." >&2
+  exit 1
+fi
+(
+  cd "$grype_source_dir"
+  go build -trimpath -buildvcs=false -ldflags="-X main.version=${grype_version#v}" -o "$GOBIN/grype" ./cmd/grype
+)
 
 check_version() {
   local binary="$1"
