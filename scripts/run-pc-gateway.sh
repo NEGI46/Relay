@@ -4,11 +4,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-export RELAY_GATEWAY_HOST="${RELAY_GATEWAY_HOST:-0.0.0.0}"
+export RELAY_PROFILE="${RELAY_PROFILE:-production}"
+export RELAY_GATEWAY_LAN_MODE="${RELAY_GATEWAY_LAN_MODE:-disabled}"
+if [[ -z "${RELAY_GATEWAY_HOST:-}" ]]; then
+  if [[ "$RELAY_PROFILE" == "development" ]]; then export RELAY_GATEWAY_HOST="0.0.0.0"; else export RELAY_GATEWAY_HOST="127.0.0.1"; fi
+fi
 export RELAY_GATEWAY_PORT="${RELAY_GATEWAY_PORT:-8080}"
 export RELAY_GATEWAY_DB="${RELAY_GATEWAY_DB:-$HOME/.relay/relay-gateway.db}"
 export RELAY_GATEWAY_ID="${RELAY_GATEWAY_ID:-pc-gateway-local}"
-export RELAY_GATEWAY_LAN_DISCOVERY="${RELAY_GATEWAY_LAN_DISCOVERY:-true}"
+export RELAY_GATEWAY_ANONYMOUS_INGRESS="${RELAY_GATEWAY_ANONYMOUS_INGRESS:-$([[ "$RELAY_PROFILE" == "development" ]] && echo true || echo false)}"
+export RELAY_GATEWAY_LAN_DISCOVERY="${RELAY_GATEWAY_LAN_DISCOVERY:-$([[ "$RELAY_PROFILE" == "development" ]] && echo true || echo false)}"
 
 NO_BROWSER=0
 SKIP_BUILD=0
@@ -43,9 +48,11 @@ echo "========================================"
 echo "  Console : $CONSOLE"
 echo "  Health  : $HEALTH"
 echo "  DB      : $RELAY_GATEWAY_DB"
+echo "  Profile : $RELAY_PROFILE / LAN: $RELAY_GATEWAY_LAN_MODE"
 echo "  Host    : ${RELAY_GATEWAY_HOST}:${RELAY_GATEWAY_PORT}"
 echo "========================================"
 echo "  Stop with Ctrl+C in this window."
+echo "  First run: create a named administrator with bootstrap-admin; no default password exists."
 echo ""
 
 if [[ "$NO_BROWSER" -eq 0 ]]; then

@@ -61,7 +61,12 @@ data class GatewayLanAnnouncement(
     val discoveryVersion: Int = 1,
     val protocolVersion: Int = 1,
     val gatewayId: String = "",
+    /** Shelter handled by the public rescue ingress; null for legacy announcements. */
+    val shelterId: String? = null,
+    /** Null means a legacy gateway that did not advertise rescue readiness. */
+    val rescueIngressReady: Boolean? = null,
     val apiPort: Int = 8080,
+    val apiScheme: String = "http",
     val anonymousIngressPath: String = "/api/public/sync/messages",
     val receiptTrust: String = "UNVERIFIED",
 )
@@ -70,4 +75,7 @@ data class DiscoveredGateway(
     val host: String,
     val port: Int,
     val gatewayId: String,
+    val scheme: String = "http",
+    val shelterId: String? = null,
+    val rescueIngressReady: Boolean? = null,
 )

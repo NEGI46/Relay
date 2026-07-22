@@ -133,7 +133,7 @@ class ReceiptOutboxTest {
             shelterId = "shelter-1",
             gatewayId = "gateway-1",
             httpClient = io.ktor.client.HttpClient(io.ktor.client.engine.cio.CIO),
-            gatewayApiKey = "test-api-key",
+            gatewayCredential = "test-api-key",
         )
     }
 

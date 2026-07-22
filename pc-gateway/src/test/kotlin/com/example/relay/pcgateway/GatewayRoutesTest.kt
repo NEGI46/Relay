@@ -55,14 +55,14 @@ class GatewayRoutesTest {
 
     @Test fun `health route starts and sync endpoint requires bridge token`() = testApplication {
         val db = Files.createTempFile("relay-route", ".db").toString()
-        val config = GatewayConfig(dbPath = db, gatewayId = "gateway", adminKey = "admin")
+        val config = GatewayConfig(profile = GatewayProfile.DEVELOPMENT, dbPath = db, gatewayId = "gateway", adminKey = "admin")
         GatewayStore(config).use { store -> application { gatewayModule(config, store) } }
         val response = client.post("/api/health")
         assertEquals(HttpStatusCode.MethodNotAllowed, response.status)
     }
 
     @Test fun `unauthenticated sync is rejected`() = testApplication {
-        val config = GatewayConfig(dbPath = Files.createTempFile("relay-route", ".db").toString(), adminKey = "admin")
+        val config = GatewayConfig(profile = GatewayProfile.DEVELOPMENT, dbPath = Files.createTempFile("relay-route", ".db").toString(), adminKey = "admin")
         GatewayStore(config).use { store -> application { gatewayModule(config, store) } }
         val response = client.post("/api/sync/messages") {
             contentType(ContentType.Application.Json)
@@ -72,7 +72,7 @@ class GatewayRoutesTest {
     }
 
     @Test fun `authenticated same batch report and status change are both stored and applied`() = testApplication {
-        val config = GatewayConfig(dbPath = Files.createTempFile("relay-route-batch", ".db").toString(), adminKey = "admin")
+        val config = GatewayConfig(profile = GatewayProfile.DEVELOPMENT, dbPath = Files.createTempFile("relay-route-batch", ".db").toString(), adminKey = "admin")
         val store = GatewayStore(config)
         val code = store.createPairingCode(1_000)
         store.requestPair(code, "bridge", "Bridge", 1_001)
@@ -84,6 +84,7 @@ class GatewayRoutesTest {
             val response = client.post("/api/sync/messages") {
                 contentType(ContentType.Application.Json)
                 header(HttpHeaders.Authorization, "Bearer $token")
+                header("X-Bridge-Id", "bridge")
                 setBody(
                     GatewayJson.encodeToString(
                         SyncMessagesRequest(

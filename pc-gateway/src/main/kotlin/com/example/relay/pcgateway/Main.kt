@@ -14,18 +14,52 @@ import io.ktor.client.engine.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import java.io.File
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
-fun main() {
+fun main(args: Array<String>) {
     val config = GatewayConfig()
+    if (args.isNotEmpty()) {
+        runLocalGatewayAdminCommand(config, args)
+        return
+    }
     val store = GatewayStore(config)
-    val rescueKeys = RescueKeyStore(Path.of(config.rescueKeyPath), config.shelterId).loadOrCreate()
+    val access = store.accessStore()
+    if (config.bootstrapUsername != null && config.bootstrapSecret != null) {
+        val created = access.bootstrapAdmin(config.bootstrapUsername, config.bootstrapSecret, source = "local_bootstrap")
+        println(if (created) "Initial Gateway administrator bootstrap completed." else "Initial administrator bootstrap was not applied (already initialized or invalid input).")
+    }
+    if (access.bootstrapRequired()) {
+        System.err.println("Gateway operator access is unavailable until a one-time bootstrap administrator is configured.")
+    }
+    access.recordRuntimeConfiguration(config.auditConfigurationTarget, "local_startup")
+
+    // A production/lab host must be explicitly provisioned.  Generating a replacement private
+    // key at service start could silently make prior envelopes undecryptable, so this is allowed
+    // only for the isolated development profile. RescueKeyStore still checks permissions before
+    // importing private material; permission, parse, expiry, or self-test failures stop startup.
+    val rescueKeyPath = Path.of(config.rescueKeyPath)
+    if (config.profile != GatewayProfile.DEVELOPMENT && !Files.isRegularFile(rescueKeyPath)) {
+        error("rescue key material is not provisioned; automatic generation is disabled outside development")
+    }
+    val rescueKeys = RescueKeyStore(rescueKeyPath, config.shelterId).loadOrCreate()
+    val now = System.currentTimeMillis()
+    val rescueKeyStatus = GatewayRescueKeyStatus.valid(
+        expiresAtEpochMillis = rescueKeys.manifest.validUntilEpochMillis,
+        warning = rescueKeys.manifest.validUntilEpochMillis - now <= config.rescueKeyExpiryWarningMillis,
+    )
+    if (rescueKeyStatus.status == "expiring_soon") {
+        System.err.println("Rescue key expiry is approaching; manual key rotation and re-provisioning are required before pilot use.")
+    }
     val verifiedBleManifest = loadVerifiedBleManifest(config, rescueKeys)
     val bleBridgeEnvironment = verifiedBleManifest?.let { signed ->
         config.bleBridgeEnvironmentFor(signed).also { environment ->
@@ -50,11 +84,16 @@ fun main() {
     val offlineMap = GsiTileCache(Path.of(config.offlineMapPath))
     val officialInformation = OfficialInformationService(Path.of(config.officialInfoCachePath))
     val rescueIngress = verifiedBleManifest?.let { RescueDeliveryIngress(rescueIntakeService) }
-    val beacon = GatewayLanBeacon(config)
+    val beacon = GatewayLanBeacon(config, rescueTrustReady = verifiedBleManifest != null)
     val consoleHost = if (config.host in setOf("0.0.0.0", "::")) "127.0.0.1" else config.host
     println("Relay PC Gateway listening on http://${config.host}:${config.port}")
     println("Operator console: http://$consoleHost:${config.port}/")
-    println("Admin key source: ${resolveAdminKeySource()} (value is not printed)")
+    println("Runtime profile: ${config.profile.name.lowercase()} / LAN mode: ${config.lanMode.name.lowercase()}")
+    if (config.legacyAdminKeyEnabled) {
+        println("Legacy X-Admin-Key source: ${resolveAdminKeySource()} (development compatibility only; value is not printed)")
+    } else {
+        println("Operator authentication: individual local staff accounts with HttpOnly session cookies")
+    }
     println("Database: ${config.dbPath}")
     println("Anonymous ingress: ${config.anonymousIngressEnabled}")
     println("Rescue shelter: ${config.shelterId}")
@@ -66,7 +105,9 @@ fun main() {
     } else {
         println("Rescue BLE trust: not ready; automatic rescue delivery is disabled (legacy manifest remains maintenance-only)")
     }
-    if (config.lanDiscoveryEnabled && config.host !in setOf("127.0.0.1", "localhost", "::1")) {
+    if (config.lanDiscoveryEnabled &&
+        (!GatewayConfig.isLoopbackHost(config.host) || config.lanMode == GatewayLanMode.TLS_REVERSE_PROXY)
+    ) {
         beacon.start()
         println("LAN discovery beacon: UDP ${config.lanDiscoveryPort} → /api/public/sync/messages")
     } else if (config.lanDiscoveryEnabled) {
@@ -81,6 +122,7 @@ fun main() {
     if (config.brokerUrl != null) {
         val client = HttpClient(CIO)
         brokerHttpClient = client
+        val brokerCredential = config.brokerCredential ?: config.brokerLegacyApiKey
 
         // 1. Create ReceiptOutbox FIRST using the same DB connection as rescue persistence
         val rescuePersistence = store.rescuePersistence() as SqliteRescuePersistence
@@ -90,7 +132,7 @@ fun main() {
             shelterId = config.shelterId,
             gatewayId = config.gatewayId,
             httpClient = client,
-            gatewayApiKey = config.brokerApiKey,
+            gatewayCredential = brokerCredential,
         )
         receiptOutbox = outbox
         receiptOutboxRef = outbox
@@ -104,7 +146,7 @@ fun main() {
             gatewayId = config.gatewayId,
             intakeService = rescueIntakeService,
             httpClient = client,
-            gatewayApiKey = config.brokerApiKey,
+            gatewayCredential = brokerCredential,
             cursorPath = cursorPath,
             pollIntervalMs = config.brokerPollIntervalMs,
         )
@@ -141,6 +183,7 @@ fun main() {
                     rescueIntakeService = rescueIntakeService,
                     offlineMap = offlineMap,
                     officialInformation = officialInformation,
+                    rescueKeyStatus = rescueKeyStatus,
                 )
             }.start(wait = true)
         } finally {
@@ -149,8 +192,42 @@ fun main() {
     } finally {
         beacon.close()
         offlineMap.close()
+        runBlocking { brokerScope.coroutineContext[Job]?.cancelAndJoin() }
         brokerHttpClient?.close()
         store.close()
+    }
+}
+
+/**
+ * Deliberately small local-only administration command surface.  Bootstrap never accepts a
+ * password on the command line, so Task Scheduler history and shell history cannot retain it.
+ */
+private fun runLocalGatewayAdminCommand(config: GatewayConfig, args: Array<String>) {
+    when (args.first()) {
+        "bootstrap-admin" -> {
+            require(args.size == 3 && args[1] == "--username") {
+                "usage: bootstrap-admin --username <local-staff-id>"
+            }
+            val username = args[2]
+            val secret = System.getenv("RELAY_GATEWAY_BOOTSTRAP_CLI_SECRET")
+                ?.takeIf { it.isNotBlank() }
+                ?: System.console()?.readPassword("Bootstrap password: ")?.concatToString()
+                ?: error(
+                    "No interactive console is available. Set RELAY_GATEWAY_BOOTSTRAP_CLI_SECRET for this one command; do not pass a password as an argument.",
+                )
+            GatewayStore(config).use { store ->
+                val created = store.accessStore().bootstrapAdmin(username, secret, source = "local_cli")
+                check(created) {
+                    "Bootstrap was not applied. An account already exists or the local username/password policy was not met."
+                }
+            }
+            println("Initial Gateway administrator bootstrap completed. The secret was not persisted or printed.")
+        }
+        "help", "--help", "-h" -> println(
+            "Relay PC Gateway commands:\n  bootstrap-admin --username <local-staff-id>\n" +
+                "Use RELAY_GATEWAY_BOOTSTRAP_CLI_SECRET or an interactive console; never pass a password as an argument.",
+        )
+        else -> error("unknown local Gateway command: ${args.first()}")
     }
 }
 
@@ -177,5 +254,6 @@ private fun loadVerifiedBleManifest(
     )
 }.onFailure { error ->
     // Do not expose key values, signatures, or file contents in logs or HTTP status.
-    System.err.println("Rescue BLE trust verification failed; automatic rescue delivery remains disabled: ${error.message ?: "invalid trust configuration"}")
+    // Do not surface parsing/crypto exception text: it can contain paths or serialized input.
+    System.err.println("Rescue BLE trust verification failed; automatic rescue delivery remains disabled (${error.javaClass.simpleName})")
 }.getOrNull()

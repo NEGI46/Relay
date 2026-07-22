@@ -121,7 +121,8 @@ class RescueDeliveryService : Service() {
     private fun startLocalGatewayDelivery(app: RelayApplication) {
         if (localGatewayDeliveryJob?.isActive == true) return
         localGatewayDeliveryJob = serviceScope.launch {
-            val delivery = HttpShelterGatewayDelivery()
+            // Share the application discovery socket/multicast lock with normal Gateway sync.
+            val delivery = HttpShelterGatewayDelivery(app.gatewayDiscovery)
             val deliveryIds = SharedPreferencesCourierDeliveryIdStore(app)
             while (isActive) {
                 val candidate = selectLocalGatewayCandidate(

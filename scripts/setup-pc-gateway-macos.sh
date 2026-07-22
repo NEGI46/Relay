@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# macOS setup for Relay PC Gateway (zero-operation fixed hub).
+# macOS setup for Relay PC Gateway. Production starts loopback-only; LAN exposure is explicit.
 # Requires: Java 17+, admin for pf firewall rules and launchd (optional).
 set -euo pipefail
 
 PORT="${RELAY_GATEWAY_PORT:-8080}"
 DISCOVERY_PORT="${RELAY_GATEWAY_DISCOVERY_PORT:-42888}"
+PROFILE="${RELAY_PROFILE:-production}"
+LAN_MODE="${RELAY_GATEWAY_LAN_MODE:-disabled}"
+HOST="${RELAY_GATEWAY_HOST:-127.0.0.1}"
+ANONYMOUS_INGRESS="${RELAY_GATEWAY_ANONYMOUS_INGRESS:-false}"
+LAN_DISCOVERY="${RELAY_GATEWAY_LAN_DISCOVERY:-false}"
 GATEWAY_HOME="${RELAY_GATEWAY_HOME:-$HOME/.relay}"
 LABEL="com.example.relay.pcgateway"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,11 +21,13 @@ usage() {
 Usage: $0 [--install-dist] [--firewall] [--autostart] [--all]
 
   --install-dist   Run Gradle :pc-gateway:installDist
-  --firewall       Open TCP $PORT and UDP $DISCOVERY_PORT via pf (needs sudo)
+  --firewall       Open requested closed-network TCP $PORT and optional UDP $DISCOVERY_PORT via pf (needs sudo)
   --autostart      Install LaunchAgent that starts Gateway at login
   --all            install-dist + firewall + autostart
 
-Env: RELAY_GATEWAY_PORT, RELAY_GATEWAY_DISCOVERY_PORT, RELAY_GATEWAY_DB, RELAY_GATEWAY_HOST
+Env: RELAY_PROFILE, RELAY_GATEWAY_LAN_MODE, RELAY_GATEWAY_HOST,
+     RELAY_GATEWAY_ANONYMOUS_INGRESS, RELAY_GATEWAY_LAN_DISCOVERY,
+     RELAY_GATEWAY_PORT, RELAY_GATEWAY_DISCOVERY_PORT, RELAY_GATEWAY_DB
 EOF
 }
 
@@ -44,6 +51,11 @@ for arg in "$@"; do
   esac
 done
 
+if [[ "$LAN_DISCOVERY" == "true" && "$ANONYMOUS_INGRESS" != "true" ]]; then
+  echo "Safety stop: LAN discovery advertises anonymous sync; enable anonymous ingress too or leave discovery disabled." >&2
+  exit 1
+fi
+
 mkdir -p "$GATEWAY_HOME"
 
 if [[ "$do_install_dist" -eq 1 ]]; then
@@ -54,6 +66,10 @@ if [[ "$do_install_dist" -eq 1 ]]; then
 fi
 
 if [[ "$do_firewall" -eq 1 ]]; then
+  if [[ "$LAN_MODE" != "closed-network" || "$HOST" == "127.0.0.1" || "$HOST" == "::1" ]]; then
+    echo "Safety stop: pf rules require explicit RELAY_GATEWAY_LAN_MODE=closed-network and a non-loopback RELAY_GATEWAY_HOST." >&2
+    exit 1
+  fi
   echo "==> pf firewall anchors (requires sudo)"
   # User-level reminder: macOS Application Firewall may still prompt on first bind.
   ANCHOR="/etc/pf.anchors/com.example.relay.pcgateway"
@@ -99,13 +115,19 @@ if [[ "$do_autostart" -eq 1 ]]; then
   <key>EnvironmentVariables</key>
   <dict>
     <key>RELAY_GATEWAY_HOST</key>
-    <string>0.0.0.0</string>
+    <string>${HOST}</string>
+    <key>RELAY_PROFILE</key>
+    <string>${PROFILE}</string>
+    <key>RELAY_GATEWAY_LAN_MODE</key>
+    <string>${LAN_MODE}</string>
     <key>RELAY_GATEWAY_PORT</key>
     <string>${PORT}</string>
     <key>RELAY_GATEWAY_DB</key>
     <string>${GATEWAY_HOME}/relay-gateway.db</string>
     <key>RELAY_GATEWAY_LAN_DISCOVERY</key>
-    <string>true</string>
+    <string>${LAN_DISCOVERY}</string>
+    <key>RELAY_GATEWAY_ANONYMOUS_INGRESS</key>
+    <string>${ANONYMOUS_INGRESS}</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

@@ -3,7 +3,9 @@ package com.example.relay.broker
 import com.example.relay.rescue.EncryptedRescueEnvelope
 import com.example.relay.rescue.RescueUrgency
 import com.example.relay.rescue.authenticatedHeaderBytes
+import com.example.relay.rescue.brokerDeviceRegistrationBytes
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -18,6 +20,7 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -56,6 +59,32 @@ class BrokerRoutesTest {
         sig.initSign(deviceKeyPair.private)
         sig.update(dataToSign)
         return Base64.getEncoder().encodeToString(sig.sign())
+    }
+
+    private fun registrationSignature(
+        keyPair: java.security.KeyPair,
+        keyId: String,
+        publicKeyBase64: String,
+    ): String {
+        val sig = Signature.getInstance("SHA256withECDSA")
+        sig.initSign(keyPair.private)
+        sig.update(brokerDeviceRegistrationBytes(keyId, publicKeyBase64))
+        return Base64.getEncoder().encodeToString(sig.sign())
+    }
+
+    private fun registrationJson(
+        keyPair: java.security.KeyPair = deviceKeyPair,
+        keyId: String = deviceKeyId,
+    ): String {
+        val publicKeyBase64 = Base64.getEncoder().encodeToString(keyPair.public.encoded)
+        return brokerJson.encodeToString(
+            BrokerDeviceRegisterRequest.serializer(),
+            BrokerDeviceRegisterRequest(
+                keyId,
+                publicKeyBase64,
+                registrationSignature(keyPair, keyId, publicKeyBase64),
+            ),
+        )
     }
 
     private fun testEnvelope(
@@ -119,7 +148,7 @@ class BrokerRoutesTest {
         application { brokerModule(store) }
         registerDevice()
         val body = uploadJson(testEnvelope())
-        client.post("/v1/rescue/upload") {
+        val first = client.post("/v1/rescue/upload") {
             contentType(ContentType.Application.Json)
             setBody(body)
         }
@@ -128,6 +157,7 @@ class BrokerRoutesTest {
             setBody(body)
         }
         assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(first.bodyAsText(), response.bodyAsText())
     }
 
     @Test
@@ -173,13 +203,17 @@ class BrokerRoutesTest {
 
     @Test
     fun `pull returns envelopes for shelter`() = testApplication {
-        application { brokerModule(store, gatewayApiKey = null) } // no auth in test
+        application { brokerModule(store, BrokerConfig(profile = BrokerProfile.PRODUCTION)) }
         registerDevice()
         client.post("/v1/rescue/upload") {
             contentType(ContentType.Application.Json)
             setBody(uploadJson(testEnvelope()))
         }
-        val response = client.get("/v1/gateways/fuchu-01/pull")
+        val credential = store.issueGatewayCredential("gateway-fuchu", "fuchu-01", System.currentTimeMillis() + 60_000)
+        val response = client.get("/v1/gateways/fuchu-01/pull") {
+            header("Authorization", "Bearer ${credential.token}")
+            header("X-Gateway-Id", "gateway-fuchu")
+        }
         assertEquals(HttpStatusCode.OK, response.status)
         val body = response.bodyAsText()
         assertTrue(body.contains("env-001"))
@@ -187,31 +221,83 @@ class BrokerRoutesTest {
 
     @Test
     fun `pull returns empty for unknown shelter`() = testApplication {
-        application { brokerModule(store, gatewayApiKey = null) }
-        val response = client.get("/v1/gateways/unknown-shelter/pull")
+        application { brokerModule(store, BrokerConfig(profile = BrokerProfile.PRODUCTION)) }
+        val credential = store.issueGatewayCredential("gateway-unknown", "unknown-shelter", System.currentTimeMillis() + 60_000)
+        val response = client.get("/v1/gateways/unknown-shelter/pull") {
+            header("Authorization", "Bearer ${credential.token}")
+            header("X-Gateway-Id", "gateway-unknown")
+        }
         assertEquals(HttpStatusCode.OK, response.status)
         assertTrue(response.bodyAsText().contains("\"envelopes\":[]"))
     }
 
     @Test
-    fun `pull requires auth when api key is set`() = testApplication {
-        application { brokerModule(store, gatewayApiKey = "secret-key") }
+    fun `pull requires scoped credential`() = testApplication {
+        application { brokerModule(store, BrokerConfig(profile = BrokerProfile.PRODUCTION)) }
         val response = client.get("/v1/gateways/fuchu-01/pull")
         assertEquals(HttpStatusCode.Unauthorized, response.status)
     }
 
     @Test
+    fun `credential cannot pull another shelter queue`() = testApplication {
+        application { brokerModule(store, BrokerConfig(profile = BrokerProfile.PRODUCTION)) }
+        val credential = store.issueGatewayCredential("gateway-a", "fuchu-01", System.currentTimeMillis() + 60_000)
+        val response = client.get("/v1/gateways/other-shelter/pull") {
+            header("Authorization", "Bearer ${credential.token}")
+            header("X-Gateway-Id", "gateway-a")
+        }
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        assertTrue(response.bodyAsText().contains("gateway_scope_mismatch"))
+    }
+
+    @Test
+    fun `credential cannot upload receipt for another shelter`() = testApplication {
+        application { brokerModule(store, BrokerConfig(profile = BrokerProfile.PRODUCTION)) }
+        val credential = store.issueGatewayCredential("gateway-a", "fuchu-01", System.currentTimeMillis() + 60_000)
+        val receipt = BrokerReceiptUpload(
+            receipt = com.example.relay.rescue.SignedShelterReceipt(
+                receipt = com.example.relay.rescue.UnsignedShelterReceipt(
+                    receiptId = "receipt-cross-shelter",
+                    envelopeId = "unknown-envelope",
+                    requestId = "request-cross-shelter",
+                    requestVersion = 1,
+                    ciphertextSha256Hex = "a".repeat(64),
+                    shelterId = "other-shelter",
+                    receivedAtEpochMillis = System.currentTimeMillis(),
+                    status = com.example.relay.rescue.ShelterReceiptStatus.ACCEPTED,
+                ),
+                signerKeyId = "signer",
+                signatureBase64 = "D".repeat(88),
+            ),
+            gatewayId = "gateway-a",
+        )
+        val response = client.post("/v1/gateways/other-shelter/receipts") {
+            header("Authorization", "Bearer ${credential.token}")
+            header("X-Gateway-Id", "gateway-a")
+            contentType(ContentType.Application.Json)
+            setBody(brokerJson.encodeToString(BrokerReceiptUpload.serializer(), receipt))
+        }
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+    }
+
+    @Test
     fun `health returns status`() = testApplication {
         application { brokerModule(store) }
+        val credential = store.issueGatewayCredential("health-gateway", "health-shelter", System.currentTimeMillis() + 60_000)
         val response = client.get("/v1/health")
         assertEquals(HttpStatusCode.OK, response.status)
-        assertTrue(response.bodyAsText().contains("\"status\":\"ok\""))
+        val body = response.bodyAsText()
+        assertTrue(body.contains("\"status\":\"ok\""))
+        assertFalse(body.contains(credential.token))
+        assertFalse(body.contains("health-gateway"))
     }
 
     @Test
     fun `receipts returns 401 for invalid token so Android can re-register`() = testApplication {
         application { brokerModule(store) }
-        val response = client.get("/v1/receipts?token=invalid-token&sinceSeq=0")
+        val response = client.get("/v1/receipts?sinceSeq=0") {
+            header("Authorization", "Bearer invalid-token")
+        }
         assertEquals(HttpStatusCode.Unauthorized, response.status)
         assertTrue(response.bodyAsText().contains("invalid_capability_token"))
     }
@@ -219,18 +305,78 @@ class BrokerRoutesTest {
     @Test
     fun `device registration returns capability token`() = testApplication {
         application { brokerModule(store) }
-        val publicKeyBase64 = Base64.getEncoder().encodeToString(deviceKeyPair.public.encoded)
-        val registerBody = brokerJson.encodeToString(
-            BrokerDeviceRegisterRequest.serializer(),
-            BrokerDeviceRegisterRequest(deviceKeyId, publicKeyBase64),
-        )
         val response = client.post("/v1/devices/register") {
             contentType(ContentType.Application.Json)
-            setBody(registerBody)
+            setBody(registrationJson())
         }
         assertEquals(HttpStatusCode.OK, response.status)
         val body = response.bodyAsText()
         assertTrue(body.contains("capabilityToken"))
         assertTrue(body.contains(deviceKeyId))
+    }
+
+    @Test
+    fun `device registration rejects malformed EC public key`() = testApplication {
+        application { brokerModule(store) }
+        val response = client.post("/v1/devices/register") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                brokerJson.encodeToString(
+                    BrokerDeviceRegisterRequest.serializer(),
+                    BrokerDeviceRegisterRequest(deviceKeyId, "not-base64", "not-a-signature"),
+                ),
+            )
+        }
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertTrue(response.bodyAsText().contains("invalid_public_key"))
+    }
+
+    @Test
+    fun `device token recovery requires proof from the registered private key`() = testApplication {
+        application { brokerModule(store) }
+        val validBody = registrationJson()
+        assertEquals(
+            HttpStatusCode.OK,
+            client.post("/v1/devices/register") {
+                contentType(ContentType.Application.Json)
+                setBody(validBody)
+            }.status,
+        )
+        val publicKeyBase64 = Base64.getEncoder().encodeToString(deviceKeyPair.public.encoded)
+        val attacker = KeyPairGenerator.getInstance("EC").apply {
+            initialize(ECGenParameterSpec("secp256r1"))
+        }.generateKeyPair()
+        val forged = BrokerDeviceRegisterRequest(
+            deviceKeyId,
+            publicKeyBase64,
+            registrationSignature(attacker, deviceKeyId, publicKeyBase64),
+        )
+        val response = client.post("/v1/devices/register") {
+            contentType(ContentType.Application.Json)
+            setBody(brokerJson.encodeToString(BrokerDeviceRegisterRequest.serializer(), forged))
+        }
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertTrue(response.bodyAsText().contains("invalid_registration_proof"))
+    }
+
+    @Test
+    fun `device registration rejects a different key for an existing identity`() = testApplication {
+        application { brokerModule(store) }
+        assertEquals(
+            HttpStatusCode.OK,
+            client.post("/v1/devices/register") {
+                contentType(ContentType.Application.Json)
+                setBody(registrationJson())
+            }.status,
+        )
+        val replacement = KeyPairGenerator.getInstance("EC").apply {
+            initialize(ECGenParameterSpec("secp256r1"))
+        }.generateKeyPair()
+        val response = client.post("/v1/devices/register") {
+            contentType(ContentType.Application.Json)
+            setBody(registrationJson(replacement, deviceKeyId))
+        }
+        assertEquals(HttpStatusCode.Conflict, response.status)
+        assertTrue(response.bodyAsText().contains("device_key_conflict"))
     }
 }

@@ -8,6 +8,8 @@ import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -17,7 +19,10 @@ private data class AndroidGatewayLanAnnouncement(
     val discoveryVersion: Int = 1,
     val protocolVersion: Int = 1,
     val gatewayId: String = "",
+    val shelterId: String? = null,
+    val rescueIngressReady: Boolean? = null,
     val apiPort: Int = 8080,
+    val apiScheme: String = "http",
     val anonymousIngressPath: String = "/api/public/sync/messages",
     val receiptTrust: String = "UNVERIFIED",
 )
@@ -26,7 +31,15 @@ data class GatewayDiscoveryDiagnostic(val gatewayIp: String?, val result: String
 
 interface GatewayDiscovery {
     suspend fun discover(timeoutMs: Int = 6_000): DiscoveredGateway?
+
+    /** Legacy-safe default for test/manual implementations that expose one known gateway. */
+    suspend fun discoverForShelter(shelterId: String, timeoutMs: Int = 6_000): DiscoveredGateway? =
+        discover(timeoutMs)?.takeIf { it.acceptsRescueFor(shelterId) }
 }
+
+private fun DiscoveredGateway.acceptsRescueFor(targetShelterId: String): Boolean =
+    rescueIngressReady != false &&
+        (shelterId == targetShelterId || (shelterId == null && gatewayId == targetShelterId))
 
 class UdpGatewayDiscovery(
     private val context: Context? = null,
@@ -35,7 +48,25 @@ class UdpGatewayDiscovery(
     private val multicastLockFactory: (() -> AutoCloseable?)? = null,
     private val onDiagnostic: (GatewayDiscoveryDiagnostic) -> Unit = {},
 ) : GatewayDiscovery {
-    override suspend fun discover(timeoutMs: Int): DiscoveredGateway? = withContext(Dispatchers.IO) {
+    private val discoveryMutex = Mutex()
+
+    override suspend fun discover(timeoutMs: Int): DiscoveredGateway? = discoveryMutex.withLock {
+        discoverMatching(timeoutMs) { true }
+    }
+
+    override suspend fun discoverForShelter(shelterId: String, timeoutMs: Int): DiscoveredGateway? =
+        discoveryMutex.withLock {
+            discoverMatching(timeoutMs) { announcement ->
+                announcement.rescueIngressReady != false &&
+                    (announcement.shelterId == shelterId ||
+                        (announcement.shelterId == null && announcement.gatewayId == shelterId))
+            }
+        }
+
+    private suspend fun discoverMatching(
+        timeoutMs: Int,
+        accepts: (AndroidGatewayLanAnnouncement) -> Boolean,
+    ): DiscoveredGateway? = withContext(Dispatchers.IO) {
         val waitMs = timeoutMs.coerceIn(1_000, 15_000)
         val lock = runCatching { multicastLockFactory?.invoke() ?: acquireWifiMulticastLock() }.getOrNull()
         try {
@@ -61,12 +92,23 @@ class UdpGatewayDiscovery(
                         }.getOrNull() ?: continue
                         if (announcement.service != "relay-pc-gateway" ||
                             announcement.discoveryVersion != 1 ||
+                            announcement.protocolVersion != GATEWAY_PROTOCOL_VERSION ||
                             announcement.apiPort !in 1..65_535 ||
+                            announcement.apiScheme !in setOf("http", "https") ||
                             announcement.gatewayId.isBlank() ||
+                            announcement.shelterId?.let { it.isBlank() || it.length > 128 } == true ||
                             announcement.anonymousIngressPath != "/api/public/sync/messages"
                         ) continue
+                        if (!accepts(announcement)) continue
                         val host = packet.address.hostAddress ?: continue
-                        return@runCatching DiscoveredGateway(host, announcement.apiPort, announcement.gatewayId)
+                        return@runCatching DiscoveredGateway(
+                            host = host,
+                            port = announcement.apiPort,
+                            gatewayId = announcement.gatewayId,
+                            scheme = announcement.apiScheme,
+                            shelterId = announcement.shelterId,
+                            rescueIngressReady = announcement.rescueIngressReady,
+                        )
                     }
                     null
                 }

@@ -60,6 +60,7 @@ import com.example.relay.rescue.trust.RegionalTrustRuntime
 import com.example.relay.rescue.trust.RoomRegionalDirectoryPersistence
 import com.example.relay.rescue.trust.VerifiedRegionalDirectoryStore
 import com.google.android.gms.nearby.connection.ConnectionsClient
+import java.net.URI
 import java.util.UUID
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import kotlinx.coroutines.CoroutineScope
@@ -122,22 +123,29 @@ class RelayApplication : Application() {
 
     /**
      * Broker endpoint resolution order:
-     * 1. SharedPreferences override (set during provisioning/enrollment)
-     * 2. Build-time resource (broker.xml) for pilot deployments
-     * Empty = Broker delivery disabled. Must be HTTPS.
+     * 1. Debug/local-development SharedPreferences override (never trusted by pilot/release)
+     * 2. Build-time resource (broker.xml) for a reviewed pilot build
+     * Empty = Broker delivery disabled. Must be HTTPS.  A production regional provisioning
+     * bundle still needs a signed directory/trust-root integration; until then the runtime
+     * deliberately does not accept hand-edited endpoint preferences in a release build.
      */
     val cloudBrokerEndpoint: String
         get() {
-            val fromPrefs = getSharedPreferences("relay_broker_config", MODE_PRIVATE)
-                .getString("broker_endpoint", null)
+            val fromPrefs = if (BuildConfig.DEBUG) {
+                getSharedPreferences("relay_broker_config", MODE_PRIVATE)
+                    .getString("broker_endpoint", null)
+            } else null
             val endpoint = fromPrefs ?: getString(R.string.broker_endpoint).trim()
-            // Enforce HTTPS-only; reject invalid endpoints
-            return if (endpoint.isNotBlank() && endpoint.startsWith("https://")) endpoint else ""
+            return endpoint.takeIf(::isValidBrokerEndpoint).orEmpty()
         }
 
-    /** Sets the Broker endpoint (called during provisioning). */
+    /**
+     * Development-only override for a local HTTPS Broker. Release/pilot variants must obtain
+     * their endpoint from reviewed signed provisioning rather than a mutable preference.
+     */
     fun setCloudBrokerEndpoint(url: String) {
-        require(url.isBlank() || url.startsWith("https://")) { "Broker endpoint must use HTTPS" }
+        check(BuildConfig.DEBUG) { "mutable Broker endpoint configuration is disabled outside debug/localDev" }
+        require(url.isBlank() || isValidBrokerEndpoint(url)) { "Broker endpoint must use HTTPS" }
         getSharedPreferences("relay_broker_config", MODE_PRIVATE)
             .edit().putString("broker_endpoint", url).apply()
     }
@@ -305,6 +313,16 @@ class RelayApplication : Application() {
 
     private companion object {
         const val DATABASE_NAME = "relay.db"
+
+        fun isValidBrokerEndpoint(value: String): Boolean = runCatching {
+            val uri = URI(value.trim())
+            uri.scheme.equals("https", ignoreCase = true) &&
+                !uri.host.isNullOrBlank() &&
+                uri.userInfo == null &&
+                uri.query == null &&
+                uri.fragment == null &&
+                (uri.port == -1 || uri.port in 1..65_535)
+        }.getOrDefault(false)
     }
 }
 

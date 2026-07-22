@@ -17,6 +17,7 @@ import com.example.relay.rescue.signShelterManifest
 import com.example.relay.rescue.verifyShelterManifest
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.AclEntry
@@ -223,7 +224,21 @@ internal fun restrictOwnerOnly(target: Path) {
 
 /** Private root material is an offline operator artifact and must never live in a Git worktree. */
 internal fun requireOfflinePrivatePath(path: Path) {
-    var parent: Path? = path.toRealPath().parent
+    val absolutePath = path.toAbsolutePath().normalize()
+    val unresolvedSegments = mutableListOf<Path>()
+    var existingAncestor = absolutePath
+    while (!Files.exists(existingAncestor, LinkOption.NOFOLLOW_LINKS)) {
+        unresolvedSegments += existingAncestor.fileName
+            ?: error("private material requires a filesystem parent")
+        existingAncestor = existingAncestor.parent
+            ?: error("private material requires a filesystem parent")
+    }
+    var canonicalPath = existingAncestor.toRealPath()
+    unresolvedSegments.asReversed().forEach { segment ->
+        canonicalPath = canonicalPath.resolve(segment)
+    }
+
+    var parent: Path? = canonicalPath.parent
     while (parent != null) {
         require(!Files.exists(parent.resolve(".git"))) { "private material may not be stored under a Git worktree" }
         parent = parent.parent

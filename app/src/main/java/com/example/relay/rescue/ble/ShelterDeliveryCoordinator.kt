@@ -45,7 +45,9 @@ class ShelterDeliveryCoordinator(
     private val deliveryIds: CourierDeliveryIdStore,
     private val clock: () -> Long = System::currentTimeMillis,
     private val json: Json = Json { encodeDefaults = true },
-    private val sessionDeadlineMillis: Long = 30_000,
+    // A 16 KiB envelope needs more than 1,600 acknowledged writes at the MTU-23 fallback.
+    // Allow the PC bridge's 120s bounded reassembly window plus connect/result overhead.
+    private val sessionDeadlineMillis: Long = 180_000,
     private val maxEnvelopeBytes: Int = MAX_ENVELOPE_BYTES,
     private val onRepositoryChanged: suspend () -> Unit = {},
     /** Lets sender-owned sessions mirror only a verified shelter receipt in the same DB transaction. */

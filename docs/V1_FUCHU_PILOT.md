@@ -1,4 +1,6 @@
-# Relay v1 — 広島県安芸郡府中町パイロット
+# Relay v1 — 広島県安芸郡府中町パイロット（歴史的な機能説明）
+
+> この文書の旧来の「v1」フローは実証候補の機能説明です。現在の安全な配備条件は [Municipal pilot readiness](readiness/MUNICIPAL_PILOT_READINESS.md) と [production Gateway 配備 runbook](runbooks/PRODUCTION_GATEWAY_DEPLOYMENT.md) が正本です。ここに書かれた到達表現は 119 の代替、実災害での救助保証、または自治体との運用合意を意味しません。
 
 > [!IMPORTANT]
 > **Current implementation status (2026-07-22):** durable sender-session restoration,
@@ -22,13 +24,13 @@ Relay v1 は、通信障害時の救助依頼をスマートフォンから暗�
 
 ## PCスタッフの流れ
 
-1. `http://127.0.0.1:8080/` を開き、`%USERPROFILE%\.relay\admin.key` の共通PINとPC表示名でロックを解除する。
+1. local operator は `http://127.0.0.1:8080/`、remote staff は承認済み TLS proxy の `https://` URL を開き、個人の username/password でログインする。初回の ADMIN は一回限りの bootstrap secret から作る。共有 PIN / `admin.key` / `X-Admin-Key` は production と lab で使わない。
 2. 未確認の「命の危険」SOSを最上位に表示し、全画面警告と警告音を確認する。
 3. 最初に「担当開始」を押したスタッフ端末が担当になる。
 4. 正確なGPS、位置の古さ、人数、状態、タグ、自由記述を確認し、確認済み→準備中→対応中→完了へ進める。
 5. 完了・取消になった依頼の全バージョンは30日後に自動削除される。
 
-同一Gatewayの運用画面はLAN内の複数スタッフPCから開けます。担当確定はGatewayのSQLiteトランザクションで先着1台に固定されます。独立した複数Gateway間の担当同期はv1対象外です。
+同一 Gateway の運用画面を LAN から開くのは、明示的に TLS reverse proxy または閉域網を構成した限定区域だけです。担当確定は Gateway の SQLite トランザクションで先着 1 台に固定されます。独立した複数 Gateway 間の担当同期は v1 対象外です。
 
 ## 府中町の地図と公式情報
 

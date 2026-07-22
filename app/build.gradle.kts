@@ -1,6 +1,7 @@
 import java.time.Instant
 import java.util.Collections
 import java.util.zip.ZipFile
+import org.gradle.api.GradleException
 
 plugins {
     alias(libs.plugins.android.application)
@@ -9,6 +10,17 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
+
+val relayReleaseStoreFile = providers.gradleProperty("relay.release.store.file").orNull
+val relayReleaseStorePassword = providers.gradleProperty("relay.release.store.password").orNull
+val relayReleaseKeyAlias = providers.gradleProperty("relay.release.key.alias").orNull
+val relayReleaseKeyPassword = providers.gradleProperty("relay.release.key.password").orNull
+val relayReleaseSigningConfigured = listOf(
+    relayReleaseStoreFile,
+    relayReleaseStorePassword,
+    relayReleaseKeyAlias,
+    relayReleaseKeyPassword,
+).all { !it.isNullOrBlank() }
 
 android {
     namespace = "com.example.relay"
@@ -41,15 +53,39 @@ android {
         buildConfigField("String", "BUILD_TIME", "\"${Instant.now()}\"")
     }
 
+    val releaseSigningConfig = if (relayReleaseSigningConfigured) {
+        signingConfigs.create("organizationRelease") {
+            storeFile = file(requireNotNull(relayReleaseStoreFile))
+            storePassword = requireNotNull(relayReleaseStorePassword)
+            keyAlias = requireNotNull(relayReleaseKeyAlias)
+            keyPassword = requireNotNull(relayReleaseKeyPassword)
+        }
+    } else {
+        null
+    }
+
     buildTypes {
         getByName("debug") {
             // Optional local developer asset; it is absent by default and must never contain a
             // private key. Release-derived variants inherit the empty production setting.
             buildConfigField("String", "REGIONAL_ROOT_BUNDLE_ASSET", "\"relay-regional-roots.debug.json\"")
             buildConfigField("String", "REGIONAL_ROOT_BUNDLE_ENVIRONMENTS", "\"TEST,PILOT\"")
+            buildConfigField("boolean", "ALLOW_HTTP_GATEWAY", "true")
         }
-        create("localDev") { initWith(getByName("debug")); matchingFallbacks += listOf("debug") }
-        create("pilotRelease") { initWith(getByName("release")); matchingFallbacks += listOf("release") }
+        getByName("release") {
+            buildConfigField("boolean", "ALLOW_HTTP_GATEWAY", "false")
+            signingConfig = releaseSigningConfig
+        }
+        create("localDev") {
+            initWith(getByName("debug"))
+            matchingFallbacks += listOf("debug")
+            buildConfigField("boolean", "ALLOW_HTTP_GATEWAY", "true")
+        }
+        create("pilotRelease") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            buildConfigField("boolean", "ALLOW_HTTP_GATEWAY", "false")
+        }
     }
 
     packaging {
@@ -61,7 +97,28 @@ android {
     }
 
     sourceSets {
+        // localDev shares the debug-only cleartext policy and test-only manifest components.
+        getByName("localDev") {
+            manifest.srcFile("src/debug/AndroidManifest.xml")
+            res.srcDir("src/debug/res")
+        }
         getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
+}
+
+// A local unsigned/locally signed assembleRelease is useful for engineering inspection, but is
+// never a formal release. CI turns this explicit gate on and fails before publication when the
+// organization signing material has not been supplied through the approved secret store.
+val requireOrganizationReleaseSigning = providers.gradleProperty("relay.require.release.signing")
+    .orNull
+    ?.equals("true", ignoreCase = true) == true
+tasks.matching { it.name == "assembleRelease" || it.name == "assemblePilotRelease" }.configureEach {
+    doFirst {
+        if (requireOrganizationReleaseSigning && !relayReleaseSigningConfigured) {
+            throw GradleException(
+                "Organization Android signing material is required for a formal release; do not publish an unsigned or locally signed APK.",
+            )
+        }
     }
 }
 

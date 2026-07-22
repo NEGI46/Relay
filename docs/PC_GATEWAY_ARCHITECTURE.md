@@ -17,6 +17,8 @@ Android Nearby 自動接続
   → (任意) Nearby で Receipt 逆伝播
 ```
 
+この anonymous HTTP/UDP 図は development 互換経路です。production/lab では既定で無効であり、限定区域で有効化する場合にも、明示した閉域網または TLS reverse proxy と Android 側 HTTPS 要件を満たす必要があります。
+
 ## 副経路（運用者の認証済みBridge経路）
 
 ```text
@@ -62,13 +64,15 @@ REPORT本文、`originDeviceId`、発信者本人を検証しない。現MVPは�
 | `GATEWAY_RECEIVED_UNVERIFIED` | 匿名LAN経路でPCのSQLiteへ保存 |
 | `GATEWAY_RECEIVED` | 認証済みBridge経路でPCのSQLiteへ保存。内容検証・公式情報・最終配信を意味しない |
 
-## 既定バインド
+## 実行プロファイルと既定バインド
 
-- HTTP: **`0.0.0.0:8080`**（LAN 向け）。Firewall で Private のみ許可すること
-- ループバック専用にしたい場合のみ `RELAY_GATEWAY_HOST=127.0.0.1`（その場合ビーコンは無効）
+- `production`（既定）: **`127.0.0.1:8080`**。匿名 ingress、UDP discovery、リモート管理、旧共有管理キーは無効。
+- `lab`: 同じ安全側の既定。限定区域の閉域網または TLS reverse proxy を明示的に構成した場合だけ LAN 機能を選択できる。
+- `development`: 開発互換のため匿名 ingress、UDP discovery、旧 `X-Admin-Key` を明示設定で利用できる。自治体実証・正式配備には使わない。
 
 ## 実装メモ
 
 - 既存 Nearby の `OfflineTransport` / `SyncCoordinator` は独立。Bridge 同期は `GatewaySyncEngine`
 - 公開経路はレート制限・REPORT のみ・形式検証
-- 管理者キーは env または `%USERPROFILE%\.relay\admin.key` に永続化（コンソールに鍵を出さない）
+- staff account、ロール、失効可能な session、最小化した監査ログは Gateway SQLite に保存する
+- 初回 ADMIN は環境変数またはローカル CLI の一回限り bootstrap secret で作成し、共有管理キーは production/lab で拒否する

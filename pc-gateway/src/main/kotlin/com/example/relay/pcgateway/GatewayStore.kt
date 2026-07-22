@@ -122,12 +122,18 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
     private val rescuePersistenceDelegate = lazy {
         SqliteRescuePersistence(config.dbPath, json)
     }
+    private val accessStoreDelegate = lazy {
+        GatewayAccessStore(config.dbPath)
+    }
 
     /**
      * Durable rescue storage sharing the gateway database file, but using its own
      * WAL-configured connection so legacy gateway work cannot hold a rescue intake lock.
      */
     fun rescuePersistence(): RescuePersistence = rescuePersistenceDelegate.value
+
+    /** Durable local staff accounts, sessions, and audit metadata in this Gateway's SQLite file. */
+    fun accessStore(): GatewayAccessStore = accessStoreDelegate.value
 
     init {
         File(config.dbPath).parentFile?.mkdirs()
@@ -909,6 +915,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
 
     override fun close() {
         if (rescuePersistenceDelegate.isInitialized()) rescuePersistenceDelegate.value.close()
+        if (accessStoreDelegate.isInitialized()) accessStoreDelegate.value.close()
         synchronized(lock) { connection.close() }
     }
 

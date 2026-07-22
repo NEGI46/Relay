@@ -37,11 +37,18 @@ class BrokerPullAgent(
     private val gatewayId: String,
     private val intakeService: RescueIntakeService,
     private val httpClient: HttpClient,
-    private val gatewayApiKey: String? = null,
+    /** Per-Gateway, per-shelter Broker credential; never persisted in the cursor file. */
+    private val gatewayCredential: String? = null,
     private val cursorPath: Path? = null,
     private val pollIntervalMs: Long = 10_000L,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
+    init {
+        require(pollIntervalMs in 1_000L..300_000L) {
+            "pollIntervalMs must be between 1000 and 300000"
+        }
+    }
+
     private var cursor: String? = loadCursor()
     private var consecutiveFailures = 0
 
@@ -61,7 +68,9 @@ class BrokerPullAgent(
             } catch (e: Exception) {
                 consecutiveFailures++
                 val backoff = minOf(pollIntervalMs * consecutiveFailures, 60_000L)
-                System.err.println("[BrokerPullAgent] pull failed (attempt $consecutiveFailures): ${e.message}")
+                // Exception messages can include endpoint or transport diagnostics. Do not log
+                // them from a credential-bearing request path.
+                System.err.println("[BrokerPullAgent] pull failed (attempt $consecutiveFailures; ${e.javaClass.simpleName})")
                 delay(backoff)
                 continue
             }
@@ -82,7 +91,7 @@ class BrokerPullAgent(
 
         val response: HttpResponse = httpClient.get(url) {
             headers {
-                gatewayApiKey?.let { append(HttpHeaders.Authorization, "Bearer $it") }
+                gatewayCredential?.let { append(HttpHeaders.Authorization, "Bearer $it") }
                 append("X-Gateway-Id", gatewayId)
             }
         }
@@ -131,7 +140,7 @@ class BrokerPullAgent(
         runCatching {
             Files.writeString(cursorPath, cursor!!)
         }.onFailure {
-            System.err.println("[BrokerPullAgent] failed to persist cursor: ${it.message}")
+            System.err.println("[BrokerPullAgent] failed to persist cursor (${it.javaClass.simpleName})")
         }
     }
 }

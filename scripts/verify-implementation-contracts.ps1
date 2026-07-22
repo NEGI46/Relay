@@ -33,6 +33,9 @@ $androidDatabaseTest = Read-Text 'app/src/androidTest/java/com/example/relay/dat
 $migrationSource = Read-Text 'app/src/main/java/com/example/relay/data/local/PlaintextDatabaseMigration.kt'
 $migrationTest = Read-Text 'app/src/androidTest/java/com/example/relay/data/local/PlaintextDatabaseMigrationTest.kt'
 $manifest = Read-Text 'app/src/main/AndroidManifest.xml'
+$debugManifest = Read-Text 'app/src/debug/AndroidManifest.xml'
+$networkSecurity = Read-Text 'app/src/main/res/xml/network_security_config.xml'
+$androidBuild = Read-Text 'app/build.gradle.kts'
 $workflow = Read-Text '.github/workflows/relay-ci.yml'
 $backup = Read-Text 'scripts/backup-gateway.ps1'
 $signing = Read-Text 'scripts/sign-artifacts.ps1'
@@ -41,6 +44,9 @@ $tufVerify = Read-Text 'scripts/verify-tuf-metadata.ps1'
 $pcGatewayPackage = Read-Text 'scripts/build-pc-gateway-exe.ps1'
 $releaseWorkflow = Read-Text '.github/workflows/publish-release.yml'
 $gatewayConfig = Read-Text 'pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayConfig.kt'
+$gatewayAccess = Read-Text 'pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayAccessStore.kt'
+$gatewayMain = Read-Text 'pc-gateway/src/main/kotlin/com/example/relay/pcgateway/Main.kt'
+$brokerConfig = Read-Text 'broker/src/main/kotlin/com/example/relay/broker/BrokerConfig.kt'
 
 # At-rest data protection must remain fail-closed and tied to Android Keystore.
 Require-Text $versions 'sqlcipher-android' 'SQLCipher dependency'
@@ -54,6 +60,11 @@ Require-Text $migrationSource 'OPEN_READONLY' 'legacy database is opened read-on
 Require-Text $migrationSource 'installEncryptedFile' 'legacy database is replaced only after encrypted copy succeeds'
 Require-Text $migrationTest 'plaintextMessagesAreCopiedIntoEncryptedRoomDatabase' 'plaintext-to-encrypted migration instrumentation test'
 Require-Text $manifest 'android:allowBackup="false"' 'Android backup is disabled for encrypted application data'
+Require-Text $manifest 'android:usesCleartextTraffic="false"' 'release Android manifest denies cleartext traffic'
+Require-Text $networkSecurity 'cleartextTrafficPermitted="false"' 'release Android network security config denies cleartext'
+Require-Text $debugManifest 'android:usesCleartextTraffic="true"' 'debug-only manifest owns the local HTTP compatibility exception'
+Require-Text $androidBuild 'ALLOW_HTTP_GATEWAY", "false"' 'release and pilotRelease block HTTP Gateway transport'
+Require-Text $androidBuild 'relay.require.release.signing' 'formal Android release signing has an explicit CI gate'
 
 # Runtime communication must have an explicit foreground-service and permission boundary.
 Require-Text $manifest 'FOREGROUND_SERVICE_CONNECTED_DEVICE' 'connected-device foreground-service permission'
@@ -79,6 +90,25 @@ Reject-Text $pcGatewayPackage "`$appVersion = '0.1.0'" 'PC Gateway package versi
 Require-Text $releaseWorkflow 'RELEASE_TAG: ${{ inputs.tag }}' 'release tag is passed to the Windows packaging step'
 Require-Text $releaseWorkflow '-AppVersion $Matches.version' 'release tag drives the Windows package version'
 Require-Text $gatewayConfig 'System.getProperty("relay.version")' 'Gateway health reports the packaged release version'
+Require-Text $gatewayConfig 'GatewayProfile.PRODUCTION' 'Gateway production profile is explicit'
+Require-Text $gatewayConfig 'RELAY_GATEWAY_LAN_MODE' 'Gateway LAN topology must be explicit'
+Require-Text $gatewayConfig 'X-Admin-Key compatibility is permitted only in the development profile' 'legacy admin key is development-only'
+Require-Text $gatewayAccess 'PBKDF2WithHmacSHA256' 'local staff passwords use a one-way KDF'
+Require-Text $gatewayAccess 'gateway_audit_log' 'Gateway durable audit log exists'
+Require-Text $gatewayMain 'bootstrap-admin' 'Gateway has a local one-time administrator bootstrap command'
+Require-Text $brokerConfig 'legacyGatewayApiKey' 'Broker legacy shared key is explicitly isolated'
+Require-Text $brokerConfig 'must bind loopback' 'production Broker bind is fail-closed'
+
+# Formal release publication must never substitute debug artifacts or leave action revisions mutable.
+Require-Text $releaseWorkflow ':app:assembleRelease' 'formal release builds an Android release APK'
+Reject-Text $releaseWorkflow ':app:assembleDebug' 'formal release must not build a debug APK'
+Reject-Text $releaseWorkflow 'Relay-Android-debug.apk' 'formal release must not publish a debug APK'
+Require-Text $releaseWorkflow 'RELAY_ANDROID_KEYSTORE_BASE64' 'formal Android release requires organization signing material'
+Require-Text $releaseWorkflow 'signtool.exe sign' 'formal Windows release requires Authenticode signing'
+Require-Text $releaseWorkflow '-RequireTool' 'formal release requires SBOM and vulnerability scanner tooling'
+Require-Text $releaseWorkflow '-RequireBundles' 'formal release verifies cosign bundles'
+if ($releaseWorkflow -match 'uses:\s+[^\s@]+@v\d') { throw 'Release workflow contains a mutable tag instead of a verified action SHA.' }
+if ($workflow -match 'uses:\s+[^\s@]+@v\d') { throw 'CI workflow contains a mutable tag instead of a verified action SHA.' }
 
 # Keep the contract itself in the required CI path; this prevents silent removal.
 Require-Text $workflow 'verify-implementation-contracts.ps1' 'implementation contract CI step'

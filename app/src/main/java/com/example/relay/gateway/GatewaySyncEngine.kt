@@ -105,7 +105,7 @@ class GatewaySyncEngine(
                 val gateway = discovery?.discover()
                     ?: settings.host.trim().takeIf(::isValidLanIpv4)?.let { host ->
                         settingsStore.recordDiscovery(host, "manual_fallback")
-                        DiscoveredGateway(host, settings.port, "manual-fallback")
+                        DiscoveredGateway(host, settings.port, "manual-fallback", settings.scheme)
                     }
                     ?: return@withLock GatewaySyncResult.Deferred("gateway_not_found").also {
                         settingsStore.recordDiscovery(null, "udp_timeout_no_fallback")

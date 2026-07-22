@@ -12,6 +12,7 @@ import com.example.relay.rescue.ShelterReceiptStatus
 import com.example.relay.rescue.UnsignedShelterReceipt
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
@@ -52,7 +53,10 @@ class RescueKeyStore(
     }
 
     private fun load(now: Long): RescueGatewayKeys {
-        require(Files.isRegularFile(path)) { "rescue key path is not a regular file" }
+        require(!Files.isSymbolicLink(path) && Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            "rescue key path is not a regular file"
+        }
+        verifyOwnerOnly(path)
         val size = Files.size(path)
         require(size in 1..MAX_KEY_FILE_BYTES) { "invalid rescue key file size" }
         val persisted = json.decodeFromString<PersistedRescueKeys>(Files.readString(path, Charsets.UTF_8))
@@ -174,6 +178,38 @@ class RescueKeyStore(
             .setPermissions(EnumSet.allOf(AclEntryPermission::class.java))
             .build()
         aclView.acl = listOf(ownerOnly)
+    }
+
+    /**
+     * Existing files are checked before importing Base64 private key material.  We do not claim
+     * DPAPI/HSM protection here: this is a fail-closed filesystem permission boundary only.
+     */
+    private fun verifyOwnerOnly(target: Path) {
+        val posix = runCatching { Files.getPosixFilePermissions(target) }.getOrNull()
+        if (posix != null) {
+            val permitted = setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)
+            require(posix.all { it in permitted } && PosixFilePermission.OWNER_READ in posix) {
+                "rescue key file permissions are not owner-only"
+            }
+            return
+        }
+        val aclView = Files.getFileAttributeView(target, AclFileAttributeView::class.java)
+            ?: error("filesystem cannot verify owner-only rescue key permissions")
+        val owner = Files.getOwner(target)
+        val readableByOther = aclView.acl.any { entry ->
+            entry.type() == AclEntryType.ALLOW && entry.principal() != owner &&
+                entry.permissions().any {
+                    it in setOf(
+                        AclEntryPermission.READ_DATA,
+                        AclEntryPermission.WRITE_DATA,
+                        AclEntryPermission.APPEND_DATA,
+                        AclEntryPermission.READ_ACL,
+                        AclEntryPermission.WRITE_ACL,
+                        AclEntryPermission.WRITE_OWNER,
+                    )
+                }
+        }
+        require(!readableByOther) { "rescue key ACL is not owner-only" }
     }
 
     private fun PersistedPrivateKey.import(): RescuePrivateKey =

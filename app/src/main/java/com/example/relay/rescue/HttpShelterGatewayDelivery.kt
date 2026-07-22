@@ -1,5 +1,6 @@
 package com.example.relay.rescue
 
+import com.example.relay.BuildConfig
 import com.example.relay.gateway.DiscoveredGateway
 import com.example.relay.gateway.GatewayDiscovery
 import com.example.relay.gateway.UdpGatewayDiscovery
@@ -21,10 +22,16 @@ class HttpShelterGatewayDelivery(
         carrierId: String,
         courierDeliveryId: String,
     ): GatewayDeliveryResult = withContext(Dispatchers.IO) {
-        val gateway = discovery.discover() ?: return@withContext GatewayDeliveryResult.GatewayNotFound
+        val gateway = discovery.discoverForShelter(envelope.destinationShelterId)
+            ?: return@withContext GatewayDeliveryResult.GatewayNotFound
+        val scheme = gateway.scheme.trim().lowercase()
+        if (scheme !in setOf("http", "https")) return@withContext GatewayDeliveryResult.InsecureTransportBlocked
+        if (scheme == "http" && !BuildConfig.ALLOW_HTTP_GATEWAY) {
+            return@withContext GatewayDeliveryResult.InsecureTransportBlocked
+        }
         val request = HttpRescueDeliveryRequest(envelope, carrierId, courierDeliveryId)
         runCatching {
-            val connection = (URL("http://${gateway.host}:${gateway.port}/api/public/rescue/deliver")
+            val connection = (URL("$scheme://${gateway.host}:${gateway.port}/api/public/rescue/deliver")
                 .openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 5_000
@@ -32,26 +39,32 @@ class HttpShelterGatewayDelivery(
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
             }
-            connection.outputStream.use { it.write(json.encodeToString(request).encodeToByteArray()) }
-            val status = connection.responseCode
-            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (status == 404) return@runCatching GatewayDeliveryResult.OldGateway
-            if (status == 429) return@runCatching GatewayDeliveryResult.RateLimited
-            if (status == 503) return@runCatching GatewayDeliveryResult.GatewayNotReady
-            if (status in 400..499) {
-                val reason = runCatching { json.decodeFromString<HttpRescueDeliveryResponse>(body).reason }.getOrNull()
-                return@runCatching when (reason?.lowercase()) {
-                    "wrong_shelter", "shelter_mismatch" -> GatewayDeliveryResult.WrongShelter
-                    "wrong_recipient_key", "recipient_key_mismatch" -> GatewayDeliveryResult.WrongRecipientKey
-                    else -> GatewayDeliveryResult.Rejected(status, reason ?: "client_rejected")
+            try {
+                val requestBody = json.encodeToString(request).encodeToByteArray()
+                connection.setFixedLengthStreamingMode(requestBody.size)
+                connection.outputStream.use { it.write(requestBody) }
+                val status = connection.responseCode
+                val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+                val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (status == 404) return@runCatching GatewayDeliveryResult.OldGateway
+                if (status == 429) return@runCatching GatewayDeliveryResult.RateLimited
+                if (status == 503) return@runCatching GatewayDeliveryResult.GatewayNotReady
+                if (status in 400..499) {
+                    val reason = runCatching { json.decodeFromString<HttpRescueDeliveryResponse>(body).reason }.getOrNull()
+                    return@runCatching when (reason?.lowercase()) {
+                        "wrong_shelter", "shelter_mismatch" -> GatewayDeliveryResult.WrongShelter
+                        "wrong_recipient_key", "recipient_key_mismatch" -> GatewayDeliveryResult.WrongRecipientKey
+                        else -> GatewayDeliveryResult.Rejected(status, reason ?: "client_rejected")
+                    }
                 }
+                if (status !in 200..299) return@runCatching GatewayDeliveryResult.NetworkFailure(status)
+                val response = runCatching { json.decodeFromString<HttpRescueDeliveryResponse>(body) }
+                    .getOrElse { return@runCatching GatewayDeliveryResult.InvalidReceipt }
+                val receipt = response.receipt ?: return@runCatching GatewayDeliveryResult.InvalidReceipt
+                GatewayDeliveryResult.Accepted(receipt)
+            } finally {
+                connection.disconnect()
             }
-            if (status !in 200..299) return@runCatching GatewayDeliveryResult.NetworkFailure(status)
-            val response = runCatching { json.decodeFromString<HttpRescueDeliveryResponse>(body) }
-                .getOrElse { return@runCatching GatewayDeliveryResult.InvalidReceipt }
-            val receipt = response.receipt ?: return@runCatching GatewayDeliveryResult.InvalidReceipt
-            GatewayDeliveryResult.Accepted(receipt)
         }.getOrElse { GatewayDeliveryResult.NetworkFailure(null) }
     }
 }
@@ -66,6 +79,8 @@ sealed interface GatewayDeliveryResult {
     data class Rejected(val httpStatus: Int, val reason: String) : GatewayDeliveryResult
     data object RateLimited : GatewayDeliveryResult
     data object GatewayNotReady : GatewayDeliveryResult
+    /** release/pilotRelease must never silently fall back to a cleartext LAN Gateway. */
+    data object InsecureTransportBlocked : GatewayDeliveryResult
     data object InvalidReceipt : GatewayDeliveryResult
 }
 

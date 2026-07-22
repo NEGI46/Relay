@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Emergency LAN only: PC Gateway uses plain HTTP (no TLS in MVP).
-  Do not point phones at untrusted public Wi-Fi for gateway sync.
-  Future hardening can restrict cleartext to private RFC1918 ranges.
--->
+<!-- Release and pilotRelease: Broker and Gateway endpoints must use HTTPS. -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true" />
+    <base-config cleartextTrafficPermitted="false" />
 </network-security-config>

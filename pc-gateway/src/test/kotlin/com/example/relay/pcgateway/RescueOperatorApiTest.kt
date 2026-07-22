@@ -26,6 +26,7 @@ class RescueOperatorApiTest {
     @Test
     fun `staff can view exact rescue detail and claim the response`() = testApplication {
         val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
             dbPath = Files.createTempFile("relay-rescue-api", ".db").toString(),
             adminKey = "staff-pin",
             shelterId = "fuchu-area",
@@ -68,7 +69,12 @@ class RescueOperatorApiTest {
                 setBody("""{"status":"CONFIRMED","operatorNodeId":"shelter-pc-a"}""")
             }
             assertEquals(HttpStatusCode.OK, claimed.status)
-            assertTrue(claimed.bodyAsText().contains("shelter-pc-a"))
+            assertTrue(claimed.bodyAsText().contains("legacy-development-admin"))
+            assertTrue(
+                store.accessStore().auditRecords(limit = 20).any {
+                    it.action == "RESCUE_ASSIGNMENT_START" && it.targetId == "request-api-1"
+                },
+            )
         }
     }
 }

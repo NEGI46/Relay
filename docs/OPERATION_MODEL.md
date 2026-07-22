@@ -10,7 +10,7 @@ v1の一般利用者画面は救助を最優先にし、安否・物資登録は
 
 ## 固定中継地点
 
-固定地点には、常時給電されたAndroid BridgeとPC Gatewayを配置します。BridgeはNearbyで受信した情報をLAN上のGatewayへ自動同期します。PC GatewayはUDPビーコンで自身を広告し、Bridgeは`/api/public/sync/messages`へtokenなしでREPORTを送信できます。
+固定地点には、常時給電されたAndroid BridgeとPC Gatewayを配置します。限定区域で LAN を使う場合は、自治体が承認した閉域網または TLS 終端 reverse proxy を明示的に構成します。production profile の Gateway は既定で loopback bind、匿名 ingress 無効、UDP discovery 無効です。匿名 REPORT 経路は development 互換機能であり、未検証情報だけで救助判断を自動化してはいけません。
 
 PCでの保存が成功した場合だけ`GATEWAY_RECEIVED_UNVERIFIED`を生成します。これは「中継拠点に保存済み（未認証）」を意味し、公式Gatewayや最終宛先への到達を意味しません。
 
@@ -19,7 +19,7 @@ PCでの保存が成功した場合だけ`GATEWAY_RECEIVED_UNVERIFIED`を生成�
 証明しません。現MVPは内容署名を検証していないため、公開経路・ペアリング経路とも内容は
 `UNVERIFIED`です。ReceiptはPC保存の証跡であり、公式情報や最終宛先への配信完了ではありません。
 
-固定地点の運用者は、インストール後に管理者PowerShellから`scripts/setup-pc-gateway.ps1`を1回実行します。これによりPrivate限定Firewall、自動起動、プロセス監視・再起動、起動直後のhealth確認をまとめて設定します。Publicネットワークでは何も開放せず停止し、スクリプトがネットワーク種別を勝手に変更することはありません。管理者キーは `%USERPROFILE%\.relay\admin.key` に永続化し、タスク引数やログへ値を出しません。一般利用者や個々のスマートフォンがPCを登録する作業はありません。
+固定地点の運用者は、インストール後に管理者 PowerShell から `scripts/setup-pc-gateway.ps1` を実行し、production profile のまま loopback health を確認します。LAN 公開は、閉域網または TLS reverse proxy を構成した上で明示的に選択します。初回の ADMIN は一回限りの bootstrap secret から作成し、以後は個人の ADMIN / OPERATOR / VIEWER アカウントと短命 session を使います。共有 `admin.key`、共有 PIN、production の `X-Admin-Key` は使用しません。一般利用者や個々のスマートフォンが PC を登録する作業はありません。
 
 ## 到達性の前提
 
@@ -33,7 +33,7 @@ PC Gatewayが停止していても、Android端末はStore–Carry–Forwardを�
 
 ## アプリ完成境界（残差の明示）
 
-本モデルの **アプリ完成（ソフトウェア）** は、zero-operation 公開 Ingress・未認証 Receipt・Store–Carry–Forward が自動テストと PC Gateway 起動 smoke で再現できることです。
+本モデルの **アプリ完成（ソフトウェア）** は、限定的な開発・訓練経路の契約を自動テストと PC Gateway 起動 smoke で再現できることです。production profile は公開 ingress を既定にせず、個人認証・監査・避難所スコープを要求します。
 
 次は **運用検証** であり、製品コアの未実装ではありません。
 

@@ -8,7 +8,7 @@
 ### Keep critical information moving across offline and online paths.
 
 [![v1](https://img.shields.io/badge/v1-Fuchu%20Town-5B4FB2?style=for-the-badge)](docs/V1_FUCHU_PILOT.md)
-[![Android](https://img.shields.io/badge/Android-6.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white)](#download)
+[![Android](https://img.shields.io/badge/Android-6.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white)](docs/readiness/MUNICIPAL_PILOT_READINESS.md)
 [![Windows](https://img.shields.io/badge/Windows-PC%20Gateway-0078D4?style=for-the-badge&logo=windows&logoColor=white)](#pc-gateway)
 [![Broker](https://img.shields.io/badge/Broker-optional%20HTTPS-0EA5E9?style=for-the-badge)](#3-任意のbroker経路)
 
@@ -67,7 +67,7 @@ required; this repository does not claim that it has been completed.
 
 ## まず結論
 
-Relayは、災害時の救助要請をAndroidで暗号化し、利用可能な経路を並行して使って避難所PCへ届ける、**ローカル優先の救助情報中継システム**です。
+Relayは、災害時の救助要請を Android で暗号化し、利用可能な経路を並行して使って避難所 PC への**送達を試みる**、ローカル優先の救助情報中継システムです。送達試行・保存・Receipt は救助実施や最終到達の保証ではありません。
 
 v1は **広島県安芸郡府中町の救助要請** に対象を絞っています。
 
@@ -90,6 +90,8 @@ Android ◄──────────── 署名済み受領・対応Recei
 > [!CAUTION]
 > Relayは消防・警察・自治体の緊急連絡、公式警報、認証済み人命安全システムを置き換えません。実災害で使う前に、自治体・消防・避難所運営者との運用設計、物理端末での無線試験、本番鍵・TLS・配布署名の整備が必要です。
 
+このブランチの目的は、自治体・消防・避難所運営者との**限定区域・訓練・共同実証**へ持ち込むための安全な基盤です。実災害で確実に救助できる完成品、119の代替、正式リリース済み製品は主張しません。現在の境界は [自治体共同実証 readiness](docs/readiness/MUNICIPAL_PILOT_READINESS.md) を参照してください。
+
 ## 画面イメージ
 
 | Androidホーム | 救助ホーム | 公式情報 |
@@ -98,19 +100,15 @@ Android ◄──────────── 署名済み受領・対応Recei
 
 PCスタッフ画面、地図、公式情報、担当フローは [府中町v1パイロット仕様](docs/V1_FUCHU_PILOT.md) にまとめています。
 
-## Download
+## 配布・正式リリース
 
-利用者向け配布物はGitHub Releasesから取得します。
+`debug` APK、ローカル署名 APK、未署名 APK、未署名 Windows インストーラーは**正式な実証配布物ではありません**。このリポジトリは、組織管理の Android 署名鍵、Windows Authenticode 証明書、cosign/TUF 鍵、SBOM・脆弱性検査ツールが GitHub Secrets / runner に用意されるまで、正式 Release workflow を fail-closed にします。
 
-[![Download Android APK](https://img.shields.io/badge/Download-Android%20APK-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/NEGI46/Relay/releases/latest/download/Relay-Android-debug.apk)
-[![Download Windows PC Gateway](https://img.shields.io/badge/Download-Windows%20PC%20Gateway-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/NEGI46/Relay/releases/latest/download/Relay-PC-Gateway-setup.exe)
-
-- [全Releaseを見る](https://github.com/NEGI46/Relay/releases)
-- [WindowsインストーラーのSHA-256](https://github.com/NEGI46/Relay/releases/latest/download/Relay-PC-Gateway-setup.exe.sha256)
-- `artifacts/`は開発・検証用です。通常の配布場所はGitHub Releaseです。
-- Brokerサーバーは現時点でReleaseアセットに含まれません。運用者が`broker/`から構築・配置します。
-
-Releaseが未作成の場合は、Actionsの **Publish Relay release** を手動実行します。`vMAJOR.MINOR.PATCH`形式のタグを受け取り、Android APK、Windowsインストーラー、SHA-256をReleaseへ登録します。
+- `artifacts/` とローカル `assembleDebug` の成果物は開発・検証専用です。
+- 正式 release workflow は `assembleRelease`、Authenticode、SBOM、OSV/Grype、cosign/TUF 検証、SHA-256、ビルド commit SHA を必須にします。
+- 正式 artifact の受領者は、同梱の `RELEASE_ARTIFACT_VERIFICATION.md` と [formal release 検証手順](docs/runbooks/VERIFY_FORMAL_RELEASE.md) で、組織が別経路で管理する証明書・cosign 公開鍵・TUF trusted root と照合します。
+- Broker サーバーは release asset ではありません。実際のホスティング、TLS、運用契約が必要です。
+- 必要な外部入力は [BLOCKED_BY_EXTERNAL_DECISIONS.md](docs/readiness/BLOCKED_BY_EXTERNAL_DECISIONS.md) を参照してください。
 
 ## Androidの使い方
 
@@ -134,12 +132,12 @@ SOS作成と端末内保存にWi-Fiやモバイル通信は必要ありません
 
 ### 2. 同一LAN — PC Gatewayへ直接配送
 
-PC GatewayはUDP `42888`で複数のIPv4サブネットへビーコンを送信します。AndroidはWi-FiのMulticastLockを必要な間だけ取得して探索し、見つからない場合は保存済みLAN IPを手動フォールバックとして試せます。
+PC Gateway の `production` profile は loopback bind・匿名 ingress 無効・UDP discovery 無効です。LAN を使うのは、`RELAY_GATEWAY_LAN_MODE=closed-network` または `tls-reverse-proxy` を明示し、自治体側が閉域網または TLS 終端を確認した場合だけです。Android の release / pilotRelease は HTTPS Gateway のみを許可し、開発用 HTTP は debug / localDev に閉じ込めています。
 
 Androidには、メッセージ本文や暗号文を含まない安全な診断情報として、最後に見つけたGateway IP、探索結果、配送結果が保存・表示されます。
 
 > [!IMPORTANT]
-> UDPビーコンは接続先を見つけるヒントであり、Gatewayの本人性を証明するものではありません。LAN HTTPもTLSなしのため、PC Gatewayは信頼できるPrivate LANだけへ公開してください。
+> UDPビーコンは接続先を見つけるヒントであり、Gatewayの本人性を証明しません。未検証経路の情報だけで救助決定を自動化してはいけません。production でリモート管理を有効にするには、loopback Gateway の前段に TLS reverse proxy と Secure/HttpOnly/SameSite cookie を使う構成、および明示的な `RELAY_GATEWAY_REMOTE_MANAGEMENT=true` が必要です。
 
 ### 3. 任意のBroker経路
 
@@ -155,12 +153,13 @@ Brokerは**復号しません**。暗号文の一時保存、重複排除、衝�
 最新実装の主な保護:
 
 - 端末ごとに初回生成したUUID `deviceKeyId`とAndroid Keystore ECDSA P-256鍵を使用
-- 端末登録時に公開鍵をBrokerへ登録し、アップロード署名をBroker側で検証
-- Receipt取得には公開`deviceKeyId`ではなく、推測困難なcapability tokenを使用
+- 端末登録時にも秘密鍵の所持証明を検証し、登録済みIDのtokenを別鍵へ返さない
+- Receipt取得には公開`deviceKeyId`ではなく、Authorization Bearerで推測困難なcapability tokenを使用
 - AndroidはBroker URLをHTTPSに限定し、HTTPとredirectを拒否
 - 64 KiBの`Content-Length`を本文読込前に確認し、読込後も再検査
 - PC GatewayのPull / Receipt APIはBearer token認証に対応
 - Envelope取得は`stored_at + envelope_id`の複合cursorで欠落を防止
+- 同じ暗号文を運んだ各端末を記録し、署名Receiptを元端末と中継端末の双方へ返送
 - Receipt取得はBroker採番の単調増加`seq`を使い、Android再起動後もcursorを保持
 - PC GatewayのPull cursorをファイルへ保存
 - Receipt Outboxを救助状態と同じSQLite接続・トランザクション境界で管理
@@ -179,13 +178,13 @@ Windowsインストーラーを実行すると、固定拠点用PC Gatewayが入
 http://127.0.0.1:8080/
 ```
 
-初期設定では`%USERPROFILE%\.relay\admin.key`の管理キーとPC表示名を使用します。未確認の命の危険SOSは最上位へ表示され、警告画面・警告音で通知されます。
+初回は既定パスワードを作りません。ローカルの一回限り `bootstrap-admin` コマンドまたは bootstrap 環境値で**個人の ADMIN アカウント**を作成し、ブラウザは HttpOnly / SameSite session cookie で認証します。`X-Admin-Key` は development profile の互換用途だけで、lab / production では拒否されます。詳細は [production Gateway 配備 runbook](docs/runbooks/PRODUCTION_GATEWAY_DEPLOYMENT.md) を参照してください。
 
 ```text
 未確認 → 確認済み → 準備中 → 対応中 → 完了
 ```
 
-最初に「担当開始」を押したスタッフ端末が担当になります。同じGatewayはLAN内の複数スタッフPCから開けますが、独立した複数Gateway間の担当同期はv1対象外です。
+最初に「担当開始」を押したスタッフ端末が担当になります。同じ Gateway の複数スタッフ PC 利用は、明示的に TLS reverse proxy または承認済み閉域網を構成した限定区域に限ります。独立した複数 Gateway 間の担当同期は v1 対象外です。
 
 対応状態は避難所鍵で署名したReceiptとしてAndroidへ返ります。完了・取消になった依頼の全バージョンは30日後に削除されます。
 
@@ -202,11 +201,11 @@ Broker本体はHTTPで待ち受けます。本番ではnginxやCaddyなどの**T
 
 | 対象 | 設定 |
 |---|---|
-| Android | SharedPreferences `relay_broker_config/broker_endpoint`、または`app/src/main/res/values/broker.xml`。空なら無効、HTTPSのみ |
-| PC Gateway | `RELAY_BROKER_URL`、`RELAY_BROKER_API_KEY`、任意で`RELAY_BROKER_POLL_INTERVAL_MS` |
-| Broker | `RELAY_BROKER_PORT`、`RELAY_BROKER_DB_PATH`、`RELAY_BROKER_GATEWAY_API_KEY` |
+| Android | debug/localDev だけが SharedPreferences `relay_broker_config/broker_endpoint` を使える。pilotRelease/release は mutable preference を受け付けず、レビュー済み build-time HTTPS endpoint（将来は署名済み regional provisioning）が必要。空なら無効 |
+| PC Gateway | `RELAY_BROKER_URL`（HTTPS）、`RELAY_BROKER_CREDENTIAL`（Gateway+避難所スコープ）、任意で`RELAY_BROKER_POLL_INTERVAL_MS` |
+| Broker | `RELAY_BROKER_PORT`、`RELAY_BROKER_DB_PATH`、`RELAY_BROKER_PROFILE` |
 
-`RELAY_BROKER_API_KEY`と`RELAY_BROKER_GATEWAY_API_KEY`には同じ共有秘密を設定します。Broker側でキーを省略するとGateway APIが開くため、開発環境以外では設定必須です。
+Broker は `issue-gateway-credential` で Gateway ID・shelter ID・期限に結びつく 256-bit 資格情報を一度だけ発行します。SQLite にはハッシュだけを保存し、別 shelter への pull / receipt upload は拒否します。端末登録ではEcdsa P-256秘密鍵の所持証明を検証し、旧 `RELAY_BROKER_API_KEY` / `RELAY_BROKER_GATEWAY_API_KEY` 共有キーは development profile 限定です。
 
 ## 開発者向け
 
@@ -271,6 +270,11 @@ adb emu geo fix 132.504 34.392
 - [オフライン地図設計](docs/design/OFFLINE_MAP.md)
 - [デバイス試験チェックリスト](docs/DEVICE_TEST_CHECKLIST.md)
 - [署名付き配布手順](docs/release/SIGNED_DISTRIBUTION.md)
+- [自治体共同実証 readiness](docs/readiness/MUNICIPAL_PILOT_READINESS.md)
+- [production Gateway 配備 runbook](docs/runbooks/PRODUCTION_GATEWAY_DEPLOYMENT.md)
+- [現地受入試験](docs/runbooks/FIELD_ACCEPTANCE_TEST.md)
+- [正式 release 検証手順](docs/runbooks/VERIFY_FORMAL_RELEASE.md)
+- [脆弱性報告ポリシー](SECURITY.md)
 - [リポジトリ案内](docs/REPOSITORY_GUIDE.md)
 
 ## 現在の検証境界
@@ -287,7 +291,7 @@ adb emu geo fix 132.504 34.392
 
 Relay v1 is a local-first rescue-request relay for the Fuchu Town pilot in Hiroshima, Japan. Android users can create a two-second SOS or a normal GPS-backed rescue request. The request is encrypted before storage and can travel through Nearby Store–Carry–Forward, a local PC Gateway path, and an optional HTTPS Broker path in parallel. BLE Gateway delivery is enabled only when an approved Regional Root and current signed Directory have been provisioned.
 
-The Broker never decrypts rescue content. Devices register per-device ECDSA P-256 public keys, uploads are signature-verified, receipt polling uses an unguessable capability token, Gateway APIs support Bearer authentication, and persistent cursors/outboxes provide restart-safe at-least-once delivery. The Broker itself is intended to run behind a TLS-terminating reverse proxy.
+The Broker never decrypts rescue content. Devices prove possession of per-device ECDSA P-256 keys during registration, uploads are signature-verified, receipt polling uses an unguessable Bearer capability token, Gateway APIs fail closed without authentication unless an explicit development override is set, and persistent cursors/outboxes provide restart-safe at-least-once delivery. The Broker itself is intended to run behind a TLS-terminating reverse proxy.
 
 The staff PC Gateway decrypts only requests addressed to its shelter, manages claim and response states, and returns signed receipts to the requester. Relay remains a pilot, not an emergency-service replacement. Physical RF, mobile-network, operational, TLS, key-management, and production-signing validation are required before deployment.
 

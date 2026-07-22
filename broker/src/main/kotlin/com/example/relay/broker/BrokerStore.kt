@@ -5,6 +5,8 @@ import com.example.relay.rescue.SignedShelterReceipt
 import com.example.relay.rescue.authenticatedHeaderBytes
 import java.io.File
 import java.security.KeyFactory
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 import java.sql.Connection
@@ -22,7 +24,7 @@ internal val brokerJson = Json { ignoreUnknownKeys = false; encodeDefaults = tru
 /** Result of an upload attempt. */
 sealed interface BrokerPutResult {
     data class Stored(val response: BrokerUploadResponse) : BrokerPutResult
-    data object Duplicate : BrokerPutResult
+    data class Duplicate(val response: BrokerUploadResponse) : BrokerPutResult
     data class Collision(val existingEnvelopeId: String) : BrokerPutResult
 }
 
@@ -31,6 +33,26 @@ data class DeviceRegistrationResult(
     val deviceKeyId: String,
     val capabilityToken: String,
 )
+
+/** Returned exactly once by the local issuance command. The raw token is never persisted. */
+data class IssuedGatewayCredential(
+    val credentialId: String,
+    val gatewayId: String,
+    val shelterId: String,
+    val expiresAtEpochMillis: Long,
+    val token: String,
+)
+
+/** Authenticated scope used by pull and receipt endpoints. */
+data class BrokerGatewayPrincipal(
+    val credentialId: String,
+    val gatewayId: String,
+    val shelterId: String,
+    val expiresAtEpochMillis: Long,
+)
+
+class DeviceKeyConflictException(deviceKeyId: String) :
+    IllegalStateException("device_key_conflict:$deviceKeyId")
 
 /**
  * SQLite-backed Broker store. Never decrypts envelopes.
@@ -53,6 +75,7 @@ class BrokerStore(dbPath: String) : AutoCloseable {
                 """
                 CREATE TABLE IF NOT EXISTS broker_envelopes(
                   envelope_id TEXT PRIMARY KEY,
+                  broker_receipt_id TEXT NOT NULL,
                   request_id TEXT NOT NULL,
                   request_version INTEGER NOT NULL,
                   sender_device_id TEXT NOT NULL,
@@ -66,6 +89,22 @@ class BrokerStore(dbPath: String) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
+            val hasBrokerReceiptId = st.executeQuery("PRAGMA table_info(broker_envelopes)").use { rs ->
+                var found = false
+                while (rs.next()) {
+                    if (rs.getString("name") == "broker_receipt_id") found = true
+                }
+                found
+            }
+            if (!hasBrokerReceiptId) {
+                st.execute("ALTER TABLE broker_envelopes ADD COLUMN broker_receipt_id TEXT")
+            }
+            // Databases created before broker receipt IDs were persisted used envelope_id for
+            // duplicate acknowledgements. Preserve that stable value during migration.
+            st.execute(
+                "UPDATE broker_envelopes SET broker_receipt_id=envelope_id " +
+                    "WHERE broker_receipt_id IS NULL OR broker_receipt_id=''",
+            )
             st.execute(
                 """
                 CREATE TABLE IF NOT EXISTS broker_receipts(
@@ -77,6 +116,25 @@ class BrokerStore(dbPath: String) : AutoCloseable {
                   uploaded_at INTEGER NOT NULL,
                   FOREIGN KEY(envelope_id) REFERENCES broker_envelopes(envelope_id) ON DELETE CASCADE
                 )
+                """.trimIndent(),
+            )
+            st.execute(
+                """
+                CREATE TABLE IF NOT EXISTS broker_envelope_devices(
+                  envelope_id TEXT NOT NULL,
+                  device_key_id TEXT NOT NULL,
+                  linked_at INTEGER NOT NULL,
+                  PRIMARY KEY(envelope_id, device_key_id),
+                  FOREIGN KEY(envelope_id) REFERENCES broker_envelopes(envelope_id) ON DELETE CASCADE
+                )
+                """.trimIndent(),
+            )
+            // Backfill the original uploader for existing databases. Every later duplicate upload
+            // is also linked so all devices carrying the ciphertext can receive its shelter receipt.
+            st.execute(
+                """
+                INSERT OR IGNORE INTO broker_envelope_devices(envelope_id, device_key_id, linked_at)
+                SELECT envelope_id, device_key_id, stored_at FROM broker_envelopes
                 """.trimIndent(),
             )
             st.execute(
@@ -115,10 +173,93 @@ class BrokerStore(dbPath: String) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
+            st.execute(
+                """
+                CREATE TABLE IF NOT EXISTS broker_gateway_credentials(
+                  credential_id TEXT PRIMARY KEY,
+                  token_hash TEXT NOT NULL UNIQUE,
+                  gateway_id TEXT NOT NULL,
+                  shelter_id TEXT NOT NULL,
+                  issued_at INTEGER NOT NULL,
+                  expires_at INTEGER NOT NULL,
+                  revoked_at INTEGER
+                )
+                """.trimIndent(),
+            )
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelopes_shelter ON broker_envelopes(shelter_id, expires_at)")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelopes_cursor ON broker_envelopes(shelter_id, stored_at, envelope_id)")
+            st.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_broker_receipt_id ON broker_envelopes(broker_receipt_id)")
+            st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelope_devices_device ON broker_envelope_devices(device_key_id, envelope_id)")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_receipts_device ON broker_receipts(shelter_id, uploaded_at)")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_receipts_seq ON broker_receipts(seq)")
+            st.execute("CREATE INDEX IF NOT EXISTS idx_broker_gateway_credential_scope ON broker_gateway_credentials(gateway_id, shelter_id, expires_at)")
+        }
+    }
+
+    /**
+     * Issues a high-entropy credential scoped to exactly one Gateway and shelter.  SQLite stores
+     * only a SHA-256 digest; this is suitable for a generated 256-bit bearer token and avoids a
+     * reversible shared secret in backups or database inspection.
+     */
+    fun issueGatewayCredential(
+        gatewayId: String,
+        shelterId: String,
+        expiresAtEpochMillis: Long,
+        now: Long = System.currentTimeMillis(),
+    ): IssuedGatewayCredential = synchronized(lock) {
+        require(isScopeIdentifier(gatewayId)) { "invalid gateway id" }
+        require(isScopeIdentifier(shelterId)) { "invalid shelter id" }
+        require(expiresAtEpochMillis > now) { "credential expiry must be in the future" }
+        val credentialId = UUID.randomUUID().toString().replace("-", "")
+        val rawSecret = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also(SecureRandom()::nextBytes))
+        val token = "rgc_${credentialId}_$rawSecret"
+        connection.prepareStatement(
+            """INSERT INTO broker_gateway_credentials
+               (credential_id,token_hash,gateway_id,shelter_id,issued_at,expires_at,revoked_at)
+               VALUES(?,?,?,?,?,?,NULL)""",
+        ).use { ps ->
+            ps.setString(1, credentialId)
+            ps.setString(2, gatewayTokenHash(token))
+            ps.setString(3, gatewayId)
+            ps.setString(4, shelterId)
+            ps.setLong(5, now)
+            ps.setLong(6, expiresAtEpochMillis)
+            ps.executeUpdate()
+        }
+        IssuedGatewayCredential(credentialId, gatewayId, shelterId, expiresAtEpochMillis, token)
+    }
+
+    fun revokeGatewayCredential(credentialId: String, now: Long = System.currentTimeMillis()): Boolean = synchronized(lock) {
+        if (credentialId.length !in 16..80) return false
+        connection.prepareStatement(
+            "UPDATE broker_gateway_credentials SET revoked_at=? WHERE credential_id=? AND revoked_at IS NULL",
+        ).use { ps ->
+            ps.setLong(1, now)
+            ps.setString(2, credentialId)
+            ps.executeUpdate() == 1
+        }
+    }
+
+    /** Returns no scope at all for malformed, expired, revoked, or unknown credentials. */
+    fun authenticateGatewayCredential(token: String?, now: Long = System.currentTimeMillis()): BrokerGatewayPrincipal? = synchronized(lock) {
+        if (token.isNullOrBlank() || token.length !in 48..256) return null
+        val digest = gatewayTokenHash(token)
+        connection.prepareStatement(
+            """SELECT credential_id,token_hash,gateway_id,shelter_id,expires_at,revoked_at
+               FROM broker_gateway_credentials WHERE token_hash=?""",
+        ).use { ps ->
+            ps.setString(1, digest)
+            ps.executeQuery().use { rs ->
+                if (!rs.next() || rs.getObject("revoked_at") != null || rs.getLong("expires_at") <= now) return null
+                val storedHash = rs.getString("token_hash")
+                if (!MessageDigest.isEqual(storedHash.toByteArray(Charsets.UTF_8), digest.toByteArray(Charsets.UTF_8))) return null
+                BrokerGatewayPrincipal(
+                    credentialId = rs.getString("credential_id"),
+                    gatewayId = rs.getString("gateway_id"),
+                    shelterId = rs.getString("shelter_id"),
+                    expiresAtEpochMillis = rs.getLong("expires_at"),
+                )
+            }
         }
     }
 
@@ -131,52 +272,97 @@ class BrokerStore(dbPath: String) : AutoCloseable {
         deviceKeyId: String,
         now: Long,
     ): BrokerPutResult = synchronized(lock) {
-        // Check for existing entry with same requestId+requestVersion
+        val previousAutoCommit = connection.autoCommit
+        connection.autoCommit = false
+        try {
+            val result = putInTransaction(envelope, deviceKeyId, now)
+            connection.commit()
+            result
+        } catch (error: Exception) {
+            connection.rollback()
+            throw error
+        } finally {
+            connection.autoCommit = previousAutoCommit
+        }
+    }
+
+    private fun putInTransaction(
+        envelope: EncryptedRescueEnvelope,
+        deviceKeyId: String,
+        now: Long,
+    ): BrokerPutResult {
+        // Check for an existing entry with the same logical request key first.
         connection.prepareStatement(
-            "SELECT envelope_id, ciphertext_hash FROM broker_envelopes WHERE request_id=? AND request_version=?",
+            """SELECT envelope_id, ciphertext_hash, broker_receipt_id, stored_at
+               FROM broker_envelopes WHERE request_id=? AND request_version=?""",
         ).use { ps ->
             ps.setString(1, envelope.requestId)
             ps.setInt(2, envelope.requestVersion)
             ps.executeQuery().use { rs ->
                 if (rs.next()) {
-                    val existingHash = rs.getString(2)
                     val existingId = rs.getString(1)
-                    return if (existingHash == envelope.ciphertextSha256Hex) {
-                        // Exact duplicate — return existing broker receipt id
-                        BrokerPutResult.Duplicate
+                    val existingHash = rs.getString(2)
+                    return if (existingId == envelope.envelopeId && existingHash == envelope.ciphertextSha256Hex) {
+                        linkDevice(existingId, deviceKeyId, now)
+                        BrokerPutResult.Duplicate(
+                            BrokerUploadResponse(
+                                brokerReceiptId = rs.getString(3),
+                                envelopeId = existingId,
+                                storedAtEpochMillis = rs.getLong(4),
+                            ),
+                        )
                     } else {
-                        // Collision: same request key, different ciphertext
+                        // A different envelope ID is not interchangeable: it is authenticated as
+                        // part of the encrypted envelope header even if a hash is copied verbatim.
                         quarantine(envelope, existingId, existingHash, deviceKeyId, now)
                         BrokerPutResult.Collision(existingId)
                     }
                 }
             }
         }
-        val brokerReceiptId = UUID.randomUUID().toString()
+
+        // envelope_id is independently unique. INSERT OR IGNORE previously turned a collision
+        // here into a false Stored response even though no row was inserted.
         connection.prepareStatement(
-            """INSERT OR IGNORE INTO broker_envelopes
-               (envelope_id, request_id, request_version, sender_device_id, shelter_id, expires_at, ciphertext_hash, envelope_json, device_key_id, stored_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            "SELECT ciphertext_hash FROM broker_envelopes WHERE envelope_id=?",
         ).use { ps ->
             ps.setString(1, envelope.envelopeId)
-            ps.setString(2, envelope.requestId)
-            ps.setInt(3, envelope.requestVersion)
-            ps.setString(4, envelope.senderDeviceId)
-            ps.setString(5, envelope.destinationShelterId)
-            ps.setLong(6, envelope.expiresAtEpochMillis)
-            ps.setString(7, envelope.ciphertextSha256Hex)
-            ps.setString(8, brokerJson.encodeToString(envelope))
-            ps.setString(9, deviceKeyId)
-            ps.setLong(10, now)
+            ps.executeQuery().use { rs ->
+                if (rs.next()) {
+                    quarantine(envelope, envelope.envelopeId, rs.getString(1), deviceKeyId, now)
+                    return BrokerPutResult.Collision(envelope.envelopeId)
+                }
+            }
+        }
+
+        val brokerReceiptId = UUID.randomUUID().toString()
+        connection.prepareStatement(
+            """INSERT INTO broker_envelopes
+               (envelope_id, broker_receipt_id, request_id, request_version, sender_device_id,
+                shelter_id, expires_at, ciphertext_hash, envelope_json, device_key_id, stored_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        ).use { ps ->
+            ps.setString(1, envelope.envelopeId)
+            ps.setString(2, brokerReceiptId)
+            ps.setString(3, envelope.requestId)
+            ps.setInt(4, envelope.requestVersion)
+            ps.setString(5, envelope.senderDeviceId)
+            ps.setString(6, envelope.destinationShelterId)
+            ps.setLong(7, envelope.expiresAtEpochMillis)
+            ps.setString(8, envelope.ciphertextSha256Hex)
+            ps.setString(9, brokerJson.encodeToString(envelope))
+            ps.setString(10, deviceKeyId)
+            ps.setLong(11, now)
             ps.executeUpdate()
         }
+        linkDevice(envelope.envelopeId, deviceKeyId, now)
         connection.prepareStatement(
             "INSERT OR IGNORE INTO broker_ledger(envelope_id, status) VALUES(?, 'BROKER_STORED')",
         ).use { ps ->
             ps.setString(1, envelope.envelopeId)
             ps.executeUpdate()
         }
-        BrokerPutResult.Stored(
+        return BrokerPutResult.Stored(
             BrokerUploadResponse(
                 brokerReceiptId = brokerReceiptId,
                 envelopeId = envelope.envelopeId,
@@ -185,13 +371,15 @@ class BrokerStore(dbPath: String) : AutoCloseable {
         )
     }
 
-    /** Look up an existing envelope's broker receipt id for duplicate responses. */
-    fun existingBrokerReceiptId(envelopeId: String): String? = synchronized(lock) {
+    private fun linkDevice(envelopeId: String, deviceKeyId: String, now: Long) {
         connection.prepareStatement(
-            "SELECT envelope_id FROM broker_envelopes WHERE envelope_id=?",
+            """INSERT OR IGNORE INTO broker_envelope_devices(envelope_id, device_key_id, linked_at)
+               VALUES(?,?,?)""",
         ).use { ps ->
             ps.setString(1, envelopeId)
-            ps.executeQuery().use { rs -> if (rs.next()) envelopeId else null }
+            ps.setString(2, deviceKeyId)
+            ps.setLong(3, now)
+            ps.executeUpdate()
         }
     }
 
@@ -204,12 +392,15 @@ class BrokerStore(dbPath: String) : AutoCloseable {
     fun registerDevice(deviceKeyId: String, publicKeyBase64: String, now: Long): DeviceRegistrationResult = synchronized(lock) {
         // Check if already registered
         connection.prepareStatement(
-            "SELECT capability_token FROM broker_devices WHERE device_key_id=?",
+            "SELECT public_key_base64, capability_token FROM broker_devices WHERE device_key_id=?",
         ).use { ps ->
             ps.setString(1, deviceKeyId)
             ps.executeQuery().use { rs ->
                 if (rs.next()) {
-                    return DeviceRegistrationResult(deviceKeyId, rs.getString(1))
+                    if (rs.getString(1) != publicKeyBase64) {
+                        throw DeviceKeyConflictException(deviceKeyId)
+                    }
+                    return DeviceRegistrationResult(deviceKeyId, rs.getString(2))
                 }
             }
         }
@@ -343,14 +534,22 @@ class BrokerStore(dbPath: String) : AutoCloseable {
      * Throws if the envelope is unknown (save failure → caller must NOT return success).
      */
     fun saveReceipt(shelterId: String, receipt: SignedShelterReceipt, now: Long): Boolean = synchronized(lock) {
-        // Verify the receipt's envelope exists and belongs to this shelter
+        // Verify every immutable receipt binding before advancing a device's monotonic cursor.
         connection.prepareStatement(
-            "SELECT envelope_id FROM broker_envelopes WHERE envelope_id=? AND shelter_id=?",
+            """SELECT request_id, request_version, ciphertext_hash FROM broker_envelopes
+               WHERE envelope_id=? AND shelter_id=?""",
         ).use { ps ->
             ps.setString(1, receipt.receipt.envelopeId)
             ps.setString(2, shelterId)
             ps.executeQuery().use { rs ->
                 if (!rs.next()) throw IllegalStateException("unknown_envelope:${receipt.receipt.envelopeId}")
+                if (receipt.receipt.shelterId != shelterId ||
+                    receipt.receipt.requestId != rs.getString(1) ||
+                    receipt.receipt.requestVersion != rs.getInt(2) ||
+                    receipt.receipt.ciphertextSha256Hex != rs.getString(3)
+                ) {
+                    throw IllegalStateException("receipt_mismatch:${receipt.receipt.envelopeId}")
+                }
             }
         }
         connection.prepareStatement(
@@ -376,8 +575,8 @@ class BrokerStore(dbPath: String) : AutoCloseable {
         var maxSeq = sinceSeq
         val receipts = connection.prepareStatement(
             """SELECT r.receipt_json, r.seq FROM broker_receipts r
-               JOIN broker_envelopes e ON e.envelope_id = r.envelope_id
-               WHERE e.device_key_id=? AND r.seq>?
+               JOIN broker_envelope_devices d ON d.envelope_id = r.envelope_id
+               WHERE d.device_key_id=? AND r.seq>?
                ORDER BY r.seq ASC LIMIT 100""",
         ).use { ps ->
             ps.setString(1, deviceKeyId)
@@ -442,6 +641,14 @@ class BrokerStore(dbPath: String) : AutoCloseable {
             ps.executeUpdate()
         }
     }
+
+    private fun isScopeIdentifier(value: String): Boolean = value.length in 1..128 &&
+        value.all { it.isLetterOrDigit() || it in "-_.:" }
+
+    /** A digest is sufficient only because [issueGatewayCredential] creates 256-bit random tokens. */
+    private fun gatewayTokenHash(token: String): String = Base64.getEncoder().encodeToString(
+        MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8)),
+    )
 
     override fun close() = synchronized(lock) {
         if (!connection.isClosed) connection.close()
