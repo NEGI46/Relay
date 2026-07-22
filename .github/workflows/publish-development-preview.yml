@@ -1,0 +1,147 @@
+name: Publish Relay development preview
+
+# This one-off workflow exists only for a clearly labelled development preview.
+# It intentionally does not use organization signing secrets and must never be
+# described as a formal or production release.
+on:
+  push:
+    branches:
+      - release/development-preview-*
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PREVIEW_TAG: v0.3.1-dev.20260722
+  PREVIEW_VERSION: 0.3.1
+  TARGET_COMMIT: 9ae3c6d2340c48da6ef90dbb2fc23eaf7ec0819f
+
+jobs:
+  android-preview:
+    name: Build Android debug preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TARGET_COMMIT }}
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Build development-only Android APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_COMMIT"
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon
+      - name: Prepare clearly labelled Android preview asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk='app/build/outputs/apk/debug/app-debug.apk'
+          test -f "$apk"
+          mkdir -p release
+          cp "$apk" release/Relay-Android-development-preview-debug.apk
+          sha256sum release/Relay-Android-development-preview-debug.apk > release/Relay-Android-development-preview-debug.apk.sha256
+          printf '{"artifact":"Relay-Android-development-preview-debug.apk","sourceCommit":"%s","buildType":"debug","signing":"Android debug key","formalRelease":false}\n' "$TARGET_COMMIT" > release/android-preview-build-info.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: development-preview-android
+          path: release/
+          if-no-files-found: error
+
+  windows-preview:
+    name: Build unsigned Windows preview installer
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TARGET_COMMIT }}
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Build unsigned Windows development installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD).Trim() -ne $env:TARGET_COMMIT) { throw 'Checked-out source does not match the declared preview commit.' }
+          foreach ($tool in 'candle.exe','light.exe','jpackage.exe') {
+            if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+              throw "Development preview build requires the hosted-runner tool: $tool"
+            }
+          }
+          ./scripts/build-pc-gateway-exe.ps1 -AppVersion $env:PREVIEW_VERSION
+      - name: Prepare clearly labelled Windows preview asset
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = 'artifacts/relay-pc-gateway.exe'
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Windows installer was not produced.' }
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item $installer release/Relay-PC-Gateway-development-preview-unsigned.exe -Force
+          (Get-FileHash -LiteralPath release/Relay-PC-Gateway-development-preview-unsigned.exe -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content -LiteralPath release/Relay-PC-Gateway-development-preview-unsigned.exe.sha256 -Encoding ascii
+          "{`"artifact`":`"Relay-PC-Gateway-development-preview-unsigned.exe`",`"sourceCommit`":`"$env:TARGET_COMMIT`",`"signing`":`"unsigned`",`"formalRelease`":false}" |
+            Set-Content -LiteralPath release/windows-preview-build-info.json -Encoding utf8
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: development-preview-windows
+          path: release/
+          if-no-files-found: error
+
+  publish-preview:
+    name: Publish development prerelease
+    runs-on: ubuntu-latest
+    needs: [android-preview, windows-preview]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: development-preview-*
+          path: release
+          merge-multiple: true
+      - name: Build preview notice and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f release/Relay-Android-development-preview-debug.apk
+          test -f release/Relay-PC-Gateway-development-preview-unsigned.exe
+          cat > release/DEVELOPMENT_PREVIEW_NOTICE.md <<'EOF'
+          # Relay Development Preview — not a formal release
+
+          This prerelease is for development and test feedback only. It is **not** a production, municipal-pilot, or emergency-communication release.
+
+          - `Relay-Android-development-preview-debug.apk` is signed with the Android debug key.
+          - `Relay-PC-Gateway-development-preview-unsigned.exe` is unsigned and may trigger Windows SmartScreen warnings.
+          - No organization Android signing, Authenticode signing, cosign/TUF signing, or formal release attestation was performed.
+          - Install only on test devices and do not represent these files as an official emergency service or an official public deployment.
+
+          Verify the included SHA-256 checksums before testing. The source commit is recorded in the build-info files and `source-commit.json`.
+          EOF
+          printf '{"sourceCommit":"%s","formalRelease":false,"releaseChannel":"development-preview"}\n' "$TARGET_COMMIT" > release/source-commit.json
+          (
+            cd release
+            sha256sum Relay-Android-development-preview-debug.apk Relay-PC-Gateway-development-preview-unsigned.exe android-preview-build-info.json windows-preview-build-info.json source-commit.json DEVELOPMENT_PREVIEW_NOTICE.md > SHA256SUMS
+          )
+      - name: Create or update the GitHub prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -d '' assets < <(find release -maxdepth 1 -type f -print0)
+          test "${#assets[@]}" -gt 0
+          title="Relay Development Preview $PREVIEW_TAG"
+          if gh release view "$PREVIEW_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$PREVIEW_TAG" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$PREVIEW_TAG" --title "$title" --prerelease --notes-file release/DEVELOPMENT_PREVIEW_NOTICE.md --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$PREVIEW_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$TARGET_COMMIT" --title "$title" --prerelease --notes-file release/DEVELOPMENT_PREVIEW_NOTICE.md
+          fi
