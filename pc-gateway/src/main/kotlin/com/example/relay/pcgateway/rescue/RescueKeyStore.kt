@@ -197,8 +197,8 @@ class RescueKeyStore(
             ?: error("filesystem cannot verify owner-only rescue key permissions")
         val owner = Files.getOwner(target)
         val readableByOther = aclView.acl.any { entry ->
-            entry.type == AclEntryType.ALLOW && entry.principal != owner &&
-                entry.permissions.any {
+            entry.type() == AclEntryType.ALLOW && entry.principal() != owner &&
+                entry.permissions().any {
                     it in setOf(
                         AclEntryPermission.READ_DATA,
                         AclEntryPermission.WRITE_DATA,
