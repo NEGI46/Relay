@@ -10,29 +10,24 @@
 [![Pilot](https://img.shields.io/badge/pilot-Fuchu%20Town-5B4FB2?style=for-the-badge)](docs/readiness/MUNICIPAL_PILOT_READINESS.md)
 [![Android](https://img.shields.io/badge/Android-6.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white)](#androidでの流れ)
 [![Gateway](https://img.shields.io/badge/PC%20Gateway-production%20fails%20closed-0078D4?style=for-the-badge&logo=windows&logoColor=white)](#pc-gateway)
-[![Trust](https://img.shields.io/badge/BLE%20trust-external%20artifacts%20required-F59E0B?style=for-the-badge)](#現在の状態)
-[![Release](https://img.shields.io/badge/formal%20release-signing%20required-D946EF?style=for-the-badge)](#配布と正式release)
+[![Broker](https://img.shields.io/badge/Broker-HTTPS%20deployment-0EA5E9?style=for-the-badge)](#https-broker)
+[![Trust](https://img.shields.io/badge/BLE%20trust-external%20artifacts%20required-F59E0B?style=for-the-badge)](#ble-gateway信頼)
+[![Release](https://img.shields.io/badge/formal%20release-signing%20required-D946EF?style=for-the-badge)](#配布とrelease)
 
-**[🇯🇵 日本語](#日本語)**　｜　**[🇬🇧 English](#english)**　｜　**[共同実証 readiness](docs/readiness/MUNICIPAL_PILOT_READINESS.md)**
+**[🇯🇵 日本語](#日本語)**　｜　**[🇬🇧 English](#english)**　｜　**[開発プレビュー](#開発プレビューを試す)**　｜　**[共同実証 readiness](docs/readiness/MUNICIPAL_PILOT_READINESS.md)**
 
 </div>
 
 > [!CAUTION]
-> **Relayは119、消防・警察・自治体の緊急連絡、公式警報、認証済み人命安全システムを置き換えません。** 現在は限定区域の訓練・共同実証に向けたコード基盤です。送信、保存、Receiptは、救助実施や最終到達の保証ではありません。
+> **Relayは119、消防・警察・自治体の緊急連絡、公式警報、認証済み人命安全システムを置き換えません。** 現在は限定区域の訓練・共同実証に向けたコード基盤です。送信、保存、Broker保管、Receiptは、救助実施や最終到達の保証ではありません。
 
-## 30秒でわかるRelay / Relay in 30 seconds
+## 30秒でわかるRelay
 
-|  | 日本語 | English |
-|---|---|---|
-| **目的** | 回線が止まっても、暗号化した救助要請を利用可能な経路で避難所PCへ近づける | Move encrypted rescue requests toward a shelter PC even when connectivity is intermittent |
-| **利用者** | Androidで赤いSOSを2秒長押し、または人数・状態を入力 | Hold the red SOS for two seconds, or enter people and conditions |
-| **経路** | Nearby、承認済みGateway、任意のHTTPS Brokerを独立して再試行 | Retry independently through Nearby, approved Gateway paths, and an optional HTTPS Broker |
-| **受信側** | PC Gatewayで担当・確認・対応・完了を管理し、署名Receiptを返す | Staff manage claim, acknowledgement, response, and completion; signed receipts return to devices |
-| **現在地** | コードと自動試験は充実。正式な地域Root、実機試験、本番インフラは未完了 | Strong code and automated tests; official regional trust, device testing, and production infrastructure remain |
+Relayは、Androidで作った救助要請を**端末内で暗号化**し、Nearby、承認済みPC Gateway、任意のHTTPS Brokerを使って避難所へ送達しようとする、ローカル優先の中継システムです。
 
 ```mermaid
 flowchart LR
-    A[📱 Android<br/>SOS / rescue request] --> B[🔐 Encrypt before storage]
+    A[📱 Android<br/>SOS / rescue request] --> B[🔐 Encrypt before transfer]
     B --> N[📲 Nearby<br/>Store–Carry–Forward]
     B --> G[🌐 Approved HTTPS Gateway path]
     B --> C[☁️ Optional HTTPS Broker]
@@ -44,25 +39,34 @@ flowchart LR
     R --> N
 ```
 
+| 対象 | 現在できること |
+|---|---|
+| **Android利用者** | 赤いSOSを2秒長押し、通常依頼、更新、取消、署名済み対応状況の確認 |
+| **中継端末** | 本文を復号せず暗号化Envelopeを運び、自分のLAN/Broker経路で onward deliveryを継続 |
+| **PCスタッフ** | 個人アカウントでログインし、担当・確認・準備・対応・完了を管理 |
+| **Broker** | 暗号文を復号せず一時保存し、PC Gatewayとの配送とReceipt返送を補助 |
+| **開発者** | Windows開発ランチャー、development prerelease、Docker/Caddy Broker、Quick Tunnel PoCを利用可能 |
+
 ## 現在の状態
 
-**基準日: 2026-07-22 / HEAD: current default branch**
+**基準日: 2026-07-22 / HEAD: `408bee4`**
 
 | 区分 | 状態 | 内容 |
 |---|---:|---|
-| 救助UI・暗号化Envelope | ✅ 実装済み | 2秒SOS、通常依頼、更新、取消、署名Receipt表示 |
-| 送信者セッション復元 | ✅ 実装済み | Room + SQLCipherと別Keystore鍵で暗号化復元情報を保持。通常のプロセス終了後も更新・取消を再開 |
-| Nearby / LAN / Broker | ✅ 実装済み | 独立経路として再試行。Broker保存やtransport完了を避難所受領へ昇格しない |
-| PC Gatewayアクセス制御 | ✅ 実装済み | `ADMIN` / `OPERATOR` / `VIEWER`、個人アカウント、監査、secure session |
-| BLE Gateway信頼チェーン | ⚠️ コード実装・実運用BLOCKED | Root → signed Directory → signed Manifest → BLE fingerprint検証。正式な府中町Root/Directoryは未提供 |
-| 自動試験 | ✅ 一部PASS | shared 20/20、Android JVM 201/201、PC Gateway 57/57、Broker 28/28。release系APKのtest/private trust artifact混入検査PASS |
-| Android instrumentation | ◻ 未実行 | source compilationのみ。emulator・物理端末でRoom migrationや再起動をまだ実行していない |
-| 物理RF・現地運用 | ◻ NOT RUN | Nearby/BLE多段、Phone→PC、モバイル回線→Broker、OEM省電力、停電復旧など未検証 |
-| 正式Release | ⛔ 外部鍵・証明書待ち | Android組織署名、Authenticode、cosign/TUF、TLS、正式scanner evidenceが必要 |
-| 継続バックグラウンドGPS | ❌ 未実装 | 旧ViewModel周期追跡は削除。Android 14+制約と明示同意を含む別設計が必要 |
+| 救助UI・暗号化Envelope | ✅ 実装済み | 2秒SOS、通常依頼、version付き更新・取消、署名Receipt表示 |
+| 受信先未解決時のSOS | ✅ 実装済み | 送信元だけが復元できるAES-GCM保留状態へ保存し、信頼済み受信鍵の解決後にEnvelope化 |
+| 送信者セッション復元 | ✅ 実装済み | Room + SQLCipherと別Keystore鍵で復元情報を保持し、通常のprocess restart後も更新・取消を再開 |
+| Nearby courier配送 | ✅ 修正済み | 受信端末がEnvelopeを永続保存すると、自身のLAN/Broker配送ownerを直ちに起動 |
+| PC Gateway DB書込み | ✅ 修正済み | 複数SQLite接続のwriteを共有coordinatorとlock fileで直列化し、`SQLITE_BUSY`を抑制 |
+| PC Gatewayアクセス制御 | ✅ 実装済み | 個人アカウント、`ADMIN` / `OPERATOR` / `VIEWER`、監査、secure session |
+| HTTPS Broker配置 | ✅ 限定テスト用構成あり | Docker Compose + Caddy、またはCloudflare Quick Tunnel PoC |
+| BLE Gateway信頼チェーン | ⚠️ コード実装・実運用BLOCKED | Root → signed Directory → signed Manifest → BLE fingerprint。正式な府中町Root/Directoryは未提供 |
+| 継続バックグラウンドGPS | ❌ 未実装 | Android 14+ location FGSと明示同意を含む別設計が必要 |
+| 物理RF・現地運用 | ◻ NOT RUN | Nearby/BLE多段、Phone→PC、モバイル回線→Broker、OEM省電力、停電復旧など未完了 |
+| 正式Release | ⛔ 外部鍵・証明書待ち | Android組織署名、Authenticode、cosign/TUF、正式scanner evidenceが必要 |
 
 > [!IMPORTANT]
-> **IMPLEMENTED ≠ AUTOMATED_TESTED ≠ DEVICE_TESTED ≠ DEPLOYMENT-READY** です。詳しい証拠区分は [救助耐久性・BLE信頼監査](docs/audits/RESCUE_DURABILITY_INITIAL_AUDIT.md) を参照してください。
+> **IMPLEMENTED ≠ AUTOMATED_TESTED ≠ DEVICE_TESTED ≠ DEPLOYMENT-READY** です。最後に文書化された監査ではshared JVM 20/20、Android JVM 201/201、PC Gateway 57/57、Broker 28/28がPASSしましたが、その後も機能修正が入っています。最新HEADについて物理端末・現地試験済みとは主張しません。
 
 ## 画面イメージ
 
@@ -70,15 +74,51 @@ flowchart LR
 |---|---|---|
 | <img src="docs/assets/relay-android-home.png" alt="Relay Android home" width="260"> | <img src="docs/assets/relay-android-rescue.png" alt="Relay rescue home" width="260"> | <img src="docs/assets/relay-android-official.png" alt="Relay official information" width="260"> |
 
+## 開発プレビューを試す
+
+> [!WARNING]
+> 次の手順は**個人開発・動作確認専用**です。unsigned Windows installerとdebug/localDev APKを、共同実証・訓練・緊急運用へ使用しないでください。
+
+### Windows PC Gateway
+
+GitHub Actionsの **Publish Relay development preview** は、次をprereleaseとして分離公開できます。
+
+- `Relay-Android-development-preview-debug.apk`
+- `Relay-PC-Gateway-development-preview-unsigned.exe`
+- `Start-Relay-PC-Gateway-Development.cmd`
+- SHA-256とdevelopment-only notice
+
+インストール後、`Start-Relay-PC-Gateway-Development.cmd`をダブルクリックします。初回は管理者の**ユーザー名と12文字以上のパスワード**だけを入力します。
+
+- 開発DB・生成鍵: `%LOCALAPPDATA%\Relay\development`
+- Operator UI: `http://127.0.0.1:8080/`
+- profile: `development`
+- 開発時のみanonymous rescue ingressとUDP discoveryを有効化
+- 同じポートのGatewayが既に動作中なら二重起動せず既存画面を開く
+
+ソースから起動する場合:
+
+```powershell
+.\scripts\start-pc-gateway-development.ps1
+```
+
+### Android localDev
+
+```powershell
+.\gradlew.bat :app:assembleLocalDev
+```
+
+生成先:
+
+```text
+app/build/outputs/apk/localDev/app-localDev.apk
+```
+
+`debug` / `localDev`だけは、同一Private LANで見つけた`development` Gatewayの公開manifestをdevelopment専用として登録できます。これは正式なRegional Rootや署名済みDirectoryの代わりではなく、`release` / `pilotRelease`では無効です。
+
 ---
 
 # 日本語
-
-## Relayとは
-
-Relayは、災害や大規模通信障害を想定した**ローカル優先の救助情報中継システム**です。受信先鍵がある救助要請は避難所公開鍵で暗号化して保存・中継し、中継端末やBrokerは本文、正確な位置、人数を復号しません。受信先鍵が未解決のSOSは、まず送信元端末だけが復元できる暗号化保留状態として保存します。
-
-現在の対象は、広島県安芸郡府中町を想定した限定区域パイロットです。ただし、このリポジトリに正式な府中町Regional RootやRoot署名済みDirectoryは含まれていません。正式な受信先公開鍵が承認済みEnrollment経路で提供されるまで、信頼済みBLE配送や本番運用は成立しません。
 
 ## Androidでの流れ
 
@@ -86,50 +126,51 @@ Relayは、災害や大規模通信障害を想定した**ローカル優先の�
 2. 命の危険がある場合は、赤いSOSを2秒長押しする。
 3. 通常依頼では人数と「命の危険・けが/体調不良・移動困難・支援が必要」を入力する。
 4. GPS位置、取得時刻、精度を含む本文を暗号化し、SQLCipher DBへ保存する。
-5. Nearby、承認済みGateway経路、設定済みBrokerを独立して再試行する。
-6. 依頼後は暗号化復元情報から更新・取消を継続できる。
-7. 避難所の署名済みReceiptだけを確認・対応中・完了として表示する。
-8. 終了結果は利用者が「確認しました」を押すまで保持し、その後に暗号化セッション復元行を削除する。
+5. Nearby、承認済みGateway、設定済みBrokerを独立して再試行する。
+6. 暗号化復元情報から依頼の更新・取消を継続する。
+7. 避難所が署名したReceiptだけを「確認・対応中・完了」として表示する。
+8. 終了結果は利用者が確認するまで保持し、その後に暗号化session recovery rowを削除する。
 
-SOS作成と端末内保存にWi-Fiやモバイル通信は必要ありません。受信先公開鍵がまだ無い場合も、SOSは送信元端末のAES-GCM回復領域へ安全に保留し、Nearby通信を開始します。ただし、受信先を復号できない端末へ本文を渡すことはできないため、**信頼済みの受信先鍵が解決されるまで暗号化Envelopeの中継は開始しません**。PC GatewayやBrokerへ接続できない場合も、作成済みの暗号化依頼は利用可能なNearby/LAN/Broker経路で再試行されます。BLE Gateway配送は承認済みの信頼情報がある場合だけ行われます。
+### オフラインで受信先鍵がまだ無い場合
 
-debug/localDev のみ、同一Private LANで発見した `development` profile のPC Gatewayが生成した公開manifestを自動登録できます。この便宜経路は正式な信頼根・署名済みDirectoryの代わりではなく、release/pilotReleaseでは無効です。
+SOS作成と端末内保存にWi-Fiやモバイル通信は不要です。受信先公開鍵がまだ解決できない場合は、本文を送信元だけが復元できるAES-GCM recovery payloadへ保存し、状態を`PENDING_DESTINATION`として保持します。
 
-## 配送経路
+- plaintextのSOS本文を中継端末へ渡しません。
+- 信頼済み受信先鍵が後から解決されると、同じrequest versionのまま転送可能な暗号化Envelopeへmaterializeします。
+- 未materializeの保留SOSは、利用者が安全にローカル取消できます。
+- Gateway HTTP成功やBrokerの`BROKER_STORED`を避難所受領として表示しません。
 
-<details open>
-<summary><strong>📲 Nearby Store–Carry–Forward</strong></summary>
+## Nearby Store–Carry–Forward
 
-- 端末同士が遭遇したとき、不足している暗号化Envelopeだけを交換します。
-- 中継端末は避難所秘密鍵を持たず、救助内容を復号できません。
-- TTL、hop、サイズ、hash、version、重複・衝突を検査します。
-- transport転送完了は相手の永続保存や避難所到達を証明しません。
-- Broker経由の署名Receiptは、元端末だけでなく同じ暗号文を運んだ中継端末にも返送できます。
+- 端末同士が接続すると、routing metadataだけのinventoryを交換します。
+- 不足している有効な暗号化Envelopeと、より新しい署名Receiptだけを要求します。
+- TTL、hop、size、hash、version、deduplication、collisionを検査します。
+- 同一versionで異なるhashはupdateとして扱わず、collision/tamper候補として再要求しません。
+- ACKは同一`envelopeId`・hash・exported hopが一致した場合だけlocal hopを進めます。
+- 中継端末が新しいEnvelopeを永続保存すると、接続済みの別peerへ再広告し、LAN/Broker配送serviceも起動します。
+- Receiptは検証済み避難所署名だけを適用し、接続済みpeerへ再広告します。
 
-</details>
+## BLE Gateway信頼
 
-<details>
-<summary><strong>📡 BLE Gateway配送と地域信頼</strong></summary>
-
-BLE Gateway配送は次の全検証が成功した場合だけ有効です。
+BLE Gateway配送は次の検証がすべて成功した場合だけ有効です。
 
 ```text
 承認済みRegional Root
         ↓ signature
 Root署名済みRegional Shelter Directory
-        ↓ manifest / key binding
+        ↓ manifest / recipient key / receipt key binding
 署名済みShelter Manifest
-        ↓ advertised + GATT identity match
-BLE Gatewayへ暗号文を提出
+        ↓ advertised identity = GATT identity
+BLE Gatewayへ暗号化Envelopeを提出
 ```
 
 - Androidはbuild variantごとの**公開Root bundleだけ**を読み込みます。
-- DirectoryはRoot署名、region、generation、有効期限、Shelter Manifest、recipient key、receipt keyを検証してSQLCipherへ保存します。
-- 同一generationで異なる内容、古いgeneration、期限切れ、fingerprint不一致は拒否します。
-- 起動時に保存済みDirectoryを再検証し、完了するまでresolverは空です。
-- `release` / `pilotRelease` はunsigned manifestと自動Enrollmentを拒否します。`debug` / `localDev`だけは、明示的なdevelopment profileの同一LAN Gatewayが提示する公開manifestをdevelopment専用として登録できます。
-- 正式Root/Directoryがない現在はBLE配送がfail-closedになります。Nearby、承認済みLAN、Brokerはそれだけを理由に停止しません。
-- Regional Root秘密鍵はリポジトリ、APK、実行中Gatewayへ渡してはいけません。
+- DirectoryはRoot署名、region、generation、有効期限、各Manifestと公開鍵bindingを検証します。
+- 古いgeneration、same-generation equivocation、期限切れ、fingerprint不一致を拒否します。
+- 保存済みDirectoryは起動時に再検証し、完了するまでBLE resolverを空にします。
+- `release` / `pilotRelease`はunsigned manifestと自動Enrollmentを拒否します。
+- 正式Root/Directoryがない現在はBLEがfail-closedになります。
+- Regional Root秘密鍵をrepository、APK、running Gatewayへ渡してはいけません。
 
 オフライン運用者CLI:
 
@@ -137,163 +178,230 @@ BLE Gatewayへ暗号文を提出
 .\gradlew.bat :pc-gateway:regionalTrustProvisioning --args="generate-regional-root ..."
 ```
 
-対応コマンド: `generate-regional-root`、`export-regional-root-bundle`、`sign-regional-directory`、`verify-regional-directory`、`print-public-fingerprints`。
-
-CLIはprivate Root materialのGit worktree内出力、既存ファイル上書き、秘密鍵の標準出力を拒否します。CLIで生成したRootが自治体の正式Rootになるわけではありません。
-
-</details>
-
-<details>
-<summary><strong>🌐 承認済みGateway / LAN経路</strong></summary>
-
-Androidの`release` / `pilotRelease`はcleartext Gateway通信を拒否します。HTTPは`debug` / `localDev`だけです。
-
-PC Gatewayの既定`production` profile:
-
-- `127.0.0.1` bind
-- anonymous ingress無効
-- UDP discovery無効
-- remote management無効
-- legacy `X-Admin-Key`拒否
-
-LAN利用には明示的な構成が必要です。
-
-| モード | 用途 |
-|---|---|
-| `disabled` | loopbackのローカル操作だけ |
-| `closed-network` | 管理者が承認した閉域網。Android release通信には別途承認済みHTTPS終端が必要 |
-| `tls-reverse-proxy` | Gatewayはloopbackのまま、外部TLS proxyだけをremote browser経路にする |
-
-UDP discoveryは`development`互換経路であり、認証ではありません。未検証経路だけで救助判断を自動化しないでください。
-
-</details>
-
-<details>
-<summary><strong>☁️ 任意のHTTPS Broker</strong></summary>
+対応コマンド:
 
 ```text
-Android ── HTTPS ──► TLS proxy ──► Broker (loopback HTTP + SQLite)
-Android ◄─ Receipt ─ TLS proxy ◄── PC Gateway Receipt Outbox
-                                  ▲
-                     scoped Gateway credential
+generate-regional-root
+export-regional-root-bundle
+sign-regional-directory
+verify-regional-directory
+print-public-fingerprints
 ```
 
-Brokerは復号せず、暗号文の保存、重複排除、衝突隔離、TTL purge、避難所別queueを担当します。`hopCount`は増やしません。
-
-主な境界:
-
-- Android登録時に端末固有P-256鍵の所持を証明
-- upload署名を登録済み公開鍵で検証
-- Receipt取得は推測困難なBearer capability token
-- Gateway資格情報は256-bitで、1つの`gatewayId`と`shelterId`へ固定
-- DBには資格情報のSHA-256 hashだけを保存
-- 期限切れ・失効・別Gateway・別避難所を拒否
-- pullは複合cursor、Receiptは単調増加seq cursor
-- Gateway Receipt Outboxは救助状態と同じSQLite transaction境界
-- Brokerは`production` / `lab`でloopback bind必須。外部TLS proxy、DNS、証明書、WAFは運用者の責任
-- 単一BrokerはHAではありません
-
-```text
-broker issue-gateway-credential --gateway-id <gateway> --shelter-id <shelter> --expires-at <epoch-ms>
-broker revoke-gateway-credential --credential-id <id>
-```
-
-raw credentialは発行時に一度だけ表示されます。repository、shell history、ticket、audit logへ保存しないでください。
-
-</details>
-
-## 救助セッションの耐久性
-
-`active_rescue_sessions`（Room schema v8）は、request/version/status/timestampと暗号化されたrecovery payloadだけを保存します。
-
-- 本文、人数、状態、自由記述、sender ID、位置は平文列へ置きません。
-- SQLCipher DBとは別のAndroid Keystore alias `relay_rescue_session_recovery_v1`を使用します。
-- AES-GCM、provider生成nonce、authenticated decryptionを使用します。
-- sessionと新しいEnvelopeを1つのRoom transactionでcommitします。
-- version更新はdurable CASで競合を検出します。
-- 復号失敗時は行を残して明示的な復元失敗にし、新規依頼へすり替えません。
-- BLE、Nearby、Gateway、Brokerの署名Receipt適用は、Envelope状態とsender session状態を同一transactionで更新します。
-- 通常のprocess deathや利用者による再起動から復元しますが、OSのforce-stopやOEM挙動を保証するものではありません。
-
-### 位置情報について
-
-継続バックグラウンドGPS追跡、location foreground service、background location permissionは現在未実装です。以前のViewModel周期追跡は削除され、復元後のUIは位置更新が停止中であることを表示します。Android 14+制約、利用者の明示同意、開始・停止条件を含む別設計が必要です。
+このCLIは私有Root materialのGit worktree内出力、既存file上書き、秘密鍵の標準出力を拒否します。生成したRootが自治体の正式Rootになるわけではありません。
 
 ## PC Gateway
 
-### Staff認証・権限
+### 安全なprofile
 
-- 初回ADMINは一回限りの`bootstrap-admin`で作成します。既定passwordはありません。
-- 個人アカウントと`ADMIN` / `OPERATOR` / `VIEWER`を使用します。
-- passwordはPBKDF2-HMAC-SHA-256、random salt、210,000 iterationsです。
-- session tokenはrandom 256-bitで、DBにはhashだけを保存します。
-- browser cookieは`HttpOnly`、`SameSite=Strict`、TLS proxy時は`Secure`です。
-- 無効化したアカウントのsessionは失効します。最後の有効ADMINは無効化・降格できません。
+| Profile | 既定bind | Anonymous ingress | UDP discovery | Remote management | Legacy `X-Admin-Key` |
+|---|---|---:|---:|---:|---:|
+| `production`（既定） | `127.0.0.1` | off | off | off | rejected |
+| `lab` | `127.0.0.1` | off | off | off | rejected |
+| `development` | `0.0.0.0` | on | on | compatibility | compatibility only |
 
-スタッフ状態遷移:
+LANやremote staff consoleを使う場合は、責任者が次のどちらかを明示します。
+
+- `closed-network`: 承認済み閉域網とPrivate-only firewall
+- `tls-reverse-proxy`: Gatewayはloopbackのまま、外部TLS proxyがHTTPS、certificate、ACLを担当
+
+Androidの`release` / `pilotRelease`はcleartext Gateway URLを拒否します。HTTPは`debug` / `localDev`だけです。
+
+### Staff認証・監査
+
+- 初回ADMINは一回限りの`bootstrap-admin`で作成し、既定passwordはありません。
+- `ADMIN` / `OPERATOR` / `VIEWER`の個人アカウントを使用します。
+- password: PBKDF2-HMAC-SHA-256、random salt、210,000 iterations
+- session token: random 256-bit、DBにはSHA-256 hashだけを保存
+- browser cookie: `HttpOnly`、`SameSite=Strict`、TLS proxy時は`Secure`
+- 無効化したaccountのsessionは失効し、最後の有効ADMINは無効化・降格できません。
+- auditにはoperator、action、result、最小限のtarget/source metadataだけを保存します。
+- rescue本文、GPS、ciphertext、password、token、credential、private key、exception textはauditへ保存しません。
+
+状態遷移:
 
 ```text
 未確認 → 確認済み → 準備中 → 対応中 → 完了
 ```
 
-最初に「担当開始」を成功させたスタッフが担当になります。独立した複数Gateway間の担当同期はv1対象外です。
+### SQLite書込み競合対策
 
-### 監査ログ
+`GatewayStore`、`GatewayAccessStore`、救助persistenceは同じSQLite fileへ別JDBC connectionを持ちます。WALはreaderとwriterの並行性を改善しますが、writerは同時に1つだけです。
 
-時刻、認証済みoperator、target ID、action、result、最小限のpeer情報を記録します。救助本文、GPS、暗号文、password、session token、Broker credential、private key、exception textは記録しません。監査検索・CSV exportはADMIN限定で、CSV formula injectionも無効化します。
+最新版では、DB pathごとの`GatewaySqliteWriteCoordinator`が次を行います。
 
-### 秘密鍵境界
+- fair `ReentrantLock`でprocess内writeを直列化
+- sibling `.relay-writer.lock` fileで同じ開発DBを誤って開いた複数Gateway processも調整
+- nested transactionを安全に扱うreentrancy guard
+- sessionの`last_seen_at`は認証requestごとではなく、既定60秒間隔で条件付き更新
 
-Gatewayの救助秘密鍵は現在もローカルfileです。DPAPI、HSM、KMS保護済みとは主張しません。owner-only POSIX permissionまたはWindows ACLを検査し、`production` / `lab`では未provisioned・安全でないfileをfail-closedにします。rotation、revocation、escrow、hardware-backed storageは外部方針が必要です。
+これにより、地図APIなどの認証済みGETと救助・監査writeが競合して発生していた`SQLITE_BUSY: database is locked`を抑えます。
 
-配備手順: [Production Gateway deployment](docs/runbooks/PRODUCTION_GATEWAY_DEPLOYMENT.md)
+### 救助秘密鍵
+
+Gatewayの救助秘密鍵は現在もowner-only local fileです。DPAPI、HSM、KMS保護済みとは主張しません。`production` / `lab`では未provisioned、期限切れ、安全でないpermission/ACLをfail-closedにします。rotation、revocation、escrow、hardware-backed storageは外部方針が必要です。
+
+- [PC Gatewayセットアップ](docs/PC_GATEWAY_SETUP.md)
+- [Production Gateway deployment](docs/runbooks/PRODUCTION_GATEWAY_DEPLOYMENT.md)
+- [PC Gateway security](docs/PC_GATEWAY_SECURITY.md)
+
+## HTTPS Broker
+
+Brokerは救助本文を復号しません。暗号化Envelopeの一時保存、deduplication、collision isolation、TTL purge、shelter queue、signed Receipt返送だけを担当します。
+
+### Security boundary
+
+- Android登録時に端末固有ECDSA P-256秘密鍵の所持を証明
+- upload署名を登録済み公開鍵で検証
+- device Receipt取得は推測困難なBearer capability token
+- Gateway credentialは256-bitで、1つの`gatewayId`と`shelterId`へscope
+- DBにはcredentialのSHA-256 hashだけを保存
+- expired、revoked、wrong-Gateway、wrong-shelterを拒否
+- Broker URLはAndroid・GatewayともHTTPS限定
+- `production` / `lab` Brokerはloopback bind必須
+- Caddy/nginx、DNS、certificate、firewall/WAF、backup、monitoringは外部運用責任
+- 単一BrokerはHAではありません
+
+Android APKへBroker URLをbuild-timeで埋め込みます。URLはHTTPS、host必須、embedded credential禁止です。空ならBroker配送を無効化します。
+
+```powershell
+.\gradlew.bat :app:assembleLocalDev -Prelay.broker.endpoint=https://relay.example.org
+```
+
+### Docker + Caddyによる限定テスト配置
+
+`deployment/broker/`には、Linux host、Docker Compose、Caddy、永続SQLite volumeを使う構成があります。
+
+前提:
+
+- 自分で管理するdomainとA/AAAA record
+- 公開TCP 80/443
+- Broker内部portをinternetへ直接公開しないfirewall
+- named owner、backup policy、終了条件
+
+```bash
+cd deployment/broker
+cp .env.example .env
+# RELAY_PUBLIC_DOMAINを設定
+docker compose up -d --build
+docker compose logs -f caddy broker
+```
+
+Health:
+
+```text
+https://<domain>/v1/health
+```
+
+詳細: [deployment/broker/README.md](deployment/broker/README.md)
+
+### Cloudflare Quick Tunnel PoC
+
+`compose.quick-tunnel.yml`は、固定domainなしでモバイル回線→Broker→Gatewayを短時間確認するPoCです。Cloudflare Quick TunnelにはSLAがなく、production用途ではありません。
+
+```powershell
+.\gradlew.bat :broker:installDist
+docker compose -f compose.quick-tunnel.yml up -d --build
+docker compose -f compose.quick-tunnel.yml logs -f cloudflared
+```
+
+表示されたrandom `https://*.trycloudflare.com` URLを使い、Gatewayを接続します。
+
+```powershell
+.\scripts\start-poc-broker-gateway.ps1 -EnableLanEnrollment
+.\scripts\initialize-poc-gateway-admin.ps1
+.\gradlew.bat :app:assembleDebug -Prelay.broker.endpoint=https://<random>.trycloudflare.com
+```
+
+テスト終了後はprototype dataを削除します。
+
+```powershell
+docker compose -f compose.quick-tunnel.yml down -v
+```
+
+詳細: [Quick Tunnel Broker PoC](docs/runbooks/QUICK_TUNNEL_BROKER_POC.md)
+
+## 救助セッションの耐久性
+
+`active_rescue_sessions`（Room schema v8）は、request/version/status/timestampと暗号化recovery payloadだけを保持します。
+
+- rescue本文、人数、状態、自由記述、sender ID、位置をplaintext session columnへ保存しません。
+- SQLCipher DBとは別のAndroid Keystore alias `relay_rescue_session_recovery_v1`を使用します。
+- AES-GCM、provider-generated nonce、authenticated decryptionを使用します。
+- sessionとEnvelopeを同じRoom transactionでcommitします。
+- durable version CASで競合を検出します。
+- 復号失敗時はrowを残し、新規requestへ黙って置き換えません。
+- verified Receipt適用はEnvelope状態とsender session状態を同じtransactionで更新します。
+- active/cancellation-in-flight Envelopeはcourier capacity pruningから保護されます。
+
+通常のprocess deathや利用者による再起動から復元しますが、OS force-stop、OEM background制限、device rebootを保証するものではありません。
+
+### 位置情報について
+
+継続バックグラウンドGPS追跡、location foreground service、background location permissionは未実装です。以前のViewModel周期loopは削除されました。Android 14+制約、利用者の明示同意、foreground start、停止条件を含む別設計が必要です。
 
 ## 公式情報と地図
 
 - Androidは府中町、広島県、気象庁の公式情報への導線だけを表示します。
 - PC Gatewayは府中町周辺の国土地理院標準地図をズーム13–15でcacheできます。
-- 気象庁の広島県警報JSONから府中町コード`3430200`を抽出し、取得失敗時は最後のcacheを表示します。
+- 気象庁の広島県警報JSONから府中町コード`3430200`を抽出し、失敗時は最後のcacheを表示します。
 - 地図利用時は [国土地理院コンテンツ利用規約](https://maps.gsi.go.jp/help/termsofuse.html) に従ってください。
 
-## 配布と正式Release
+## 配布とRelease
 
-`debug` APK、ローカル署名APK、未署名APK、未署名Windows installerは正式な実証配布物ではありません。
+### Development preview
 
-`Publish Relay formal release` workflowは、次が揃わない限り公開前に失敗します。
+`Publish Relay development preview`は、debug/localDev APKとunsigned Windows installerを**GitHub prerelease**として公開します。正式版名のartifactが混入した場合は公開を拒否します。
 
-- 組織管理Android signing materialと`apksigner`検証
-- Windows Authenticode証明書、timestamp、`signtool`検証
+用途:
+
+- 個人開発
+- 同一LANでの開発Gateway接続
+- UI・配送PoC
+
+禁止:
+
+- 自治体共同実証
+- 訓練での正式配布
+- 緊急運用
+- 署名済み正式版としての案内
+
+### Formal release
+
+`Publish Relay formal release`は、次が揃わない限り公開前にfail-closedします。
+
+- 組織管理Android signing materialと`apksigner`
+- Windows Authenticode certificate、timestamp、`signtool`
 - immutable source commit
-- pinned Syft / OSV-Scanner / GrypeとSBOM・脆弱性証拠
-- High/Critical blocking policy
-- cosign署名・bundle検証
+- pinned Syft / OSV-Scanner / Grype
+- SBOMとHigh/Critical blocking policy
+- cosign signature/bundle verification
 - TUF trusted root / targets metadata
 - SHA-256とsource-commit manifest
 
-通常CIは`report-only`で、不足した外部serviceや署名を`BLOCKED`として残します。正式Releaseは`block-high-critical`でfail-closedです。
+通常CIのsecurity evidenceは`report-only`です。正式Releaseは`block-high-critical`です。
 
 - [GitHub Releases](https://github.com/NEGI46/Relay/releases)
-- [正式Release検証手順](docs/runbooks/VERIFY_FORMAL_RELEASE.md)
-- [外部判断・provisioning blocker](docs/readiness/BLOCKED_BY_EXTERNAL_DECISIONS.md)
+- [Formal release verification](docs/runbooks/VERIFY_FORMAL_RELEASE.md)
+- [External blockers](docs/readiness/BLOCKED_BY_EXTERNAL_DECISIONS.md)
 
-## 開発者向け
+## Build / test
 
-### 必要環境
+必要環境:
 
 - JDK 17
 - Android SDK / API 36
 - Git
 - Windows installer作成時はWiX 3とsigning toolchain
+- Broker container試験時はDocker Compose
 
 Android: min SDK 23、target/compile SDK 36、version `1.0.0`。
-
-### Build / test
 
 Windows PowerShell:
 
 ```powershell
 .\gradlew.bat :shared:jvmTest :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :pc-gateway:test :broker:test
-.\gradlew.bat :app:assembleDebug :pc-gateway:build :broker:build
+.\gradlew.bat :app:assembleDebug :app:assembleLocalDev :pc-gateway:build :broker:build
 .\gradlew.bat :app:verifyNoTestTrustArtifactsInReleaseApks
 ```
 
@@ -301,40 +409,28 @@ macOS / Linux:
 
 ```bash
 ./gradlew :shared:jvmTest :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :pc-gateway:test :broker:test
-./gradlew :app:assembleDebug :pc-gateway:build :broker:build
+./gradlew :app:assembleDebug :app:assembleLocalDev :pc-gateway:build :broker:build
 ./gradlew :app:verifyNoTestTrustArtifactsInReleaseApks
 ```
 
-`compileDebugAndroidTestKotlin`はinstrumentation sourceをcompileするだけで、emulator・実機上のtest実行ではありません。
+`compileDebugAndroidTestKotlin`はinstrumentation source compilationであり、emulator・物理端末上の実行ではありません。
 
-### CI
-
-Relay CIは次を実行します。
-
-- Android debug APK、PC Gateway、Broker build/test
-- shared / Android JVM test、Compose desktop smoke
-- implementation・accessibility・municipal security contracts
-- deterministic decoder、virtual BLE、Mobly host contracts
-- Gateway recovery、Meshtastic、BPv7、TUF metadata tests
-- pinned Syft / OSV / Grype evidence
-- 任意のMobSFとdistribution verification
-
-GitHub Actionsはcommit SHA pinを使用しています。decoder regressionは実Jazzer fuzzingではなく、JVM Jazzer targetは別途必要です。
-
-## リポジトリ構成
+## Repository map
 
 | 場所 | 役割 |
 |---|---|
-| `app/` | Android UI、暗号化DB、session復元、Nearby/Gateway/Broker/BLE |
-| `shared/` | 救助model、暗号、署名Receipt、地域信頼contract |
-| `pc-gateway/` | 救助復号、staff管理、監査、地図、公式情報、Broker Pull/Outbox、provisioning CLI |
-| `broker/` | scoped encrypted-envelope relay、端末登録、資格情報、Receipt中継 |
+| `app/` | Android UI、SQLCipher、session復元、Nearby/Gateway/Broker/BLE、PoC diagnostics |
+| `shared/` | rescue model、cryptography、signed Receipt、regional trust contract |
+| `pc-gateway/` | rescue復号、staff/auth/audit、SQLite coordination、地図、公式情報、Broker Pull/Outbox |
+| `broker/` | scoped encrypted-envelope relay、device registration、Gateway credential、Receipt relay |
+| `deployment/broker/` | Docker Compose + CaddyによるHTTPS Broker限定テスト配置 |
+| `compose.quick-tunnel.yml` | Cloudflare Quick Tunnel PoC |
+| `scripts/` | Gateway launcher、PoC起動、packaging、scanner、verification |
 | `relay-protocol/` | Gateway wire contract |
 | `pc-ble-bridge/` | Windows BLE GATT sidecar |
-| `composeApp/` | Compose Multiplatform / desktop / iOS framework |
-| `apple/` | Swift PackageとApple向けGATT・Receipt contract |
+| `composeApp/`, `apple/` | desktop/iOS frameworkとApple contract |
 | `gateway-meshtastic-adapter/` | 分離されたMeshtastic adapter |
-| `gateway-bp7-export/` | BPv7 export-only境界 |
+| `gateway-bp7-export/` | BPv7 export-only boundary |
 | `test-lab/`, `tools/ble-sim/` | host、fault、decoder、virtual BLE test |
 | `docs/` | architecture、security、readiness、audit、runbook |
 
@@ -353,116 +449,53 @@ GitHub Actionsはcommit SHA pinを使用しています。decoder regressionは�
 ## 主要ドキュメント
 
 - [Municipal pilot readiness](docs/readiness/MUNICIPAL_PILOT_READINESS.md)
-- [救助耐久性・BLE信頼監査](docs/audits/RESCUE_DURABILITY_INITIAL_AUDIT.md)
-- [外部判断・provisioning blocker](docs/readiness/BLOCKED_BY_EXTERNAL_DECISIONS.md)
-- [Field acceptance test](docs/runbooks/FIELD_ACCEPTANCE_TEST.md)
+- [Rescue durability and BLE trust audit](docs/audits/RESCUE_DURABILITY_INITIAL_AUDIT.md)
+- [PC Gateway setup](docs/PC_GATEWAY_SETUP.md)
+- [PC Gateway security](docs/PC_GATEWAY_SECURITY.md)
 - [Production Gateway deployment](docs/runbooks/PRODUCTION_GATEWAY_DEPLOYMENT.md)
 - [Broker architecture](docs/BROKER_ARCHITECTURE.md)
-- [PC Gateway security](docs/PC_GATEWAY_SECURITY.md)
+- [HTTPS Broker deployment](deployment/broker/README.md)
+- [Quick Tunnel Broker PoC](docs/runbooks/QUICK_TUNNEL_BROKER_POC.md)
+- [Field acceptance test](docs/runbooks/FIELD_ACCEPTANCE_TEST.md)
 - [Gateway backup](docs/runbooks/GATEWAY_BACKUP.md)
 - [Formal release verification](docs/runbooks/VERIFY_FORMAL_RELEASE.md)
 - [Security policy](SECURITY.md)
-- [Repository guide](docs/REPOSITORY_GUIDE.md)
 
 ---
 
 # English
 
 <details open>
-<summary><strong>Open the full English documentation</strong></summary>
+<summary><strong>Current English overview</strong></summary>
 
-## What Relay is
+Relay is a **local-first encrypted rescue-information relay** for outages and intermittent networks. Android requests can move through Nearby Store–Carry–Forward, an approved HTTPS Gateway path, and an optional HTTPS Broker. Courier devices and the Broker never receive the shelter private key.
 
-Relay is a **local-first rescue-information relay** for outages and intermittent networks. Rescue content is encrypted to a shelter recipient key before local storage. Courier devices and the Broker handle ciphertext and cannot decrypt the rescue body, exact location, or people count.
+### Latest changes
 
-The current scope is a limited-area Fuchu Town pilot candidate. This repository does not include an official Fuchu Regional Root or a Root-signed Regional Shelter Directory. Trusted BLE Gateway delivery and production operation remain blocked until authorized public trust artifacts and operational approvals are provisioned.
+- An SOS can be stored locally as an AES-GCM sealed `PENDING_DESTINATION` session when no trusted recipient key is available. It is materialized into a transferable envelope only after a recipient is resolved.
+- A courier that durably stores a Nearby rescue envelope immediately starts its own onward LAN/Broker delivery instead of leaving the envelope stranded.
+- Nearby inventory, ACK, collision, update/cancellation, and signed-receipt handling were tightened.
+- PC Gateway SQLite writes across the message, access, and rescue stores are serialized by a per-database coordinator and sibling lock file. Session `last_seen_at` writes are throttled to a 60-second interval by default.
+- A Windows development launcher now asks only for a username and a 12+ character password, isolates state under LocalAppData, and opens the local console.
+- A separate development-prerelease workflow publishes a localDev APK and unsigned Windows installer without confusing them with formal release artifacts.
+- Controlled HTTPS Broker deployment is available with Docker Compose and Caddy.
+- A Cloudflare Quick Tunnel configuration is available strictly for a time-limited mobile-network PoC; it has no SLA and is not production infrastructure.
 
-## Android flow
+### Trust and deployment boundary
 
-1. Grant location and nearby-device permissions.
-2. Hold the red SOS for two seconds for an immediate life-risk request.
-3. For a normal request, enter people count and one or more conditions.
-4. Encrypt GPS position, timestamp, accuracy, and rescue content before SQLCipher storage.
-5. Retry independently through Nearby, approved Gateway paths, and an optional Broker.
-6. Restore, update, or cancel the active request from encrypted recovery state after a normal process restart.
-7. Show shelter acknowledgement, response, and completion only after a valid signed shelter receipt.
-8. Retain a terminal result until the sender explicitly acknowledges it.
+Trusted BLE Gateway delivery still requires an approved Regional Root and a current Root-signed Regional Shelter Directory. These official Fuchu artifacts are not in this repository, so BLE fails closed. The Regional Root private key must never enter the repository, APK, or running Gateway.
 
-Internet access is not required to create and store an SOS, but a new envelope still needs an approved shelter recipient public key. Transport completion, HTTP success, and `BROKER_STORED` are not shelter acceptance.
+The default Gateway `production` profile is loopback-only with anonymous ingress, UDP discovery, remote management, and legacy admin-key access disabled. Remote access requires an approved closed-network or TLS reverse-proxy topology.
 
-## Delivery paths
+The Broker never decrypts. Gateway credentials are high-entropy, hashed at rest, and scoped to one Gateway and shelter. Production/lab Broker processes bind to loopback behind an externally operated TLS proxy.
 
-### Nearby Store–Carry–Forward
+### Validation boundary
 
-Nearby exchanges only missing encrypted envelopes. Couriers do not have shelter private keys. TTL, hop, size, hash, version, deduplication, and collision rules are enforced. Transfer completion is not durable remote storage or final delivery.
+The latest documented audit baseline recorded shared JVM 20/20, Android JVM 201/201, PC Gateway 57/57, and Broker 28/28 passing tests. Later fixes added more tests and tooling, but physical Nearby/BLE, multi-hop, Phone-to-PC, mobile-to-Broker-to-Gateway, OEM background behavior, power-loss recovery, and field operation remain unvalidated.
 
-### BLE Gateway trust
-
-BLE delivery requires the complete chain:
-
-```text
-Approved Regional Root
-  → Root-signed Regional Shelter Directory
-  → signed Shelter Manifest and key bindings
-  → matching advertised and GATT identity
-  → encrypted BLE submission
-```
-
-Android loads public-only Root bundles, validates and persists signed directories in SQLCipher, rejects rollback/equivocation/expiry/fingerprint mismatch, and re-verifies persisted data at startup. Unsigned bundled manifests and automatic debug TOFU enrollment were removed. Without approved public artifacts, BLE delivery fails closed while other independent routes remain available. The Regional Root private key must never enter this repository, an APK, or a running Gateway.
-
-### Approved Gateway path
-
-`release` and `pilotRelease` reject cleartext Gateway traffic. The default `production` profile binds to loopback with anonymous ingress, UDP discovery, remote management, and legacy `X-Admin-Key` disabled. LAN or remote access requires an explicit approved closed-network or TLS-reverse-proxy topology.
-
-### Optional HTTPS Broker
-
-The Broker never decrypts. It stores and deduplicates encrypted envelopes, isolates collisions, purges by TTL, and relays signed receipts. Production/lab Broker instances must bind to loopback behind an externally operated TLS reverse proxy.
-
-Gateway credentials contain 256 bits of entropy, are scoped to exactly one Gateway and shelter, and are stored only as SHA-256 hashes. Expired, revoked, malformed, cross-Gateway, and cross-shelter use is rejected. Device registration proves possession of a per-device P-256 key; upload signatures are not human identity verification.
-
-## Durable rescue sessions
-
-Room schema v8 stores request/version/status metadata plus only an AES-GCM encrypted recovery payload. Rescue body, people, conditions, sender ID, and location are not plaintext session columns. A separate Android Keystore alias protects recovery data. Envelope and session changes commit together with durable version CAS. Decryption failures retain evidence and surface recovery failure rather than silently creating a replacement request.
-
-Continuous background GPS tracking is not implemented. The previous ViewModel loop was removed. A separate design is required for explicit consent, Android 14+ location-FGS constraints, and lifecycle stop conditions.
-
-## PC Gateway
-
-The Gateway uses named `ADMIN`, `OPERATOR`, and `VIEWER` accounts. The first ADMIN is created with a one-time bootstrap command; there is no default password. Passwords use PBKDF2-HMAC-SHA-256 with random salts and 210,000 iterations. Random session tokens are stored only as hashes, and browser cookies are HttpOnly/SameSite with Secure required behind TLS.
-
-The audit log records minimal operator/action/result metadata and must not contain rescue text, GPS, ciphertext, passwords, tokens, Broker credentials, private keys, or exception text. Gateway rescue private keys remain an owner-only local-file boundary; this repository does not claim DPAPI/HSM/KMS protection.
-
-## Formal distribution
-
-Debug, locally signed, or unsigned artifacts are not formal pilot releases. The formal workflow fails closed unless organization Android signing, Windows Authenticode, pinned SBOM/vulnerability scanners, High/Critical blocking, cosign/TUF verification, checksums, and immutable source-commit evidence are all available.
-
-## Validation boundary
-
-Automated evidence dated 2026-07-22 records shared JVM 20/20, Android JVM 201/201, PC Gateway 57/57, and Broker 28/28 passing tests, plus successful inspection of release-derived APKs for test/private trust material. Android instrumentation source compiled but did not run on an emulator or physical device.
-
-Physical Nearby/BLE, multi-hop, Phone-to-PC, mobile-to-Broker-to-Gateway, OEM background behavior, power-loss recovery, production TLS, formal signing, and field operations remain unvalidated.
+Continuous background GPS tracking is not implemented. Formal distribution remains blocked until organization Android signing, Windows Authenticode, SBOM/vulnerability evidence, cosign/TUF verification, and production infrastructure are available.
 
 **Overall status:** `READY_FOR_DEVICE_TEST_WITH_TRUST_ARTIFACT_BLOCKER`
-
-## Build and test
-
-```bash
-./gradlew :shared:jvmTest :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :pc-gateway:test :broker:test
-./gradlew :app:assembleDebug :pc-gateway:build :broker:build
-./gradlew :app:verifyNoTestTrustArtifactsInReleaseApks
-```
-
-## Key documents
-
-- [Municipal pilot readiness](docs/readiness/MUNICIPAL_PILOT_READINESS.md)
-- [Rescue durability and BLE trust audit](docs/audits/RESCUE_DURABILITY_INITIAL_AUDIT.md)
-- [External decision blockers](docs/readiness/BLOCKED_BY_EXTERNAL_DECISIONS.md)
-- [Field acceptance test](docs/runbooks/FIELD_ACCEPTANCE_TEST.md)
-- [Production Gateway deployment](docs/runbooks/PRODUCTION_GATEWAY_DEPLOYMENT.md)
-- [Broker architecture](docs/BROKER_ARCHITECTURE.md)
-- [PC Gateway security](docs/PC_GATEWAY_SECURITY.md)
-- [Formal release verification](docs/runbooks/VERIFY_FORMAL_RELEASE.md)
-- [Security policy](SECURITY.md)
 
 </details>
 
