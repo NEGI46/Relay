@@ -103,12 +103,17 @@ jobs:
             Set-Content -LiteralPath release/Relay-PC-Gateway-development-preview-unsigned.exe.sha256 -Encoding ascii
           Copy-Item artifacts/Relay-PC-Gateway-development.ps1 release/Relay-PC-Gateway-development.ps1 -Force
           Copy-Item artifacts/Start-Relay-PC-Gateway-Development.cmd release/Start-Relay-PC-Gateway-Development.cmd -Force
+          Copy-Item scripts/register-pc-gateway-autostart.ps1 release/Register-Relay-PC-Gateway-Autostart-development.ps1 -Force
           @'
           DEVELOPMENT PREVIEW ONLY
 
           This Windows installer is unsigned. It is not a formal Relay release and must not be
           used for pilot or emergency operations. Use Start-Relay-PC-Gateway-Development.cmd after
           installation; it prompts for a local username and password and keeps data under LocalAppData.
+
+          To auto-start the gateway after logon or reboot, run
+          Register-Relay-PC-Gateway-Autostart-development.ps1 from an elevated PowerShell. It only
+          registers a Task Scheduler task and never stores broker credentials or secrets.
           '@ | Set-Content -LiteralPath release/WINDOWS_DEVELOPMENT_PREVIEW_NOTICE.txt -Encoding utf8
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -133,6 +138,7 @@ jobs:
           set -euo pipefail
           test -f release/Relay-Android-development-preview-debug.apk
           test -f release/Relay-PC-Gateway-development-preview-unsigned.exe
+          test -f release/Register-Relay-PC-Gateway-Autostart-development.ps1
           test -f release/ANDROID_DEVELOPMENT_PREVIEW_NOTICE.txt
           test -f release/WINDOWS_DEVELOPMENT_PREVIEW_NOTICE.txt
           if find release -type f \( -name 'Relay-Android-release.apk' -o -name 'Relay-PC-Gateway-setup.exe' \) | grep -q .; then
