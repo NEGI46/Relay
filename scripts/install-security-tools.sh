@@ -7,6 +7,7 @@
 set -euo pipefail
 
 readonly syft_module='github.com/anchore/syft/cmd/syft'
+readonly syft_root_module="${syft_module%/cmd/syft}"
 readonly syft_version='v1.20.0'
 readonly osv_module='github.com/google/osv-scanner/v2/cmd/osv-scanner'
 readonly osv_version='v2.0.3'
@@ -28,7 +29,20 @@ export GONOSUMDB=''
 export GOBIN="$tool_dir"
 mkdir -p "$GOBIN"
 
-go install "$syft_module@$syft_version"
+# `go install package@version` does not populate Syft's build-time version variable.
+# Build the checksum-verified source module instead so the version check below attests the
+# actual pinned scanner release rather than an unversioned binary.
+syft_source_dir="$(go env GOMODCACHE)/$syft_root_module@$syft_version"
+go mod download "$syft_root_module@$syft_version"
+if [[ ! -f "$syft_source_dir/go.mod" ]]; then
+  echo "Security scanner bootstrap BLOCKED: verified Syft source is unavailable." >&2
+  exit 1
+fi
+(
+  cd "$syft_source_dir"
+  go build -trimpath -buildvcs=false -ldflags="-X main.version=${syft_version#v}" -o "$GOBIN/syft" ./cmd/syft
+)
+
 go install "$osv_module@$osv_version"
 
 # Go deliberately rejects `go install package@version` when the target module has a
