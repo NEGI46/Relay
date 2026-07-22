@@ -218,6 +218,11 @@ class RelayApplication : Application() {
                 transport = nearbyTransport,
                 nowEpochMillis = SystemClock::nowMillis,
                 shelterKeyProvider = rescueShelterKeyStore,
+                onEnvelopeStored = {
+                    // A Nearby receiver is also a courier. Its delivery service owns the LAN,
+                    // Broker and BLE retry loops required to carry a stored envelope onward.
+                    RescueDeliveryService.enableAndStart(this)
+                },
                 receiptApplier = { key, receipt, publicKey ->
                     activeRescueSessionStore.applyVerifiedReceipt(key, receipt, publicKey, SystemClock.nowMillis())
                 },
