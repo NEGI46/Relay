@@ -83,6 +83,26 @@ class RescueNearbyCoordinatorTest {
     }
 
     @Test
+    fun `incoming stored envelope starts onward courier delivery`() = runTest {
+        val source = InMemoryRescueEnvelopeRepository()
+        val transferredEnvelope = requireNotNull(forwardRescueEnvelope(createAndStore(source, CONFIDENTIAL_TEXT)))
+        var onwardDeliveryStarts = 0
+        val coordinator = RescueNearbyCoordinator(
+            InMemoryRescueEnvelopeRepository(),
+            RecordingTransport(),
+            nowEpochMillis = { NOW },
+            onEnvelopeStored = { onwardDeliveryStarts++ },
+        )
+
+        coordinator.handlePayload(
+            SOURCE_PEER_ID,
+            RescueNearbyPacketCodec().encode(RescueNearbyPacket.Envelope(transferredEnvelope)),
+        )
+
+        assertEquals(1, onwardDeliveryStarts)
+    }
+
+    @Test
     fun `incoming envelope is advertised to peers that are already connected`() = runTest {
         val source = InMemoryRescueEnvelopeRepository()
         val transferredEnvelope = requireNotNull(forwardRescueEnvelope(createAndStore(source, CONFIDENTIAL_TEXT)))
