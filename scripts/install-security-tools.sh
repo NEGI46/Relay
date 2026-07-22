@@ -13,7 +13,7 @@ readonly osv_module='github.com/google/osv-scanner/v2/cmd/osv-scanner'
 readonly osv_version='v2.0.3'
 readonly grype_module='github.com/anchore/grype/cmd/grype'
 readonly grype_root_module="${grype_module%/cmd/grype}"
-readonly grype_version='v0.80.0'
+readonly grype_version='v0.116.0'
 
 tool_dir="${1:-${RUNNER_TEMP:-/tmp}/relay-security-tools}"
 
