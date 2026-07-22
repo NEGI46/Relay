@@ -642,11 +642,6 @@ class GatewayAccessStore(
             ?.take(80)
 
         /** Prefix spreadsheet formula-looking cells so an audit export cannot execute data as a formula. */
-        fun csvEscape(value: String): String {
-            val safe = if (value.firstOrNull() in setOf('=', '+', '-', '@')) "'$value" else value
-            return if (safe.any { it == ',' || it == '\"' || it == '\n' || it == '\r' }) {
-                "\"${safe.replace("\"", "\"\"")}\""
-            } else safe
-        }
+        fun csvEscape(value: String): String = csvSafeCell(value)
     }
 }
