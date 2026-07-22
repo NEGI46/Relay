@@ -48,6 +48,20 @@ PC Gatewayが停止していても、Android端末はStore–Carry–Forwardを�
 
 Stage token: `APP_COMPLETE_SOFTWARE_AND_PC` — residual is physical RF/device and admin elevation only.
 
+> **Current rescue-session status (2026-07-22) / 現行の救助セッション状態**
+>
+> The continuous GPS update description below is historical and is **not** enabled for the
+> current rescue flow. Phase 5 (explicit location-tracking consent, a location foreground
+> service, and periodic position updates) is `NOT_STARTED`. The current implementation captures
+> location only while creating a request when a location fix is available, persists that rescue
+> state in an encrypted recovery payload, and reports that location updates are stopped. It does
+> not start a location foreground service from boot, background work, or request restoration.
+>
+> 以下の継続GPS更新の記述は現行の救助フローには適用しません。Phase 5（明示同意、位置情報
+> Foreground Service、継続位置更新）は `NOT_STARTED` です。現在は依頼作成時に取得できた位置
+> のみを暗号化した回復データへ保持し、位置更新は停止中と表示します。起動時・バックグラウンド
+> 作業・依頼復元から位置情報FGSを開始しません。
+
 
 ## 位置情報（GPS）
 

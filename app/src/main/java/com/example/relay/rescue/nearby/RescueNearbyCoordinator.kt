@@ -34,6 +34,8 @@ class RescueNearbyCoordinator(
     private val maxInventoryEntries: Int = 64,
     private val maxRequestedEntries: Int = 32,
     private val shelterKeyProvider: ShelterPublicKeyProvider? = null,
+    /** Sender sessions receive receipt state only after the existing signature checks succeed. */
+    private val receiptApplier: (RescueRequestKey, SignedShelterReceipt, com.example.relay.rescue.RescuePublicKey) -> ReceiptApplicationResult = repository::applyReceipt,
 ) {
     private val pendingExports = mutableMapOf<Pair<String, RescueRequestKey>, EncryptedRescueEnvelope>()
 
@@ -180,7 +182,7 @@ class RescueNearbyCoordinator(
         val keys = shelterKeyProvider?.load() ?: return
         val receipt = packet.receipt
         if (receipt.receipt.shelterId != keys.shelterId) return
-        if (repository.applyReceipt(
+        if (receiptApplier(
             RescueRequestKey(receipt.receipt.requestId, receipt.receipt.requestVersion),
             receipt,
             keys.receiptSigningKey,

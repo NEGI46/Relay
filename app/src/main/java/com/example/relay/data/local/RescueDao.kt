@@ -48,6 +48,13 @@ interface RescueDao {
     )
     fun pruningCandidate(protectedRequestId: String, protectedRequestVersion: Int): RescueEntity?
 
+    @Query(
+        """SELECT * FROM rescue_envelopes
+            ORDER BY expiresAtEpochMillis, receivedAtEpochMillis, createdAtEpochMillis,
+                     requestId, requestVersion, envelopeId""",
+    )
+    fun pruningCandidates(): List<RescueEntity>
+
     @Query("DELETE FROM rescue_envelopes WHERE requestId = :requestId AND requestVersion = :requestVersion")
     fun delete(requestId: String, requestVersion: Int): Int
 }

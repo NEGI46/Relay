@@ -30,8 +30,10 @@ class RelayConverters {
         DeliveryReceiptEntity::class,
         RescueEntity::class,
         BrokerLedgerEntity::class,
+        RegionalDirectoryEntity::class,
+        ActiveRescueSessionEntity::class,
     ],
-    version = 6,
+    version = 8,
     exportSchema = true,
 )
 @TypeConverters(RelayConverters::class)
@@ -39,4 +41,6 @@ abstract class RelayDatabase : RoomDatabase() {
     abstract fun relayDao(): RelayDao
     abstract fun rescueDao(): RescueDao
     abstract fun brokerLedgerDao(): BrokerLedgerDao
+    abstract fun regionalDirectoryDao(): RegionalDirectoryDao
+    abstract fun activeRescueSessionDao(): ActiveRescueSessionDao
 }

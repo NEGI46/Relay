@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -68,6 +69,52 @@ class SqlCipherPassphraseStoreTest {
             File(databaseFile.path).delete()
             File(databaseFile.path + "-shm").delete()
             File(databaseFile.path + "-wal").delete()
+        }
+    }
+
+    @Test
+    fun sqlCipherDatabaseReopensWithBrokerLedgerAndActiveSessionTables() {
+        System.loadLibrary("sqlcipher")
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val name = "sqlcipher-session-reopen-${UUID.randomUUID()}.db"
+        val file = context.getDatabasePath(name)
+        val passphrase = ByteArray(32) { (it + 31).toByte() }
+        try {
+            val first = Room.databaseBuilder(context, RelayDatabase::class.java, name)
+                .openHelperFactory(SupportOpenHelperFactory(passphrase))
+                .build()
+            first.brokerLedgerDao().upsert(
+                BrokerLedgerEntity("request-1", 1, "broker-receipt", "UPLOADED", 10L),
+            )
+            first.activeRescueSessionDao().insert(
+                ActiveRescueSessionEntity(
+                    requestId = "request-1",
+                    latestVersion = 1,
+                    sealedRecoveryPayload = byteArrayOf(9, 8, 7),
+                    recoveryNonce = ByteArray(12) { 1 },
+                    trackingMode = "DISABLED",
+                    latestSubmissionStatus = "PENDING",
+                    createdAtEpochMillis = 1L,
+                    updatedAtEpochMillis = 1L,
+                    expiresAtEpochMillis = 2L,
+                    terminalStatus = null,
+                ),
+            )
+            first.close()
+
+            val reopened = Room.databaseBuilder(context, RelayDatabase::class.java, name)
+                .openHelperFactory(SupportOpenHelperFactory(passphrase))
+                .build()
+            try {
+                assertEquals("broker-receipt", reopened.brokerLedgerDao().find("request-1", 1)?.brokerReceiptId)
+                assertEquals(1, reopened.activeRescueSessionDao().find("request-1")?.latestVersion)
+            } finally {
+                reopened.close()
+            }
+        } finally {
+            context.deleteDatabase(name)
+            File("${file.path}-shm").delete()
+            File("${file.path}-wal").delete()
         }
     }
 }

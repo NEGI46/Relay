@@ -7,6 +7,17 @@ plugins {
 application { mainClass.set("com.example.relay.pcgateway.MainKt") }
 kotlin { jvmToolchain(17) }
 
+/**
+ * Offline-only entry point for public-root/directory preparation. It is separate from `run`, does
+ * not start the Gateway, and must be executed from a non-Git offline key directory.
+ */
+tasks.register<JavaExec>("regionalTrustProvisioning") {
+    group = "relay security"
+    description = "Run the offline regional trust provisioning CLI (never normal Gateway startup)."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.example.relay.pcgateway.rescue.provisioning.RegionalTrustProvisioningCliKt")
+}
+
 dependencies {
     implementation(project(":relay-protocol"))
     implementation(project(":shared"))

@@ -43,6 +43,10 @@ data class OwnRescueRequestUiState(
     val createdAtEpochMillis: Long,
     val submissionStatus: RescueSubmissionStatus,
     val isCancelled: Boolean = false,
+    /** Phase 5 is not implemented yet; restored sessions explicitly report this as false. */
+    val trackingEnabled: Boolean = false,
+    /** Public terminal state only; rescue contents remain in the encrypted recovery payload. */
+    val terminalStatus: String? = null,
 )
 
 /** Metadata-only, passive status shown to a courier. */
@@ -60,6 +64,8 @@ data class RescueUiState(
     val courierAutomation: CourierAutomationUiState = CourierAutomationUiState(),
     val ownRequest: OwnRescueRequestUiState? = null,
     val isRequestSubmitting: Boolean = false,
+    /** Prevents a corrupt encrypted recovery record from being mistaken for a fresh empty form. */
+    val recoveryFailure: Boolean = false,
     val formMessage: String? = null,
     val language: RescueLanguage = RescueLanguage.JAPANESE,
 )
@@ -73,6 +79,7 @@ interface RescueCallbacks {
     fun onSendSos()
     fun onPrepareUpdate()
     fun onCancelRequest()
+    fun onAcknowledgeTerminalResult()
     fun onRefreshStatus()
     fun onStopBroadcasting()
 }

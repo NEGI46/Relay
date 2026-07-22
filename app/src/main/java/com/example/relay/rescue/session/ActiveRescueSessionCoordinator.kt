@@ -1,0 +1,337 @@
+package com.example.relay.rescue.session
+
+import com.example.relay.location.LocationProvider
+import com.example.relay.rescue.EncryptedRescueEnvelope
+import com.example.relay.rescue.RescueCryptography
+import com.example.relay.rescue.RescueLocation
+import com.example.relay.rescue.RescueRequestAction
+import com.example.relay.rescue.RescueRequestDraft
+import com.example.relay.rescue.RescueSubmissionStatus
+import com.example.relay.rescue.ShelterPublicKeyProvider
+import com.example.relay.rescue.ShelterPublicKeys
+import com.example.relay.rescue.StoredRescueRecord
+import com.example.relay.rescue.toPayload
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+data class RecoveredRescueSession(
+    val session: ActiveRescueSession,
+    val recovery: RescueSessionRecoveryPayload,
+    val submissionStatus: RescueSubmissionStatus,
+)
+
+sealed interface RescueSessionRestoreResult {
+    data object None : RescueSessionRestoreResult
+    data class Restored(val value: RecoveredRescueSession) : RescueSessionRestoreResult
+    /** Retained, undecryptable data; callers must show a recovery failure rather than a new request. */
+    data class Corrupt(val requestId: String) : RescueSessionRestoreResult
+}
+
+sealed interface RescueSessionOperationResult {
+    data class Stored(val value: RecoveredRescueSession, val record: StoredRescueRecord) : RescueSessionOperationResult
+    /** A live request already exists; it is restored rather than creating a competing request. */
+    data class ActiveSessionExists(val value: RecoveredRescueSession) : RescueSessionOperationResult
+    data object ShelterUnavailable : RescueSessionOperationResult
+    data object LocationUnavailable : RescueSessionOperationResult
+    data object Expired : RescueSessionOperationResult
+    data object Terminal : RescueSessionOperationResult
+    data object Corrupt : RescueSessionOperationResult
+    data object CancelledAlready : RescueSessionOperationResult
+    data object Conflict : RescueSessionOperationResult
+    data object StorageFailure : RescueSessionOperationResult
+}
+
+/**
+ * Sender-owned rescue workflow. The ViewModel supplies UI input only; this coordinator owns
+ * version allocation, encryption, atomic persistence, recovery, cancellation, and expiry.
+ */
+class ActiveRescueSessionCoordinator(
+    private val store: ActiveRescueSessionStore,
+    private val recoveryCipher: RecoveryPayloadCipher,
+    private val shelterKeyProvider: ShelterPublicKeyProvider,
+    private val locationProvider: LocationProvider? = null,
+    private val nowEpochMillis: () -> Long = System::currentTimeMillis,
+    private val newEnvelopeId: () -> String = { UUID.randomUUID().toString() },
+    private val requestLifetimeMillis: Long = DEFAULT_REQUEST_LIFETIME_MILLIS,
+    private val shelterKeyWaitMillis: Long = 0,
+    private val deliveryNotifier: RescueDeliveryNotifier = RescueDeliveryNotifier { },
+) {
+    private val locks = ConcurrentHashMap<String, Mutex>()
+
+    init {
+        require(requestLifetimeMillis in 60_000..(30L * 24 * 60 * 60 * 1_000))
+    }
+
+    /** Creates an initial request and durable recovery state as one commit. */
+    suspend fun create(draft: RescueRequestDraft): RescueSessionOperationResult {
+        existingLiveSession()?.let { return it }
+        val keys = awaitShelterKeys() ?: return RescueSessionOperationResult.ShelterUnavailable
+        val now = nowEpochMillis()
+        val located = attachCurrentLocation(
+            draft.copy(
+                requestVersion = 1,
+                destinationShelterId = keys.shelterId,
+                createdAtEpochMillis = now,
+                expiresAtEpochMillis = now + requestLifetimeMillis,
+                action = RescueRequestAction.ACTIVE,
+            ),
+        ) ?: return RescueSessionOperationResult.LocationUnavailable
+        return mutexFor(located.requestId).withLock {
+            val prepared = prepare(located, keys) ?: return@withLock RescueSessionOperationResult.StorageFailure
+            when (val result = store.createAtomically(prepared.session, prepared.envelope, now)) {
+                is SessionCommitResult.Stored -> {
+                    val stored = RescueSessionOperationResult.Stored(
+                        value = RecoveredRescueSession(
+                        session = prepared.session,
+                        recovery = prepared.recovery,
+                        submissionStatus = result.record.state.submissionStatus,
+                    ),
+                    record = result.record,
+                )
+                    deliveryNotifier.onDeliveryRequired()
+                    stored
+                }
+                is SessionCommitResult.Rejected,
+                SessionCommitResult.Invalid,
+                -> RescueSessionOperationResult.StorageFailure
+                SessionCommitResult.ActiveSessionExists -> existingLiveSession()
+                    ?: RescueSessionOperationResult.StorageFailure
+                SessionCommitResult.VersionConflict -> RescueSessionOperationResult.Conflict
+            }
+        }
+    }
+
+    /** Restores the newest sender session, including a terminal result the user has not dismissed. */
+    fun restoreLatest(): RescueSessionRestoreResult {
+        val candidate = store.all()
+            .sortedWith(
+                compareBy<ActiveRescueSession> { it.terminalStatus != null }
+                    .thenByDescending { it.updatedAtEpochMillis }
+                    .thenBy { it.requestId },
+            )
+            .firstOrNull() ?: return RescueSessionRestoreResult.None
+        return restore(candidate)
+    }
+
+    fun restore(requestId: String): RescueSessionRestoreResult =
+        store.find(requestId)?.let(::restore) ?: RescueSessionRestoreResult.None
+
+    /**
+     * Builds the user-editable draft without allocating a version. Allocation happens only in
+     * [update], after it re-checks the durable version within the transaction.
+     */
+    fun prepareUpdate(requestId: String): RescueSessionRestoreResult = restore(requestId)
+
+    /**
+     * A terminal result remains recoverable until the sender explicitly acknowledges it. The
+     * acknowledgement removes only the AES-GCM recovery row; courier envelopes are left intact
+     * for their independent retention/receipt policy.
+     */
+    suspend fun acknowledgeTerminalResult(requestId: String): Boolean = mutexFor(requestId).withLock {
+        val restored = restore(requestId)
+        if (restored !is RescueSessionRestoreResult.Restored || restored.value.session.terminalStatus == null) {
+            false
+        } else {
+            store.deleteAcknowledgedTerminal(requestId)
+        }
+    }
+
+    suspend fun update(
+        requestId: String,
+        editedDraft: RescueRequestDraft,
+    ): RescueSessionOperationResult = mutate(requestId) { recovered, nextVersion, now ->
+        if (recovered.recovery.draft.action != RescueRequestAction.ACTIVE) return@mutate null
+        editedDraft.copy(
+            requestId = requestId,
+            requestVersion = nextVersion,
+            senderDeviceId = recovered.recovery.draft.senderDeviceId,
+            destinationShelterId = recovered.recovery.draft.destinationShelterId,
+            createdAtEpochMillis = now,
+            expiresAtEpochMillis = now + requestLifetimeMillis,
+            action = RescueRequestAction.ACTIVE,
+        )
+    }
+
+    suspend fun cancel(requestId: String): RescueSessionOperationResult = mutate(requestId) { recovered, nextVersion, now ->
+        val current = recovered.recovery.draft
+        if (current.action != RescueRequestAction.ACTIVE) return@mutate null
+        current.copy(
+            requestVersion = nextVersion,
+            createdAtEpochMillis = now,
+            expiresAtEpochMillis = now + requestLifetimeMillis,
+            action = RescueRequestAction.CANCELLED,
+        )
+    }
+
+    private suspend fun mutate(
+        requestId: String,
+        transform: (RecoveredRescueSession, Int, Long) -> RescueRequestDraft?,
+    ): RescueSessionOperationResult = mutexFor(requestId).withLock {
+        repeat(MAX_CONFLICT_RETRIES) {
+            val restored = when (val result = restore(requestId)) {
+                is RescueSessionRestoreResult.Restored -> result.value
+                RescueSessionRestoreResult.None -> return@withLock RescueSessionOperationResult.StorageFailure
+                is RescueSessionRestoreResult.Corrupt -> return@withLock RescueSessionOperationResult.Corrupt
+            }
+            if (restored.session.terminalStatus == ActiveRescueSession.SESSION_EXPIRED) {
+                return@withLock RescueSessionOperationResult.Expired
+            }
+            if (restored.session.terminalStatus != null) return@withLock RescueSessionOperationResult.Terminal
+            if (nowEpochMillis() >= restored.session.expiresAtEpochMillis) {
+                store.markExpired(requestId, restored.session.latestVersion, nowEpochMillis())
+                return@withLock RescueSessionOperationResult.Expired
+            }
+            val now = nowEpochMillis()
+            val draft = transform(restored, restored.session.latestVersion + 1, now)
+                ?: return@withLock RescueSessionOperationResult.CancelledAlready
+            val prepared = prepare(draft, restored.recovery.recipientPublicKey, restored.recovery.receiptSigningPublicKey)
+                ?: return@withLock RescueSessionOperationResult.StorageFailure
+            val session = prepared.session.copy(createdAtEpochMillis = restored.session.createdAtEpochMillis)
+            when (val committed = store.updateAtomically(
+                expectedVersion = restored.session.latestVersion,
+                session = session,
+                envelope = prepared.envelope,
+                receivedAtEpochMillis = now,
+            )) {
+                is SessionCommitResult.Stored -> {
+                    val stored = RescueSessionOperationResult.Stored(
+                        value = RecoveredRescueSession(
+                        session = session,
+                        recovery = prepared.recovery,
+                        submissionStatus = RescueSubmissionStatus.PENDING,
+                    ),
+                    record = committed.record,
+                )
+                    deliveryNotifier.onDeliveryRequired()
+                    return@withLock stored
+                }
+                is SessionCommitResult.Rejected,
+                SessionCommitResult.Invalid,
+                -> return@withLock RescueSessionOperationResult.StorageFailure
+                SessionCommitResult.ActiveSessionExists -> return@withLock existingLiveSession()
+                    ?: RescueSessionOperationResult.StorageFailure
+                SessionCommitResult.VersionConflict -> Unit // Re-read and safely rebuild after the short DB transaction.
+            }
+        }
+        RescueSessionOperationResult.Conflict
+    }
+
+    private fun restore(session: ActiveRescueSession): RescueSessionRestoreResult {
+        if (!session.isStructurallyValid()) return RescueSessionRestoreResult.Corrupt(session.requestId)
+        val recovery = runCatching {
+            recoveryCipher.open(SealedRecoveryPayload(session.sealedRecoveryPayload, session.recoveryNonce))
+        }.getOrElse { return RescueSessionRestoreResult.Corrupt(session.requestId) }
+        if (recovery.draft.requestId != session.requestId ||
+            recovery.draft.requestVersion != session.latestVersion ||
+            recovery.draft.expiresAtEpochMillis != session.expiresAtEpochMillis
+        ) {
+            return RescueSessionRestoreResult.Corrupt(session.requestId)
+        }
+        if (session.terminalStatus == null && nowEpochMillis() >= session.expiresAtEpochMillis) {
+            store.markExpired(session.requestId, session.latestVersion, nowEpochMillis())
+            return restore(session.copy(terminalStatus = ActiveRescueSession.SESSION_EXPIRED, updatedAtEpochMillis = nowEpochMillis()))
+        }
+        val status = runCatching { RescueSubmissionStatus.valueOf(session.latestSubmissionStatus) }
+            .getOrElse { return RescueSessionRestoreResult.Corrupt(session.requestId) }
+        return RescueSessionRestoreResult.Restored(RecoveredRescueSession(session, recovery, status))
+    }
+
+    private fun prepare(draft: RescueRequestDraft, keys: ShelterPublicKeys): PreparedSession? =
+        prepare(draft, keys.recipientKey, keys.receiptSigningKey)
+
+    /** Encrypts before opening the short Room transaction; CAS handles any concurrent change. */
+    private fun prepare(
+        draft: RescueRequestDraft,
+        recipientPublicKey: com.example.relay.rescue.RescuePublicKey,
+        receiptSigningPublicKey: com.example.relay.rescue.RescuePublicKey,
+    ): PreparedSession? = runCatching {
+        val recovery = RescueSessionRecoveryPayload(
+            draft = draft,
+            recipientPublicKey = recipientPublicKey,
+            receiptSigningPublicKey = receiptSigningPublicKey,
+        )
+        val sealed = recoveryCipher.seal(recovery)
+        val envelope = RescueCryptography.encrypt(
+            payload = draft.toPayload(),
+            recipientPublicKey = recipientPublicKey,
+            envelopeId = newEnvelopeId(),
+        )
+        PreparedSession(
+            recovery = recovery,
+            envelope = envelope,
+            session = ActiveRescueSession(
+                requestId = draft.requestId,
+                latestVersion = draft.requestVersion,
+                sealedRecoveryPayload = sealed.ciphertext,
+                recoveryNonce = sealed.nonce,
+                trackingMode = ActiveRescueSession.TRACKING_DISABLED,
+                latestSubmissionStatus = RescueSubmissionStatus.PENDING.name,
+                createdAtEpochMillis = draft.createdAtEpochMillis,
+                updatedAtEpochMillis = draft.createdAtEpochMillis,
+                expiresAtEpochMillis = draft.expiresAtEpochMillis,
+                terminalStatus = null,
+            ),
+        )
+    }.getOrNull()
+
+    private suspend fun attachCurrentLocation(draft: RescueRequestDraft): RescueRequestDraft? {
+        val provider = locationProvider ?: return draft
+        val fix = runCatching { provider.currentFix(8_000) }.getOrNull() ?: return null
+        return draft.copy(
+            location = RescueLocation(
+                latitude = fix.latitude,
+                longitude = fix.longitude,
+                accuracyMeters = fix.accuracyMeters,
+                description = draft.location?.description.orEmpty(),
+                capturedAtEpochMillis = fix.capturedAtEpochMillis,
+            ),
+        )
+    }
+
+    private suspend fun awaitShelterKeys(): ShelterPublicKeys? {
+        shelterKeyProvider.load()?.let { return it }
+        val deadline = nowEpochMillis() + shelterKeyWaitMillis.coerceIn(0, MAX_KEY_WAIT_MILLIS)
+        while (nowEpochMillis() < deadline) {
+            delay(KEY_RETRY_MILLIS)
+            shelterKeyProvider.load()?.let { return it }
+        }
+        return null
+    }
+
+    private fun mutexFor(requestId: String): Mutex = locks.computeIfAbsent(requestId) { Mutex() }
+
+    /** A corrupted durable record blocks new creation instead of being mistaken for an empty app. */
+    private fun existingLiveSession(): RescueSessionOperationResult? {
+        for (session in store.all().sortedByDescending { it.updatedAtEpochMillis }) {
+            when (val restored = restore(session)) {
+                is RescueSessionRestoreResult.Corrupt -> return RescueSessionOperationResult.Corrupt
+                RescueSessionRestoreResult.None -> Unit
+                is RescueSessionRestoreResult.Restored -> if (restored.value.session.terminalStatus == null) {
+                    return RescueSessionOperationResult.ActiveSessionExists(restored.value)
+                }
+            }
+        }
+        return null
+    }
+
+    private data class PreparedSession(
+        val recovery: RescueSessionRecoveryPayload,
+        val session: ActiveRescueSession,
+        val envelope: EncryptedRescueEnvelope,
+    )
+
+    private companion object {
+        const val DEFAULT_REQUEST_LIFETIME_MILLIS = 3L * 24 * 60 * 60 * 1_000
+        const val MAX_KEY_WAIT_MILLIS = 15_000L
+        const val KEY_RETRY_MILLIS = 250L
+        const val MAX_CONFLICT_RETRIES = 3
+    }
+}
+
+/** Android supplies this from the application boundary; tests use the no-op default. */
+fun interface RescueDeliveryNotifier {
+    fun onDeliveryRequired()
+}

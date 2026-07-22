@@ -3,6 +3,7 @@ package com.example.relay.rescue
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -51,6 +52,49 @@ class RegionalShelterTrustTest {
     }
 
     @Test
+    fun directoryRejectsAResignedContainerWithAnAlteredManifestKeyOrBleIdentity() {
+        val rootPair = RescueCryptography.generateShelterSigningKeyPair()
+        val root = RegionalRootBundle(regionId = "region-1", rootSigningPublicKey = rootPair.publicKey)
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val receipt = RescueCryptography.generateShelterSigningKeyPair()
+        val manifest = signedManifest(root.regionId, "shelter-1", recipient, receipt, 1, rootPair.privateKey)
+        val changedRecipient = RescueCryptography.generateRecipientKeyPair()
+        val changedReceipt = RescueCryptography.generateShelterSigningKeyPair()
+        val altered = manifest.copy(
+            manifest = manifest.manifest.copy(
+                recipientPublicKey = changedRecipient.publicKey,
+                receiptSigningPublicKey = changedReceipt.publicKey,
+            ),
+        )
+        val signedDirectory = signRegionalShelterDirectory(directory(root.regionId, 1, altered), rootPair.privateKey)
+        val resolver = RegionalShelterDirectoryResolver(listOf(root))
+
+        assertEquals(DirectoryAcceptance.Invalid, resolver.accept(signedDirectory, 1_500))
+        assertFalse(resolver.verifyAdvertisedManifest(altered, 1_500))
+        assertEquals(null, resolver.resolveBeaconIdentity(altered.beaconFingerprintBytes().copyOf(9), 1_500))
+    }
+
+    @Test
+    fun directoryRejectsAFormallySignedManifestWhoseRecipientOrReceiptKeyIdDoesNotMatchItsKey() {
+        val rootPair = RescueCryptography.generateShelterSigningKeyPair()
+        val root = RegionalRootBundle(regionId = "region-1", rootSigningPublicKey = rootPair.publicKey)
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val receipt = RescueCryptography.generateShelterSigningKeyPair()
+        val malformedKeyIdManifest = ShelterPublicKeyManifest(
+            shelterId = "shelter-1",
+            recipientPublicKey = recipient.publicKey.copy(keyId = "wrong-recipient-key-id"),
+            receiptSigningPublicKey = receipt.publicKey.copy(keyId = "wrong-receipt-key-id"),
+            validFromEpochMillis = 1_000,
+            validUntilEpochMillis = 2_000,
+            generation = 1,
+        )
+        val signedManifest = signShelterManifest(root.regionId, malformedKeyIdManifest, rootPair.privateKey)
+        val signedDirectory = signRegionalShelterDirectory(directory(root.regionId, 1, signedManifest), rootPair.privateKey)
+
+        assertEquals(DirectoryAcceptance.Invalid, RegionalShelterDirectoryResolver(listOf(root)).accept(signedDirectory, 1_500))
+    }
+
+    @Test
     fun resolverNeverReplacesAcceptedDirectoryWithOlderGeneration() {
         val rootPair = RescueCryptography.generateShelterSigningKeyPair()
         val root = RegionalRootBundle(regionId = "region-1", rootSigningPublicKey = rootPair.publicKey)
@@ -64,6 +108,49 @@ class RegionalShelterTrustTest {
         assertIs<DirectoryAcceptance.Accepted>(resolver.accept(newer, 1_500))
         assertEquals(DirectoryAcceptance.Stale, resolver.accept(older, 1_500))
         assertEquals(2L, resolver.resolveForNewRequest("region-1", "shelter-1", 1_500)?.let { newer.directory.generation })
+    }
+
+    @Test
+    fun sameGenerationIsIdempotentOnlyForTheExactSignedDirectory() {
+        val rootPair = RescueCryptography.generateShelterSigningKeyPair()
+        val root = RegionalRootBundle(regionId = "region-1", rootSigningPublicKey = rootPair.publicKey)
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val receipt = RescueCryptography.generateShelterSigningKeyPair()
+        val manifest = signedManifest(root.regionId, "shelter-1", recipient, receipt, 1, rootPair.privateKey)
+        val accepted = signRegionalShelterDirectory(directory(root.regionId, 1, manifest), rootPair.privateKey)
+        val changed = signRegionalShelterDirectory(
+            directory(root.regionId, 1, manifest).copy(validUntilEpochMillis = 2_100),
+            rootPair.privateKey,
+        )
+        val resolver = RegionalShelterDirectoryResolver(listOf(root))
+
+        assertIs<DirectoryAcceptance.Accepted>(resolver.accept(accepted, 1_500))
+        assertEquals(DirectoryAcceptance.AlreadyAccepted, resolver.accept(accepted, 1_500))
+        assertEquals(DirectoryAcceptance.Invalid, resolver.accept(changed, 1_500))
+        assertEquals(accepted.signedDirectoryFingerprint(), resolver.acceptedDirectoryDigest("region-1"))
+    }
+
+    @Test
+    fun duplicateRootIdentifiersAreRejectedBeforeAnyDirectoryCanBeTrusted() {
+        val first = RescueCryptography.generateShelterSigningKeyPair()
+        val second = RescueCryptography.generateShelterSigningKeyPair()
+
+        assertFailsWith<IllegalArgumentException> {
+            RegionalShelterDirectoryResolver(
+                listOf(
+                    RegionalRootBundle(regionId = "region-1", rootSigningPublicKey = first.publicKey),
+                    RegionalRootBundle(regionId = "region-1", rootSigningPublicKey = second.publicKey),
+                ),
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            RegionalShelterDirectoryResolver(
+                listOf(
+                    RegionalRootBundle(regionId = "region-1", rootSigningPublicKey = first.publicKey),
+                    RegionalRootBundle(regionId = "region-2", rootSigningPublicKey = first.publicKey),
+                ),
+            )
+        }
     }
 
     @Test
