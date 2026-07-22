@@ -187,6 +187,7 @@ class AnonymousIngressTest {
             shelterId = "shelter-test",
             adminKey = "do-not-advertise",
             port = 9080,
+            publicPort = 9080,
         )
         val text = GatewayLanBeacon(config, rescueTrustReady = true).announcementBytes().decodeToString()
         val announcement = GatewayJson.decodeFromString(GatewayLanAnnouncement.serializer(), text)
