@@ -3,6 +3,7 @@ package com.example.relay.pcgateway.rescue
 import com.example.relay.rescue.EncryptedRescueEnvelope
 import com.example.relay.rescue.RescuePayload
 import com.example.relay.rescue.SignedShelterReceipt
+import com.example.relay.pcgateway.GatewaySqliteWriteCoordinator
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
@@ -60,6 +61,7 @@ class SqliteRescuePersistence(
     private val json: Json,
 ) : RescuePersistence, AutoCloseable {
     private val lock = Any()
+    private val writeCoordinator = GatewaySqliteWriteCoordinator.forDatabase(dbPath)
     private val connection: Connection
 
     /**
@@ -71,14 +73,17 @@ class SqliteRescuePersistence(
      * of that transaction.
      */
     fun <T> withConnection(block: (Connection) -> T): T = synchronized(lock) {
-        check(!connection.isClosed) { "rescue persistence is closed" }
-        block(connection)
+        writeCoordinator.write {
+            check(!connection.isClosed) { "rescue persistence is closed" }
+            block(connection)
+        }
     }
 
     init {
         File(dbPath).parentFile?.mkdirs()
         connection = DriverManager.getConnection("jdbc:sqlite:$dbPath")
-        connection.createStatement().use { statement ->
+        writeCoordinator.write {
+            connection.createStatement().use { statement ->
             statement.execute("PRAGMA busy_timeout=5000")
             statement.execute("PRAGMA journal_mode=WAL")
             statement.execute("PRAGMA foreign_keys=ON")
@@ -125,6 +130,7 @@ class SqliteRescuePersistence(
             runCatching { statement.execute("ALTER TABLE rescue_requests ADD COLUMN assigned_node_id TEXT") }
             runCatching { statement.execute("ALTER TABLE rescue_requests ADD COLUMN status_updated_at INTEGER NOT NULL DEFAULT 0") }
             runCatching { statement.execute("ALTER TABLE rescue_requests ADD COLUMN terminal_at INTEGER") }
+            }
         }
     }
 
@@ -146,35 +152,39 @@ class SqliteRescuePersistence(
     override fun find(key: RescueRequestKey): StoredRescueRequest? = synchronized(lock) { findInternal(key) }
 
     override fun insert(request: StoredRescueRequest) = synchronized(lock) {
-        connection.prepareStatement(
-            """INSERT INTO rescue_requests(request_id,request_version,envelope_hash,envelope_json,payload_json,received_at,response_status,receipt_json,assigned_node_id,status_updated_at,terminal_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-        ).use { ps ->
-            ps.setString(1, request.key.requestId); ps.setInt(2, request.key.requestVersion)
-            ps.setString(3, request.envelopeHash); ps.setString(4, json.encodeToString(request.envelope))
-            ps.setString(5, json.encodeToString(request.payload)); ps.setLong(6, request.receivedAtEpochMillis)
-            ps.setString(7, request.responseStatus.name); ps.setString(8, json.encodeToString(request.receipt))
-            ps.setString(9, request.assignedNodeId); ps.setLong(10, request.statusUpdatedAtEpochMillis)
-            request.terminalAtEpochMillis?.let { ps.setLong(11, it) } ?: ps.setNull(11, java.sql.Types.BIGINT)
-            check(ps.executeUpdate() == 1) { "request insert failed" }
+        writeCoordinator.write {
+            connection.prepareStatement(
+                """INSERT INTO rescue_requests(request_id,request_version,envelope_hash,envelope_json,payload_json,received_at,response_status,receipt_json,assigned_node_id,status_updated_at,terminal_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            ).use { ps ->
+                ps.setString(1, request.key.requestId); ps.setInt(2, request.key.requestVersion)
+                ps.setString(3, request.envelopeHash); ps.setString(4, json.encodeToString(request.envelope))
+                ps.setString(5, json.encodeToString(request.payload)); ps.setLong(6, request.receivedAtEpochMillis)
+                ps.setString(7, request.responseStatus.name); ps.setString(8, json.encodeToString(request.receipt))
+                ps.setString(9, request.assignedNodeId); ps.setLong(10, request.statusUpdatedAtEpochMillis)
+                request.terminalAtEpochMillis?.let { ps.setLong(11, it) } ?: ps.setNull(11, java.sql.Types.BIGINT)
+                check(ps.executeUpdate() == 1) { "request insert failed" }
+            }
+            replaceCarriersAndDeliveries(request)
         }
-        replaceCarriersAndDeliveries(request)
     }
 
     override fun replace(request: StoredRescueRequest) = synchronized(lock) {
-        connection.prepareStatement(
-            """UPDATE rescue_requests SET envelope_hash=?,envelope_json=?,payload_json=?,received_at=?,response_status=?,receipt_json=?,assigned_node_id=?,status_updated_at=?,terminal_at=?
-               WHERE request_id=? AND request_version=?""",
-        ).use { ps ->
-            ps.setString(1, request.envelopeHash); ps.setString(2, json.encodeToString(request.envelope))
-            ps.setString(3, json.encodeToString(request.payload)); ps.setLong(4, request.receivedAtEpochMillis)
-            ps.setString(5, request.responseStatus.name); ps.setString(6, json.encodeToString(request.receipt))
-            ps.setString(7, request.assignedNodeId); ps.setLong(8, request.statusUpdatedAtEpochMillis)
-            request.terminalAtEpochMillis?.let { ps.setLong(9, it) } ?: ps.setNull(9, java.sql.Types.BIGINT)
-            ps.setString(10, request.key.requestId); ps.setInt(11, request.key.requestVersion)
-            check(ps.executeUpdate() == 1) { "request does not exist" }
+        writeCoordinator.write {
+            connection.prepareStatement(
+                """UPDATE rescue_requests SET envelope_hash=?,envelope_json=?,payload_json=?,received_at=?,response_status=?,receipt_json=?,assigned_node_id=?,status_updated_at=?,terminal_at=?
+                   WHERE request_id=? AND request_version=?""",
+            ).use { ps ->
+                ps.setString(1, request.envelopeHash); ps.setString(2, json.encodeToString(request.envelope))
+                ps.setString(3, json.encodeToString(request.payload)); ps.setLong(4, request.receivedAtEpochMillis)
+                ps.setString(5, request.responseStatus.name); ps.setString(6, json.encodeToString(request.receipt))
+                ps.setString(7, request.assignedNodeId); ps.setLong(8, request.statusUpdatedAtEpochMillis)
+                request.terminalAtEpochMillis?.let { ps.setLong(9, it) } ?: ps.setNull(9, java.sql.Types.BIGINT)
+                ps.setString(10, request.key.requestId); ps.setInt(11, request.key.requestVersion)
+                check(ps.executeUpdate() == 1) { "request does not exist" }
+            }
+            replaceCarriersAndDeliveries(request)
         }
-        replaceCarriersAndDeliveries(request)
     }
 
     override fun listAll(): List<StoredRescueRequest> = synchronized(lock) {
@@ -193,15 +203,17 @@ class SqliteRescuePersistence(
     }
 
     override fun quarantine(envelope: QuarantinedRescueEnvelope) = synchronized(lock) {
-        connection.prepareStatement(
-            """INSERT INTO rescue_quarantine(request_id,request_version,envelope_id,claimed_envelope_hash,existing_envelope_hash,carrier_id,quarantined_at,reason)
-               VALUES(?,?,?,?,?,?,?,?)""",
-        ).use { ps ->
-            ps.setString(1, envelope.key.requestId); ps.setInt(2, envelope.key.requestVersion); ps.setString(3, envelope.envelopeId)
-            ps.setString(4, envelope.claimedEnvelopeHash); ps.setString(5, envelope.existingEnvelopeHash); ps.setString(6, envelope.carrierId)
-            ps.setLong(7, envelope.quarantinedAtEpochMillis); ps.setString(8, envelope.reason); ps.executeUpdate()
+        writeCoordinator.write {
+            connection.prepareStatement(
+                """INSERT INTO rescue_quarantine(request_id,request_version,envelope_id,claimed_envelope_hash,existing_envelope_hash,carrier_id,quarantined_at,reason)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+            ).use { ps ->
+                ps.setString(1, envelope.key.requestId); ps.setInt(2, envelope.key.requestVersion); ps.setString(3, envelope.envelopeId)
+                ps.setString(4, envelope.claimedEnvelopeHash); ps.setString(5, envelope.existingEnvelopeHash); ps.setString(6, envelope.carrierId)
+                ps.setLong(7, envelope.quarantinedAtEpochMillis); ps.setString(8, envelope.reason); ps.executeUpdate()
+            }
+            Unit
         }
-        Unit
     }
 
     override fun listQuarantined(): List<QuarantinedRescueEnvelope> = synchronized(lock) {
@@ -218,12 +230,14 @@ class SqliteRescuePersistence(
     }
 
     override fun deleteTerminalBefore(cutoffEpochMillis: Long): Int = synchronized(lock) {
-        connection.prepareStatement(
-            "DELETE FROM rescue_requests WHERE request_id IN " +
-                "(SELECT request_id FROM rescue_requests WHERE terminal_at IS NOT NULL AND terminal_at < ?)",
-        ).use { ps ->
-            ps.setLong(1, cutoffEpochMillis)
-            ps.executeUpdate()
+        writeCoordinator.write {
+            connection.prepareStatement(
+                "DELETE FROM rescue_requests WHERE request_id IN " +
+                    "(SELECT request_id FROM rescue_requests WHERE terminal_at IS NOT NULL AND terminal_at < ?)",
+            ).use { ps ->
+                ps.setLong(1, cutoffEpochMillis)
+                ps.executeUpdate()
+            }
         }
     }
 

@@ -65,14 +65,20 @@ data class AuditLogRecord(
  * WAL plus the short transactions below keep it independent from rescue ingestion, while keeping
  * the authorization boundary durable and locally inspectable for an audit.
  */
-class GatewayAccessStore(dbPath: String) : AutoCloseable {
+class GatewayAccessStore(
+    dbPath: String,
+    private val sessionTouchIntervalMillis: Long = DEFAULT_SESSION_TOUCH_INTERVAL_MILLIS,
+) : AutoCloseable {
     private val lock = Any()
+    private val writeCoordinator = GatewaySqliteWriteCoordinator.forDatabase(dbPath)
     private val connection: Connection
 
     init {
+        require(sessionTouchIntervalMillis >= 0) { "session touch interval must not be negative" }
         File(dbPath).parentFile?.mkdirs()
         connection = DriverManager.getConnection("jdbc:sqlite:$dbPath")
-        connection.createStatement().use { statement ->
+        writeCoordinator.write {
+            connection.createStatement().use { statement ->
             statement.execute("PRAGMA busy_timeout=5000")
             statement.execute("PRAGMA journal_mode=WAL")
             statement.execute("PRAGMA foreign_keys=ON")
@@ -136,6 +142,7 @@ class GatewayAccessStore(dbPath: String) : AutoCloseable {
             statement.execute("CREATE INDEX IF NOT EXISTS idx_staff_sessions_lookup ON staff_sessions(expires_at, revoked_at)")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_gateway_audit_time ON gateway_audit_log(occurred_at DESC)")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_gateway_audit_action ON gateway_audit_log(action, occurred_at DESC)")
+            }
         }
     }
 
@@ -214,15 +221,17 @@ class GatewayAccessStore(dbPath: String) : AutoCloseable {
         }
         val token = randomToken()
         val expiresAt = now + sessionTtlMillis
-        connection.prepareStatement(
-            "INSERT INTO staff_sessions(session_hash,username,created_at,expires_at,last_seen_at) VALUES(?,?,?,?,?)",
-        ).use { statement ->
-            statement.setString(1, tokenHash(token))
-            statement.setString(2, account.username)
-            statement.setLong(3, now)
-            statement.setLong(4, expiresAt)
-            statement.setLong(5, now)
-            statement.executeUpdate()
+        writeCoordinator.write {
+            connection.prepareStatement(
+                "INSERT INTO staff_sessions(session_hash,username,created_at,expires_at,last_seen_at) VALUES(?,?,?,?,?)",
+            ).use { statement ->
+                statement.setString(1, tokenHash(token))
+                statement.setString(2, account.username)
+                statement.setLong(3, now)
+                statement.setLong(4, expiresAt)
+                statement.setLong(5, now)
+                statement.executeUpdate()
+            }
         }
         auditInternal(now, account.username, null, "LOGIN", "SUCCESS", source)
         LoginResult.Success(
@@ -231,13 +240,18 @@ class GatewayAccessStore(dbPath: String) : AutoCloseable {
         )
     }
 
-    /** Returns null for expired/revoked sessions and for accounts disabled after login. */
+    /**
+     * Returns null for expired/revoked sessions and for accounts disabled after login.
+     *
+     * A browser polls several authenticated read endpoints. Refreshing last_seen_at on every one
+     * makes each poll a SQLite writer, so persist this audit hint at a bounded interval instead.
+     */
     fun authenticateSession(token: String?, now: Long = System.currentTimeMillis()): AuthenticatedStaff? = synchronized(lock) {
         if (token.isNullOrBlank() || token.length !in 32..256) return null
         val hash = tokenHash(token)
-        connection.prepareStatement(
+        val authenticated = connection.prepareStatement(
             """
-            SELECT a.username,a.role,a.disabled,s.expires_at,s.revoked_at
+            SELECT a.username,a.role,a.disabled,s.expires_at,s.revoked_at,s.last_seen_at
             FROM staff_sessions s JOIN staff_accounts a ON a.username=s.username
             WHERE s.session_hash=?
             """.trimIndent(),
@@ -248,22 +262,35 @@ class GatewayAccessStore(dbPath: String) : AutoCloseable {
                     return null
                 }
                 val role = runCatching { StaffRole.valueOf(result.getString("role")) }.getOrNull() ?: return null
-                connection.prepareStatement("UPDATE staff_sessions SET last_seen_at=? WHERE session_hash=?").use { update ->
-                    update.setLong(1, now)
-                    update.setString(2, hash)
-                    update.executeUpdate()
-                }
-                AuthenticatedStaff(result.getString("username"), role, sessionId = hash)
+                AuthenticatedSession(
+                    staff = AuthenticatedStaff(result.getString("username"), role, sessionId = hash),
+                    lastSeenAtEpochMillis = result.getLong("last_seen_at"),
+                )
             }
         }
+        if (now - authenticated.lastSeenAtEpochMillis >= sessionTouchIntervalMillis) {
+            writeCoordinator.write {
+                connection.prepareStatement(
+                    "UPDATE staff_sessions SET last_seen_at=? WHERE session_hash=? AND last_seen_at <= ?",
+                ).use { update ->
+                    update.setLong(1, now)
+                    update.setString(2, hash)
+                    update.setLong(3, now - sessionTouchIntervalMillis)
+                    update.executeUpdate()
+                }
+            }
+        }
+        authenticated.staff
     }
 
     fun revokeSession(token: String?, actor: AuthenticatedStaff?, source: String?, now: Long = System.currentTimeMillis()) = synchronized(lock) {
         if (token.isNullOrBlank()) return@synchronized
-        connection.prepareStatement("UPDATE staff_sessions SET revoked_at=? WHERE session_hash=? AND revoked_at IS NULL").use { statement ->
-            statement.setLong(1, now)
-            statement.setString(2, tokenHash(token))
-            statement.executeUpdate()
+        writeCoordinator.write {
+            connection.prepareStatement("UPDATE staff_sessions SET revoked_at=? WHERE session_hash=? AND revoked_at IS NULL").use { statement ->
+                statement.setLong(1, now)
+                statement.setString(2, tokenHash(token))
+                statement.executeUpdate()
+            }
         }
         auditInternal(now, actor?.username, actor?.username, "LOGOUT", "SUCCESS", source)
     }
@@ -280,16 +307,18 @@ class GatewayAccessStore(dbPath: String) : AutoCloseable {
             auditInternal(now, actor.username, username.take(64), "ACCOUNT_CREATE", "REJECTED", source)
             return false
         }
-        val inserted = connection.prepareStatement(
-            "INSERT OR IGNORE INTO staff_accounts(username,password_kdf,role,disabled,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-        ).use { statement ->
-            statement.setString(1, username)
-            statement.setString(2, passwordHash(password))
-            statement.setString(3, role.name)
-            statement.setInt(4, 0)
-            statement.setLong(5, now)
-            statement.setLong(6, now)
-            statement.executeUpdate() == 1
+        val inserted = writeCoordinator.write {
+            connection.prepareStatement(
+                "INSERT OR IGNORE INTO staff_accounts(username,password_kdf,role,disabled,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+            ).use { statement ->
+                statement.setString(1, username)
+                statement.setString(2, passwordHash(password))
+                statement.setString(3, role.name)
+                statement.setInt(4, 0)
+                statement.setLong(5, now)
+                statement.setLong(6, now)
+                statement.executeUpdate() == 1
+            }
         }
         auditInternal(now, actor.username, username, "ACCOUNT_CREATE", if (inserted) "SUCCESS" else "REJECTED", source)
         inserted
@@ -310,11 +339,13 @@ class GatewayAccessStore(dbPath: String) : AutoCloseable {
             auditInternal(now, actor.username, username, "ACCOUNT_ROLE_CHANGE", "REJECTED_LAST_ADMIN", source)
             return false
         }
-        val updated = connection.prepareStatement("UPDATE staff_accounts SET role=?,updated_at=? WHERE username=?").use { statement ->
-            statement.setString(1, role.name)
-            statement.setLong(2, now)
-            statement.setString(3, username)
-            statement.executeUpdate() == 1
+        val updated = writeCoordinator.write {
+            connection.prepareStatement("UPDATE staff_accounts SET role=?,updated_at=? WHERE username=?").use { statement ->
+                statement.setString(1, role.name)
+                statement.setLong(2, now)
+                statement.setString(3, username)
+                statement.executeUpdate() == 1
+            }
         }
         auditInternal(now, actor.username, username, "ACCOUNT_ROLE_CHANGE", if (updated) "SUCCESS" else "REJECTED", source)
         updated
@@ -505,30 +536,34 @@ class GatewayAccessStore(dbPath: String) : AutoCloseable {
         result: String,
         source: String?,
     ) {
-        connection.prepareStatement(
-            "INSERT INTO gateway_audit_log(occurred_at,operator_username,target_id,action,result,source_info) VALUES(?,?,?,?,?,?)",
-        ).use { statement ->
-            statement.setLong(1, now)
-            statement.setString(2, operator?.takeIf(::isValidUsername)?.take(64))
-            statement.setString(3, target?.take(128))
-            statement.setString(4, action.take(80).filter { it.isLetterOrDigit() || it == '_' })
-            statement.setString(5, result.take(80).filter { it.isLetterOrDigit() || it == '_' })
-            statement.setString(6, minimalSource(source))
-            statement.executeUpdate()
+        writeCoordinator.write {
+            connection.prepareStatement(
+                "INSERT INTO gateway_audit_log(occurred_at,operator_username,target_id,action,result,source_info) VALUES(?,?,?,?,?,?)",
+            ).use { statement ->
+                statement.setLong(1, now)
+                statement.setString(2, operator?.takeIf(::isValidUsername)?.take(64))
+                statement.setString(3, target?.take(128))
+                statement.setString(4, action.take(80).filter { it.isLetterOrDigit() || it == '_' })
+                statement.setString(5, result.take(80).filter { it.isLetterOrDigit() || it == '_' })
+                statement.setString(6, minimalSource(source))
+                statement.executeUpdate()
+            }
         }
     }
 
     private fun transaction(block: () -> Unit) {
-        val previousAutoCommit = connection.autoCommit
-        connection.autoCommit = false
-        try {
-            block()
-            connection.commit()
-        } catch (error: Throwable) {
-            runCatching { connection.rollback() }
-            throw error
-        } finally {
-            connection.autoCommit = previousAutoCommit
+        writeCoordinator.write {
+            val previousAutoCommit = connection.autoCommit
+            connection.autoCommit = false
+            try {
+                block()
+                connection.commit()
+            } catch (error: Throwable) {
+                runCatching { connection.rollback() }
+                throw error
+            } finally {
+                connection.autoCommit = previousAutoCommit
+            }
         }
     }
 
@@ -537,6 +572,11 @@ class GatewayAccessStore(dbPath: String) : AutoCloseable {
         val passwordKdf: String,
         val role: StaffRole,
         val disabled: Boolean,
+    )
+
+    private data class AuthenticatedSession(
+        val staff: AuthenticatedStaff,
+        val lastSeenAtEpochMillis: Long,
     )
 
     override fun close() = synchronized(lock) {
@@ -549,6 +589,7 @@ class GatewayAccessStore(dbPath: String) : AutoCloseable {
         const val KDF_KEY_BITS = 256
         const val MAX_KDF_ITERATIONS = 1_000_000
         const val ACCESS_SCHEMA_VERSION = 1
+        const val DEFAULT_SESSION_TOUCH_INTERVAL_MILLIS = 60_000L
 
         fun isValidUsername(value: String): Boolean = value.matches(Regex("[A-Za-z0-9][A-Za-z0-9_.-]{2,63}"))
 

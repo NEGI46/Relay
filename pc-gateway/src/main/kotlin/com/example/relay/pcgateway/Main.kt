@@ -69,9 +69,13 @@ fun main(args: Array<String>) {
             )
         }
     }
-    // Do not bind the sidecar ingress unless the advertised shelter identity is root-signed,
-    // current, and matches the two locally held private keys. This prevents an unprovisioned PC
-    // from accepting delivery traffic merely because its generated public manifest is reachable.
+    // Production/lab never bind public rescue delivery unless the advertised shelter identity is
+    // root-signed, current, and matches the two locally held private keys. The deliberately
+    // isolated development profile is the one exception: it publishes the generated local public
+    // manifest so a debug/localDev phone can enroll it without a certificate or manual key copy.
+    // This compatibility path is never enabled by a missing production configuration.
+    val developmentRescueDelivery = config.profile == GatewayProfile.DEVELOPMENT
+    val rescueDeliveryReady = verifiedBleManifest != null || developmentRescueDelivery
     var receiptOutboxRef: ReceiptOutbox? = null
     val rescueIntakeService = RescueIntakeService(
         shelterId = config.shelterId,
@@ -83,8 +87,8 @@ fun main(args: Array<String>) {
     rescueIntakeService.purgeExpiredDetails()
     val offlineMap = GsiTileCache(Path.of(config.offlineMapPath))
     val officialInformation = OfficialInformationService(Path.of(config.officialInfoCachePath))
-    val rescueIngress = verifiedBleManifest?.let { RescueDeliveryIngress(rescueIntakeService) }
-    val beacon = GatewayLanBeacon(config, rescueTrustReady = verifiedBleManifest != null)
+    val rescueIngress = rescueDeliveryReady.let { ready -> if (ready) RescueDeliveryIngress(rescueIntakeService) else null }
+    val beacon = GatewayLanBeacon(config, rescueTrustReady = rescueDeliveryReady)
     val consoleHost = if (config.host in setOf("0.0.0.0", "::")) "127.0.0.1" else config.host
     println("Relay PC Gateway listening on http://${config.host}:${config.port}")
     println("Operator console: http://$consoleHost:${config.port}/")
@@ -102,6 +106,8 @@ fun main(args: Array<String>) {
         println("Rescue maintenance manifest fingerprint: ${verifiedBleManifest.manifest.fingerprint()}")
         println("Rescue BLE signed-manifest fingerprint base64: ${bleBridgeEnvironment?.signedManifestFingerprintBase64}")
         println("BLE sidecar ingress: http://${config.bleBridgeIngressHost}:${config.bleBridgeIngressPort} (loopback only; secret is not printed)")
+    } else if (developmentRescueDelivery) {
+        println("Rescue delivery: development-generated keys are enabled for debug/localDev clients only")
     } else {
         println("Rescue BLE trust: not ready; automatic rescue delivery is disabled (legacy manifest remains maintenance-only)")
     }
@@ -180,6 +186,7 @@ fun main(args: Array<String>) {
                     store,
                     rescueManifest = rescueKeys.manifest,
                     rescueBleReady = verifiedBleManifest != null,
+                    rescueDeliveryReady = rescueDeliveryReady,
                     rescueIntakeService = rescueIntakeService,
                     offlineMap = offlineMap,
                     officialInformation = officialInformation,

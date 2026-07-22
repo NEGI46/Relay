@@ -44,7 +44,7 @@ class RescueViewModelTest {
     }
 
     @Test
-    fun `request creation fails closed when shelter public key is unavailable`() = runBlocking {
+    fun `request creation keeps SOS safely queued when shelter public key is unavailable`() = runBlocking {
         val repository = InMemoryRescueEnvelopeRepository()
         val viewModel = RescueViewModel(
             coordinator = testSessionCoordinator(
@@ -59,17 +59,21 @@ class RescueViewModelTest {
         viewModel.onDraftChange(
             requireNotNull(viewModel.state.value.draft).copy(
                 destinationShelterId = "shelter-1",
+                personCount = 1,
+                conditions = setOf(RescueCondition.INJURED_OR_UNWELL),
                 freeText = PRIVATE_NOTE,
             ),
         )
 
         viewModel.onSubmitRequest()
 
-        val failed = withTimeout(ASYNC_TIMEOUT_MILLIS) {
-            viewModel.state.first { !it.isRequestSubmitting && it.formMessage != null }
+        val queued = withTimeout(ASYNC_TIMEOUT_MILLIS) {
+            viewModel.state.first { !it.isRequestSubmitting && it.screen == RescueScreen.BROADCASTING }
         }
-        assertEquals(RescueScreen.REQUEST_FORM, failed.screen)
-        assertTrue(failed.formMessage!!.isNotBlank())
+        assertEquals(RescueScreen.BROADCASTING, queued.screen)
+        assertEquals(RescueSubmissionStatus.PENDING_DESTINATION, queued.ownRequest!!.submissionStatus)
+        assertTrue(queued.broadcast.isActive)
+        assertTrue(queued.courierAutomation.isEnabled)
         assertTrue(repository.all().isEmpty())
     }
 

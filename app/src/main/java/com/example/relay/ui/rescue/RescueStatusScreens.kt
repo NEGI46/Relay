@@ -118,6 +118,10 @@ private fun StatusCard(label: String, value: String) {
 }
 
 private fun RescueSubmissionStatus.label(language: RescueLanguage): String = when (this) {
+    RescueSubmissionStatus.PENDING_DESTINATION -> language.text(
+        "受信先を安全に確認しています。端末内でSOSを保留中です",
+        "Resolving a trusted receiver; the SOS is queued on this device",
+    )
     RescueSubmissionStatus.PENDING -> language.text("避難所へ自動提出を待っています", "Waiting for automatic shelter delivery")
     RescueSubmissionStatus.IN_TRANSIT -> language.text("避難所へ自動提出中です", "Relaying to the shelter")
     RescueSubmissionStatus.SHELTER_STORED -> language.text("避難所PCへ提出済みです", "Delivered to the shelter PC")

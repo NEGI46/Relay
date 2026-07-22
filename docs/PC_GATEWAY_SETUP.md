@@ -61,6 +61,20 @@ $env:RELAY_GATEWAY_LAN_MODE = 'disabled'
 
 これは限定されたローカル開発用です。共同実証、release/pilotRelease Android、または実運用に使わないでください。
 
+### 開発プレビューの簡単な起動（Windows）
+
+開発版インストーラーを実行した後、配布物にある
+`Start-Relay-PC-Gateway-Development.cmd` をダブルクリックしてください。初回は管理者の
+**ユーザー名と12文字以上のパスワードだけ**を入力します。開発用DB・生成鍵は
+`%LOCALAPPDATA%\Relay\development` に隔離され、localhostの管理画面を開きます。
+
+この開発ランチャーは、デバッグ版Androidが同一LAN上で見つけた開発Gatewayの公開鍵を自動登録できるよう、`development` profile の匿名救助受信とUDP discoveryを有効にします。production/pilot のアプリ・Gatewayはこの経路を受け入れません。既存のGatewayが同じポートで動いている場合は二重起動せず、その画面を開きます。
+
+GitHub の **Publish Relay development preview** は、このランチャーと unsigned Windows
+installer、debug/localDev Android APK を GitHub prerelease として公開します。これは
+**正式版ではありません**。署名済みの `Publish Relay formal release` とは完全に別で、
+実証・緊急運用には使わないでください。
+
 ## Broker
 
 RELAY_BROKER_URL は HTTPS のみです。Broker は production/lab で loopback bind し、別の TLS proxy の背後に置きます。Gateway ごと・避難所ごとの scoped credential は Broker の issue-gateway-credential で発行し、Gateway に RELAY_BROKER_CREDENTIAL として渡します。共有 RELAY_BROKER_API_KEY は development 互換だけです。

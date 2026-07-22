@@ -13,6 +13,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.relay.MainActivity
 import com.example.relay.RelayApplication
+import com.example.relay.domain.OperatingMode
+import com.example.relay.rescue.DevelopmentEnrollmentResult
 import com.example.relay.rescue.RescueSubmissionStatus
 import com.example.relay.rescue.SharedPreferencesRescueAutomationStore
 import com.example.relay.rescue.BrokerDeliveryResult
@@ -43,6 +45,7 @@ class RescueDeliveryService : Service() {
     private var localGatewayDeliveryJob: Job? = null
     private var brokerDeliveryJob: Job? = null
     private var brokerReceiptPollJob: Job? = null
+    private var destinationResolutionJob: Job? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!SharedPreferencesRescueAutomationStore(this).isEnabled()) {
@@ -61,7 +64,9 @@ class RescueDeliveryService : Service() {
             return START_NOT_STICKY
         }
         (application as? RelayApplication)?.let { app ->
+            startNearbyRelayForRescue(app)
             app.rescueDeliveryCoordinator.start(serviceScope)
+            startDestinationResolution(app)
             startLocalGatewayDelivery(app)
             startBrokerDelivery(app)
             startBrokerReceiptPolling(app)
@@ -75,6 +80,7 @@ class RescueDeliveryService : Service() {
         localGatewayDeliveryJob?.cancel()
         brokerDeliveryJob?.cancel()
         brokerReceiptPollJob?.cancel()
+        destinationResolutionJob?.cancel()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -114,6 +120,54 @@ class RescueDeliveryService : Service() {
                     }
                 }
                 delay(5_000)
+            }
+        }
+    }
+
+    /**
+     * A rescue request owns the same Nearby transport as ordinary relay mode. This works without
+     * Wi-Fi or mobile data; Android permission/Bluetooth prerequisites still remain explicit OS
+     * requirements and are reported by [RelayCommunicationService].
+     */
+    private fun startNearbyRelayForRescue(app: RelayApplication) {
+        RelayCommunicationService.start(this, OperatingMode.RELAY, app.deviceRoleStore.load())?.let {
+            getSharedPreferences("relay_rescue_diagnostics", MODE_PRIVATE).edit()
+                .putString("last_nearby_start_result", "failed")
+                .putLong("last_nearby_start_at", System.currentTimeMillis())
+                .apply()
+        }
+    }
+
+    /**
+     * A no-key SOS remains only under the sender's recovery cipher. Development builds may
+     * discover their local generated-key Gateway here; production never auto-enrolls and simply
+     * waits for a normal trusted provisioning source to populate the key store.
+     */
+    private fun startDestinationResolution(app: RelayApplication) {
+        if (destinationResolutionJob?.isActive == true) return
+        destinationResolutionJob = serviceScope.launch {
+            while (isActive) {
+                val hasPendingDestination = app.activeRescueSessionCoordinator.hasPendingDestination()
+                if (hasPendingDestination && app.rescueShelterKeyStore.load() == null) {
+                    val enrollment = app.developmentShelterManifestBootstrap.tryEnroll()
+                    if (enrollment !in setOf(
+                            DevelopmentEnrollmentResult.DISABLED,
+                            DevelopmentEnrollmentResult.GATEWAY_NOT_FOUND,
+                        )
+                    ) {
+                        getSharedPreferences("relay_rescue_diagnostics", MODE_PRIVATE).edit()
+                            .putString("last_development_enrollment", enrollment.name)
+                            .putLong("last_development_enrollment_at", System.currentTimeMillis())
+                            .apply()
+                    }
+                }
+                val resolved = if (hasPendingDestination) {
+                    runCatching { app.activeRescueSessionCoordinator.resolvePendingDestinations() }.getOrDefault(0)
+                } else {
+                    0
+                }
+                if (resolved > 0) app.notifyRescueStoreChanged()
+                delay(DESTINATION_RESOLUTION_INTERVAL_MILLIS)
             }
         }
     }
@@ -287,6 +341,7 @@ class RescueDeliveryService : Service() {
         private const val STATUS_CHANNEL_ID = "relay_rescue_status"
         private const val NOTIFICATION_ID = 1002
         private const val STATUS_NOTIFICATION_ID = 1003
+        private const val DESTINATION_RESOLUTION_INTERVAL_MILLIS = 2_000L
 
         fun startIfEnabled(context: Context) {
             if (!SharedPreferencesRescueAutomationStore(context).isEnabled()) return

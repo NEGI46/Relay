@@ -55,6 +55,8 @@ data class ActiveRescueSession(
 
 sealed interface SessionCommitResult {
     data class Stored(val record: StoredRescueRecord) : SessionCommitResult
+    /** Sender recovery was stored, but no envelope was created because a destination is unknown. */
+    data object PendingDestinationStored : SessionCommitResult
     data class Rejected(val reason: RescueStoreRejection) : SessionCommitResult
     /** Another live sender session was committed by this or a different process. */
     data object ActiveSessionExists : SessionCommitResult
@@ -75,12 +77,35 @@ interface ActiveRescueSessionStore {
         receivedAtEpochMillis: Long,
     ): SessionCommitResult
 
+    /**
+     * Persists an SOS before a trusted shelter key exists. This row contains only encrypted
+     * sender recovery material; it deliberately creates no courier-transferable envelope.
+     */
+    fun createPendingDestinationAtomically(
+        session: ActiveRescueSession,
+        receivedAtEpochMillis: Long,
+    ): SessionCommitResult = SessionCommitResult.Invalid
+
     fun updateAtomically(
         expectedVersion: Int,
         session: ActiveRescueSession,
         envelope: EncryptedRescueEnvelope,
         receivedAtEpochMillis: Long,
     ): SessionCommitResult
+
+    /**
+     * Atomically turns a previously local-only pending SOS into its first encrypted envelope
+     * after a trusted shelter key has been resolved. The request version is intentionally kept.
+     */
+    fun materializePendingDestinationAtomically(
+        expectedVersion: Int,
+        session: ActiveRescueSession,
+        envelope: EncryptedRescueEnvelope,
+        receivedAtEpochMillis: Long,
+    ): SessionCommitResult = SessionCommitResult.Invalid
+
+    /** Removes an SOS that has never been exported because no trusted destination was available. */
+    fun discardPendingDestination(requestId: String, expectedVersion: Int): Boolean = false
 
     fun applyVerifiedReceipt(
         key: RescueRequestKey,
@@ -132,6 +157,25 @@ class RoomActiveRescueSessionStore(
         }
     }
 
+    override fun createPendingDestinationAtomically(
+        session: ActiveRescueSession,
+        receivedAtEpochMillis: Long,
+    ): SessionCommitResult {
+        if (!validPendingDestination(session, receivedAtEpochMillis)) return SessionCommitResult.Invalid
+        return try {
+            database.runInTransaction<SessionCommitResult> {
+                if (sessions.hasLiveActiveSession(receivedAtEpochMillis)) {
+                    return@runInTransaction SessionCommitResult.ActiveSessionExists
+                }
+                if (sessions.find(session.requestId) != null) throw SessionVersionConflict()
+                check(sessions.insert(session.toEntity()) != -1L)
+                SessionCommitResult.PendingDestinationStored
+            }
+        } catch (_: SessionVersionConflict) {
+            SessionCommitResult.VersionConflict
+        }
+    }
+
     override fun updateAtomically(
         expectedVersion: Int,
         session: ActiveRescueSession,
@@ -170,6 +214,55 @@ class RoomActiveRescueSessionStore(
             SessionCommitResult.VersionConflict
         }
     }
+
+    override fun materializePendingDestinationAtomically(
+        expectedVersion: Int,
+        session: ActiveRescueSession,
+        envelope: EncryptedRescueEnvelope,
+        receivedAtEpochMillis: Long,
+    ): SessionCommitResult {
+        if (!validCommit(session, envelope, receivedAtEpochMillis) ||
+            session.latestVersion != expectedVersion ||
+            session.latestSubmissionStatus != RescueSubmissionStatus.PENDING.name
+        ) {
+            return SessionCommitResult.Invalid
+        }
+        return try {
+            database.runInTransaction<SessionCommitResult> {
+                val current = sessions.find(session.requestId) ?: throw SessionVersionConflict()
+                if (current.latestVersion != expectedVersion ||
+                    current.latestSubmissionStatus != RescueSubmissionStatus.PENDING_DESTINATION.name ||
+                    current.terminalStatus != null
+                ) {
+                    throw SessionVersionConflict()
+                }
+                when (val stored = envelopes.storeInTransaction(envelope, receivedAtEpochMillis, allowPruning = false)) {
+                    is RescueStoreResult.Stored -> {
+                        val updated = sessions.materializePendingDestination(
+                            requestId = session.requestId,
+                            expectedVersion = expectedVersion,
+                            sealedRecoveryPayload = session.sealedRecoveryPayload,
+                            recoveryNonce = session.recoveryNonce,
+                            trackingMode = session.trackingMode,
+                            latestSubmissionStatus = session.latestSubmissionStatus,
+                            updatedAtEpochMillis = session.updatedAtEpochMillis,
+                            expiresAtEpochMillis = session.expiresAtEpochMillis,
+                        )
+                        if (updated != 1) throw SessionVersionConflict()
+                        SessionCommitResult.Stored(stored.record)
+                    }
+                    is RescueStoreResult.Rejected -> SessionCommitResult.Rejected(stored.reason)
+                }
+            }
+        } catch (_: SessionVersionConflict) {
+            SessionCommitResult.VersionConflict
+        }
+    }
+
+    override fun discardPendingDestination(requestId: String, expectedVersion: Int): Boolean =
+        database.runInTransaction<Boolean> {
+            sessions.deletePendingDestination(requestId, expectedVersion) == 1
+        }
 
     override fun applyVerifiedReceipt(
         key: RescueRequestKey,
@@ -218,6 +311,15 @@ class RoomActiveRescueSessionStore(
             session.requestId == envelope.requestId &&
             session.latestVersion == envelope.requestVersion &&
             session.expiresAtEpochMillis == envelope.expiresAtEpochMillis &&
+            session.terminalStatus == null
+
+    private fun validPendingDestination(
+        session: ActiveRescueSession,
+        receivedAtEpochMillis: Long,
+    ): Boolean =
+        session.isStructurallyValid() &&
+            receivedAtEpochMillis > 0 &&
+            session.latestSubmissionStatus == RescueSubmissionStatus.PENDING_DESTINATION.name &&
             session.terminalStatus == null
 
     private fun ActiveRescueSessionEntity.toSession() = ActiveRescueSession(

@@ -24,6 +24,58 @@ import org.junit.Test
 
 class RescueOperatorApiTest {
     @Test
+    fun `anonymous rescue ingress stays closed until explicitly ready`() = testApplication {
+        val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
+            dbPath = Files.createTempFile("relay-rescue-ingress-gate", ".db").toString(),
+            shelterId = "fuchu-area",
+        )
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val signer = RescueCryptography.generateShelterSigningKeyPair()
+        val service = RescueIntakeService(
+            shelterId = config.shelterId,
+            recipientPrivateKey = recipient.privateKey,
+            shelterSigningPrivateKey = signer.privateKey,
+            persistence = InMemoryRescuePersistence(),
+        )
+
+        GatewayStore(config).use { store ->
+            application { gatewayModule(config, store, rescueIntakeService = service) }
+            assertEquals(HttpStatusCode.NotFound, client.post("/api/public/rescue/deliver").status)
+            assertTrue(client.get("/api/health").bodyAsText().contains("\"rescueIngressReady\":false"))
+        }
+    }
+
+    @Test
+    fun `development generated-key mode explicitly enables anonymous rescue ingress`() = testApplication {
+        val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
+            dbPath = Files.createTempFile("relay-rescue-development-ingress", ".db").toString(),
+            shelterId = "fuchu-area",
+        )
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val signer = RescueCryptography.generateShelterSigningKeyPair()
+        val service = RescueIntakeService(
+            shelterId = config.shelterId,
+            recipientPrivateKey = recipient.privateKey,
+            shelterSigningPrivateKey = signer.privateKey,
+            persistence = InMemoryRescuePersistence(),
+        )
+
+        GatewayStore(config).use { store ->
+            application {
+                gatewayModule(
+                    config,
+                    store,
+                    rescueIntakeService = service,
+                    rescueDeliveryReady = true,
+                )
+            }
+            assertTrue(client.get("/api/health").bodyAsText().contains("\"rescueIngressReady\":true"))
+        }
+    }
+
+    @Test
     fun `staff can view exact rescue detail and claim the response`() = testApplication {
         val config = GatewayConfig(
             profile = GatewayProfile.DEVELOPMENT,
