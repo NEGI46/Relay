@@ -1,4 +1,5 @@
 import java.time.Instant
+import java.net.URI
 import java.util.Collections
 import java.util.zip.ZipFile
 import org.gradle.api.GradleException
@@ -21,6 +22,16 @@ val relayReleaseSigningConfigured = listOf(
     relayReleaseKeyAlias,
     relayReleaseKeyPassword,
 ).all { !it.isNullOrBlank() }
+val relayBrokerEndpoint = providers.gradleProperty("relay.broker.endpoint").orNull?.trim()?.trimEnd('/') ?: ""
+
+if (relayBrokerEndpoint.isNotEmpty()) {
+    val brokerUri = runCatching { URI(relayBrokerEndpoint) }.getOrElse {
+        throw GradleException("relay.broker.endpoint must be a valid HTTPS URL")
+    }
+    require(brokerUri.scheme.equals("https", ignoreCase = true) && !brokerUri.host.isNullOrBlank() && brokerUri.userInfo == null) {
+        "relay.broker.endpoint must be an HTTPS URL without embedded credentials"
+    }
+}
 
 android {
     namespace = "com.example.relay"
@@ -40,6 +51,9 @@ android {
         // A test Root is never a release/pilot trust anchor, even if a misconfigured asset is
         // accidentally packaged. Debug/local development may explicitly allow TEST fixtures.
         buildConfigField("String", "REGIONAL_ROOT_BUNDLE_ENVIRONMENTS", "\"PILOT,PRODUCTION\"")
+        // The public Broker location is build-time configuration, never editable in a release
+        // APK. An empty value deliberately disables mobile-network Broker delivery.
+        resValue("string", "broker_endpoint", relayBrokerEndpoint)
     }
 
     buildFeatures {
