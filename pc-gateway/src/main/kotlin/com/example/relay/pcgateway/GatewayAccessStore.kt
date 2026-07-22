@@ -459,7 +459,7 @@ class GatewayAccessStore(dbPath: String) : AutoCloseable {
             listOf(
                 record.id.toString(), record.occurredAtEpochMillis.toString(), record.operatorUsername.orEmpty(),
                 record.targetId.orEmpty(), record.action, record.result, record.source.orEmpty(),
-            ).joinToString(",")(::csvEscape)
+            ).joinToString(",") { value -> csvEscape(value) }
         }
         return header + "\n" + rows + "\n"
     }
