@@ -27,7 +27,7 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
       - name: Build debug APK and JVM artifacts
-        run: ./gradlew :app:assembleDebug :pc-gateway:build :broker:test --no-daemon
+        run: ./gradlew :app:assembleDebug :pc-gateway:build :pc-gateway:installDist :broker:test --no-daemon
       - name: Upload build artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
@@ -36,6 +36,7 @@ jobs:
           path: |
             app/build/outputs/apk/**/*.apk
             pc-gateway/build/libs/**
+            pc-gateway/build/install/pc-gateway/**
           if-no-files-found: warn
 
   unit:
