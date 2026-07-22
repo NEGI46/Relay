@@ -52,7 +52,7 @@ data class OwnRescueRequestUiState(
 /** Metadata-only, passive status shown to a courier. */
 data class CourierAutomationUiState(
     val isEnabled: Boolean = false,
-    val statusMessage: String = "受信した情報は自動で避難所へ届けます",
+    val statusMessage: String = "受信した情報は、地域の救助拠点が見つかると中継します",
     val lastDeliveredAtEpochMillis: Long? = null,
 )
 

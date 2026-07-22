@@ -95,7 +95,7 @@ private fun RescueHomeScreen(
                         when {
                             state.broadcast.transferCount > 0 -> language.text("中継済み。避難所への到達を確認中です。", "Relayed. Waiting for confirmation from the shelter.")
                             state.broadcast.isActive -> language.text("周囲のRelay端末を探しています。", "Looking for nearby Relay devices.")
-                            else -> language.text("送信可能。依頼後はアプリを閉じても中継します。", "Ready. Relay continues after you close the app.")
+                            else -> language.text("中継の準備ができています。依頼後は、通信サービスが動作している間は画面を閉じても中継します。", "Ready to relay. After you request help, relaying continues even if you close the screen, as long as the communication service is running.")
                         },
                     )
                     Text(language.text("端末・避難所・再送を選ぶ操作はありません。", "You never need to select a device, shelter, or retry."))
@@ -179,16 +179,21 @@ private fun OwnRequestCard(request: OwnRescueRequestUiState, language: RescueLan
                 },
                 style = MaterialTheme.typography.titleMedium,
             )
-            Text(language.text("依頼 → 自動中継 → 避難所受信 → 対応中 → 完了", "Request → Relay → Shelter → Responding → Complete"))
+            Text(
+                if (request.terminalStatus == "EXPIRED") {
+                    language.text("この救助依頼はもう受け付けられません。", "This request can no longer be acted on.")
+                } else {
+                    request.submissionStatus.statusCopy().description(language)
+                },
+            )
             MiniLocationMap(request.urgency == RescueUrgency.IMMEDIATE)
             Text("GPS: %.5f, %.5f".format(request.latitude, request.longitude))
-            Text(language.text("位置更新", "Location updated") + ": ${formatRescueTime(request.locationCapturedAtEpochMillis)}${request.accuracyMeters?.let { language.text("（精度 約${it.toInt()}m）", " (accuracy about ${it.toInt()} m)") }.orEmpty()}")
+            Text(language.text("位置の取得時刻", "Location captured") + ": ${formatRescueTime(request.locationCapturedAtEpochMillis)}${request.accuracyMeters?.let { language.text("（精度 約${it.toInt()}m）", " (accuracy about ${it.toInt()} m)") }.orEmpty()}")
             Text(
-                if (request.trackingEnabled) {
-                    language.text("現在地を継続して更新中です。", "Location updates are active.")
-                } else {
-                    language.text("現在地の更新は停止しています。", "Location updates are stopped.")
-                },
+                language.text(
+                    "位置は依頼の作成時と更新の送信時に取得します。常時追跡はしません。",
+                    "Location is captured when you create the request and when you send an update. It is not tracked continuously.",
+                ),
             )
             if (!request.isCancelled && request.terminalStatus == null) {
                 Button(onClick = callbacks::onPrepareUpdate, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
@@ -277,20 +282,8 @@ internal fun SectionTitle(text: String) = Text(
     modifier = Modifier.padding(top = 8.dp).semantics { heading() },
 )
 
-private fun RescueSubmissionStatus.statusLabel(language: RescueLanguage): String = when (this) {
-    RescueSubmissionStatus.PENDING_DESTINATION -> language.text(
-        "受信先を安全に確認中",
-        "Resolving a trusted receiver",
-    )
-    RescueSubmissionStatus.PENDING -> language.text("周囲の端末を探索中", "Looking for nearby devices")
-    RescueSubmissionStatus.IN_TRANSIT -> language.text("避難所へ自動中継中", "Relaying to the shelter")
-    RescueSubmissionStatus.SHELTER_STORED -> language.text("避難所PCが受信済み", "Received by the shelter PC")
-    RescueSubmissionStatus.SHELTER_ACCEPTED -> language.text("避難所が受領済み", "Accepted by the shelter")
-    RescueSubmissionStatus.SHELTER_RESPONDING -> language.text("避難所が対応中", "Shelter is responding")
-    RescueSubmissionStatus.SHELTER_COMPLETED -> language.text("対応完了", "Response complete")
-    RescueSubmissionStatus.CANCELLED -> language.text("取消確認済み", "Cancellation confirmed")
-    RescueSubmissionStatus.SHELTER_REJECTED -> language.text("避難所で確認が必要", "Shelter review required")
-}
+private fun RescueSubmissionStatus.statusLabel(language: RescueLanguage): String =
+    statusCopy().shortLabel(language)
 
 private fun formatRescueTime(epochMillis: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(epochMillis))

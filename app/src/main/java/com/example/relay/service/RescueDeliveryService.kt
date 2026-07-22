@@ -92,8 +92,8 @@ class RescueDeliveryService : Service() {
 
     private fun notification() = NotificationCompat.Builder(this, CHANNEL_ID)
         .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-        .setContentTitle("Relay が救助要請を運搬中")
-        .setContentText("避難所PCを見つけると自動で提出します")
+        .setContentTitle("Relay が救助要請を中継中")
+        .setContentText("地域の救助拠点が見つかると中継します")
         .setOngoing(true)
         .setOnlyAlertOnce(true)
         .build()

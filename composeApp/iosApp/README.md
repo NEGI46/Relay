@@ -41,4 +41,6 @@ struct ComposeView: UIViewControllerRepresentable {
 }
 ```
 
-Kotlin 側の UI・ドメインは Android 版と同じ系統（`RelaySharedApp` / `shared`）です。SwiftUI でアプリ本体を書き直していません。
+Kotlin 側の UI・ドメインは共有モジュール（`RelaySharedApp` / `shared`）を使います。SwiftUI でアプリ本体を書き直していません。
+
+この共有 UI は **開発プレビュー（機能制限あり）** です。Android 版の救助依頼（SOS）・Nearby 自動中継・Foreground Service は含まれません。安否・物資・地域情報の共有と地図確認、および PC Gateway の公開同期（開発用）のみに対応します。

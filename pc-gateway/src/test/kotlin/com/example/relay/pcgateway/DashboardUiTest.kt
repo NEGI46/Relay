@@ -37,6 +37,53 @@ class DashboardUiTest {
     )
 
     @Test
+    fun `staff response labels are centralised and separate rescue request from external dispatch`() {
+        val script = requireNotNull(javaClass.classLoader.getResource("web/app.js")).readText()
+        // All eight staff response states must resolve to a Japanese label (not the raw enum).
+        listOf(
+            "UNCONFIRMED", "CONFIRMED", "PREPARING", "RESCUE_REQUESTED",
+            "RESPONDING", "COMPLETED", "UNABLE", "DUPLICATE",
+        ).forEach { assertTrue("missing label for $it", script.contains("$it:")) }
+        // RESCUE_REQUESTED must not claim an external fire/rescue dispatch actually happened.
+        assertTrue(script.contains("外部連携未確認"))
+        assertFalse(script.contains("救助隊を要請済み"))
+    }
+
+    @Test
+    fun `settings screen names the signed in operator instead of the PC`() {
+        val markup = requireNotNull(javaClass.classLoader.getResource("web/index.html")).readText()
+        // assignedNodeId / nodeId() is a staff username, so the console must not call it "this PC".
+        assertFalse(markup.contains("このPC"))
+        assertTrue(markup.contains("サインイン中の運用者"))
+        assertTrue(markup.contains("最初に確認した運用者が担当"))
+        assertFalse(markup.contains("最初に確認したPCが担当"))
+    }
+
+    @Test
+    fun `console shows build profile and hides raw errors from normal screens`() {
+        val markup = requireNotNull(javaClass.classLoader.getResource("web/index.html")).readText()
+        val script = requireNotNull(javaClass.classLoader.getResource("web/app.js")).readText()
+        // Operation mode / build profile must be surfaced to staff.
+        assertTrue(markup.contains("運用モード"))
+        assertTrue(markup.contains("id=\"settingsProfile\""))
+        assertTrue(script.contains("renderOperationMode"))
+        assertTrue(script.contains("health.profile"))
+        assertTrue(script.contains("開発プレビュー"))
+        assertTrue(script.contains("正式運用"))
+        // A concurrency conflict must be phrased for an operator, not "another PC".
+        assertTrue(script.contains("別の運用者が先に担当"))
+        assertFalse(script.contains("別のPCが先に担当"))
+    }
+
+    @Test
+    fun `gateway store is not presented as a signed shelter receipt`() {
+        // The dashboard summary must keep gateway-stored content marked unverified, never "official".
+        val script = requireNotNull(javaClass.classLoader.getResource("web/app.js")).readText()
+        assertFalse(script.contains("公式到達"))
+        assertFalse(script.contains("救助が保証"))
+    }
+
+    @Test
     fun `rescue list escapes user supplied location before inserting markup`() {
         val script = requireNotNull(javaClass.classLoader.getResource("web/app.js")).readText()
         val unsafeExpression = "$" + "{request.locationDescription || \"GPS位置あり\"}"

@@ -34,6 +34,19 @@
   function statusLabel(value) {
     return ({ UNCONFIRMED: "未確認", CONFIRMED: "確認済み", PREPARING: "対応準備中", RESCUE_REQUESTED: "対応要請を記録（外部連携未確認）", RESPONDING: "対応中", COMPLETED: "完了", UNABLE: "対応不可", DUPLICATE: "重複" })[value] || value;
   }
+  function profileLabel(profile) {
+    return ({ production: "正式運用", lab: "実証・検証モード", development: "開発プレビュー" })[String(profile || "").toLowerCase()] || "開発プレビュー";
+  }
+  function renderOperationMode(health) {
+    const profile = String(health.profile || "").toLowerCase();
+    const label = profileLabel(profile);
+    const isDev = profile !== "production";
+    const anon = health.anonymousIngress ? "・anonymous ingress有効" : "";
+    const detail = $("settingsProfile");
+    if (detail) detail.textContent = isDev ? `${label}（正式運用には未対応${anon}）` : label;
+    const chip = $("modeLabel");
+    if (chip) { chip.textContent = isDev ? label : ""; chip.classList.toggle("dev", isDev); }
+  }
   function conditionLabel(value) {
     return ({ LIFE_THREATENING: "命の危険", INJURED_OR_UNWELL: "けが・体調不良", MOBILITY_IMPAIRED: "自力移動困難", SUPPORT_NEEDED: "生活・医療支援" })[value] || value;
   }
@@ -138,7 +151,7 @@
       await api(`/api/rescue/requests/${encodeURIComponent(id)}/status`, { method: "POST", headers: authHeaders(true), body: JSON.stringify({ status }) });
       await loadRequests();
     } catch (error) {
-      alert(error.status === 409 ? "別のPCが先に担当したか、状態の順序が正しくありません。更新してください。" : `状態更新に失敗しました: ${error.message}`);
+      alert(error.status === 409 ? "別の運用者が先に担当したか、状態の順序が正しくありません。更新してください。" : `状態更新に失敗しました: ${error.message}`);
     }
   }
 
@@ -337,7 +350,7 @@
 
   async function refreshAll() {
     try {
-      await Promise.all([loadRequests(), loadMapStatus(), loadOfficial(), api("/api/health").then((health) => { $("healthStatus").textContent = `Gateway ${health.status} / BLE ${health.bleBridgeStatus}`; })]);
+      await Promise.all([loadRequests(), loadMapStatus(), loadOfficial(), api("/api/health").then((health) => { $("healthStatus").textContent = `Gateway ${health.status} / BLE ${health.bleBridgeStatus}`; renderOperationMode(health); })]);
       $("connectionDot").classList.add("online"); $("connectionLabel").textContent = "接続中";
     } catch (error) {
       if (error.status === 401) return lock();

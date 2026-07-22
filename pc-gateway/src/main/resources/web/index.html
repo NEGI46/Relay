@@ -31,7 +31,7 @@
 
   <header class="app-header">
     <div class="brand"><span class="wordmark small" aria-hidden="true">R</span><div><h1>Relay 救助拠点</h1><p>広島県安芸郡府中町</p></div></div>
-    <div class="header-status"><span id="connectionDot" class="dot"></span><span id="connectionLabel">接続確認中</span><span id="staffNodeLabel"></span><button id="lockButton" class="button quiet" type="button">ロック</button></div>
+    <div class="header-status"><span id="connectionDot" class="dot"></span><span id="connectionLabel">接続確認中</span><span id="modeLabel" class="mode-chip"></span><span id="staffNodeLabel"></span><button id="lockButton" class="button quiet" type="button">ロック</button></div>
   </header>
 
   <aside id="officialAlert" class="official-alert">公式情報を確認中です</aside>
@@ -83,8 +83,8 @@
 
     <section id="panel-settings" class="panel">
       <div class="wide-card settings-grid">
-        <div><p class="eyebrow">PILOT AREA</p><h2>初期設定</h2><dl><dt>都道府県</dt><dd>広島県</dd><dt>市区町村</dt><dd>安芸郡府中町</dd><dt>このPC</dt><dd id="settingsNode"></dd></dl></div>
-        <div><h3>通信確認</h3><p id="healthStatus">確認中</p><h3>運用ルール</h3><ul><li>画面は避難所スタッフだけが使用</li><li>最初に確認したPCが担当</li><li>完了・取消から30日後に詳細を削除</li><li>一般利用者は避難所を選択しない</li></ul></div>
+        <div><p class="eyebrow">PILOT AREA</p><h2>初期設定</h2><dl><dt>都道府県</dt><dd>広島県</dd><dt>市区町村</dt><dd>安芸郡府中町</dd><dt>サインイン中の運用者</dt><dd id="settingsNode"></dd><dt>運用モード</dt><dd id="settingsProfile">確認中</dd></dl></div>
+        <div><h3>通信確認</h3><p id="healthStatus">確認中</p><h3>運用ルール</h3><ul><li>画面は避難所スタッフだけが使用</li><li>最初に確認した運用者が担当</li><li>完了・取消から30日後に詳細を削除</li><li>一般利用者は避難所を選択しない</li></ul></div>
       </div>
     </section>
   </main>
