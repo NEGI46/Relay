@@ -22,6 +22,11 @@ artifacts/~relay-pc-gateway.DDF
 tools/wix314/
 signing/*.jks
 signing/*.pfx
+# Offline regional signing material is never a repository or build artifact input.
+**/*regional-root-private*.json
+**/*regional-root-material*.json
+**/*root-signing-material*.json
+**/*.pkcs8
 artifacts/*.txt
 artifacts/gw-*.txt
 artifacts/export-test.csv

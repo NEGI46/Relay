@@ -38,6 +38,9 @@ import kotlinx.serialization.json.Json
 data class RegionalRootSigningMaterial(
     val fileVersion: Int = 1,
     val regionId: String,
+    /** Operator-side classification only; Android public bundles intentionally omit private metadata. */
+    val environment: String = "UNSPECIFIED",
+    val operatorLabel: String = "Relay Regional Root — NOT MUNICIPAL PRODUCTION",
     val rootSigningPublicKey: RescuePublicKey,
     val rootSigningPrivateKey: PersistedRegionalPrivateKey,
 ) {
@@ -142,6 +145,7 @@ class ShelterManifestProvisioner(
     fun loadRootSigningMaterial(path: Path): RegionalRootSigningMaterial {
         require(Files.isRegularFile(path)) { "regional root signing material is missing" }
         require(Files.size(path) in 1..MAX_ROOT_MATERIAL_BYTES) { "invalid regional root signing material size" }
+        requireOfflinePrivatePath(path)
         return Json { encodeDefaults = true; ignoreUnknownKeys = false }
             .decodeFromString<RegionalRootSigningMaterial>(Files.readString(path, Charsets.UTF_8))
             .also { it.privateKey() }
@@ -170,8 +174,10 @@ object ShelterManifestProvisioningCli {
         )
         println("Provisioned signed shelter manifest for ${signed.manifest.shelterId}; fingerprint=${signed.manifest.fingerprint()}")
         0
-    }.getOrElse { error ->
-        System.err.println("Provisioning failed: ${error.message}")
+    }.getOrElse {
+        // A malformed root-material input can contain sensitive text. Do not reflect exception
+        // messages to the console from this offline signing path.
+        System.err.println("Provisioning failed. No signed shelter manifest was written.")
         2
     }
 
@@ -197,7 +203,8 @@ private fun atomicWriteOwnerOnly(path: Path, contents: ByteArray) {
     }
 }
 
-private fun restrictOwnerOnly(target: Path) {
+/** Shared by offline root generation; normal Gateway startup never receives root material. */
+internal fun restrictOwnerOnly(target: Path) {
     val posix = runCatching { Files.getPosixFilePermissions(target) }.getOrNull()
     if (posix != null) {
         Files.setPosixFilePermissions(target, setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE))
@@ -212,4 +219,13 @@ private fun restrictOwnerOnly(target: Path) {
         .setPermissions(EnumSet.allOf(AclEntryPermission::class.java))
         .build()
     aclView.acl = listOf(ownerOnly)
+}
+
+/** Private root material is an offline operator artifact and must never live in a Git worktree. */
+internal fun requireOfflinePrivatePath(path: Path) {
+    var parent: Path? = path.toAbsolutePath().parent
+    while (parent != null) {
+        require(!Files.exists(parent.resolve(".git"))) { "private material may not be stored under a Git worktree" }
+        parent = parent.parent
+    }
 }
