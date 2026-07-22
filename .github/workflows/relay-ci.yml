@@ -197,7 +197,9 @@ jobs:
           path: evidence
           merge-multiple: true
       - shell: pwsh
-        run: ./scripts/verify-security-evidence.ps1 -EvidencePaths evidence/mobsf.json,evidence/syft-sbom.json,evidence/osv.json,evidence/grype.json,evidence/signature-verification.json -OutputPath evidence/security-evidence-summary.json -RequireComplete -Mode $env:SECURITY_MODE
+        # In report-only mode, unavailable external services remain explicitly BLOCKED in the
+        # artifact. The evidence script enforces completeness automatically in block-high-critical.
+        run: ./scripts/verify-security-evidence.ps1 -EvidencePaths evidence/mobsf.json,evidence/syft-sbom.json,evidence/osv.json,evidence/grype.json,evidence/signature-verification.json -OutputPath evidence/security-evidence-summary.json -Mode $env:SECURITY_MODE
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
