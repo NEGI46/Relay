@@ -377,7 +377,7 @@ internal fun gatewayStatusLabel(lastResult: String?, transportRunning: Boolean):
     !transportRunning -> "中継拠点: 通信停止中"
     lastResult == null -> "中継拠点: 探索・同期の準備中"
     lastResult == "idle" -> "中継拠点: 送信待ちの情報なし"
-    lastResult == "gateway_not_found" -> "中継拠点: 未検出（同じWi‑FiにPC Gatewayがありますか）"
+    lastResult == "gateway_not_found" -> "中継拠点: 未検出（利用できる中継経路が見つかりません）"
     lastResult.startsWith("sent=") -> "中継拠点: 同期済み・内容は未検証（$lastResult）"
     lastResult.startsWith("http_") -> "中継拠点: 通信エラー（$lastResult）"
     lastResult == "network_error" -> "中継拠点: ネットワークエラー"
@@ -398,7 +398,7 @@ private fun SettingsScreen(
             item { Text("設定", style = MaterialTheme.typography.headlineMedium) }
             item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("すべてローカル優先です。登録・ペアリングは不要です。")
-                Text("近くの端末と自動中継し、同じWi‑Fi上のPC Gatewayへ公開同期できます。")
+                Text("近くの端末で中継し、利用できる安全なオンライン経路（地域の中継拠点など）へ公開同期できます。")
                 Text("インターネットが戻ると重要情報を追加受信します（オフライン中継はそのまま）。")
                 Text(if (state.transportRunning) "災害通信: 動作中" else "災害通信: 停止中")
                 Text("中継拠点への保存は未検証の証跡です。公式到達ではありません。")

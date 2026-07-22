@@ -89,7 +89,7 @@ fun RelaySharedApp(
                     // Discovery is platform-specific; until wired, require override or localhost.
                     DiscoveredGateway("127.0.0.1", gatewayPortOverride, "local")
                 }
-                val response = client.pushPublic(gateway, deviceId, "Relay Apple", pending)
+                val response = client.pushPublic(gateway, deviceId, "Relay 共有版プレビュー", pending)
                 client.mapReceipts(response).forEach { store.insertReceipt(it) }
                 lastGateway =
                     "sent=${response.acceptedMessageIds.size} (内容は未検証)"
@@ -123,7 +123,8 @@ fun RelaySharedApp(
                             Modifier.fillMaxWidth().semantics { contentDescription = "災害通信の状態" },
                         ) {
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("iPhone / 共有 Kotlin 版", style = MaterialTheme.typography.titleLarge)
+                                Text("共有Kotlin版（開発プレビュー）", style = MaterialTheme.typography.titleLarge)
+                                Text("開発プレビュー版です。救助依頼（SOS）と自動中継はありません。安否・物資・地域情報の共有と地図確認に対応します。")
                                 Text("保存中の情報: ${messages.size}件")
                                 Text(
                                     when {
@@ -140,7 +141,7 @@ fun RelaySharedApp(
                                         .fillMaxWidth()
                                         .height(56.dp)
                                         .semantics { contentDescription = "中継拠点へ同期" },
-                                ) { Text("中継拠点へ同期（公開LAN）") }
+                                ) { Text("地域の中継拠点へ同期（開発プレビュー）") }
                             }
                         }
                     }
