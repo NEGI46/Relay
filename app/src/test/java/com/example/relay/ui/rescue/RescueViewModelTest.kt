@@ -59,6 +59,8 @@ class RescueViewModelTest {
         viewModel.onDraftChange(
             requireNotNull(viewModel.state.value.draft).copy(
                 destinationShelterId = "shelter-1",
+                personCount = 1,
+                conditions = setOf(RescueCondition.INJURED_OR_UNWELL),
                 freeText = PRIVATE_NOTE,
             ),
         )
