@@ -278,6 +278,10 @@ internal fun SectionTitle(text: String) = Text(
 )
 
 private fun RescueSubmissionStatus.statusLabel(language: RescueLanguage): String = when (this) {
+    RescueSubmissionStatus.PENDING_DESTINATION -> language.text(
+        "受信先を安全に確認中",
+        "Resolving a trusted receiver",
+    )
     RescueSubmissionStatus.PENDING -> language.text("周囲の端末を探索中", "Looking for nearby devices")
     RescueSubmissionStatus.IN_TRANSIT -> language.text("避難所へ自動中継中", "Relaying to the shelter")
     RescueSubmissionStatus.SHELTER_STORED -> language.text("避難所PCが受信済み", "Received by the shelter PC")

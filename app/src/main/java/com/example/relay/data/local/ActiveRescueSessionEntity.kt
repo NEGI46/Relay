@@ -79,6 +79,45 @@ interface ActiveRescueSessionDao {
         terminalStatus: String?,
     ): Int
 
+    /**
+     * Converts an on-device-only SOS into a transferable encrypted envelope without consuming a
+     * new request version. The status predicate prevents a stale resolver from replacing an
+     * already-materialized session.
+     */
+    @Query(
+        """UPDATE active_rescue_sessions
+            SET sealedRecoveryPayload = :sealedRecoveryPayload,
+                recoveryNonce = :recoveryNonce,
+                trackingMode = :trackingMode,
+                latestSubmissionStatus = :latestSubmissionStatus,
+                updatedAtEpochMillis = :updatedAtEpochMillis,
+                expiresAtEpochMillis = :expiresAtEpochMillis
+            WHERE requestId = :requestId
+              AND latestVersion = :expectedVersion
+              AND latestSubmissionStatus = 'PENDING_DESTINATION'
+              AND terminalStatus IS NULL""",
+    )
+    fun materializePendingDestination(
+        requestId: String,
+        expectedVersion: Int,
+        sealedRecoveryPayload: ByteArray,
+        recoveryNonce: ByteArray,
+        trackingMode: String,
+        latestSubmissionStatus: String,
+        updatedAtEpochMillis: Long,
+        expiresAtEpochMillis: Long,
+    ): Int
+
+    /** A pending-destination SOS has no envelope, so local cancellation safely deletes only it. */
+    @Query(
+        """DELETE FROM active_rescue_sessions
+            WHERE requestId = :requestId
+              AND latestVersion = :expectedVersion
+              AND latestSubmissionStatus = 'PENDING_DESTINATION'
+              AND terminalStatus IS NULL""",
+    )
+    fun deletePendingDestination(requestId: String, expectedVersion: Int): Int
+
     /** Only a verified shelter receipt is allowed to advance this public status field. */
     @Query(
         """UPDATE active_rescue_sessions

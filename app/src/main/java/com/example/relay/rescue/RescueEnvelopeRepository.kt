@@ -12,6 +12,11 @@ import com.example.relay.rescue.validate
 data class RescueRequestKey(val requestId: String, val requestVersion: Int)
 
 enum class RescueSubmissionStatus {
+    /**
+     * Sender-only state: the SOS is encrypted in the device recovery store, but no trusted
+     * shelter public key is available yet, so no transferable envelope exists.
+     */
+    PENDING_DESTINATION,
     PENDING,
     IN_TRANSIT,
     SHELTER_STORED,
@@ -255,6 +260,7 @@ internal fun ShelterReceiptStatus.toSubmissionStatus(): RescueSubmissionStatus =
 }
 
 internal fun RescueSubmissionStatus.rank(): Int = when (this) {
+    RescueSubmissionStatus.PENDING_DESTINATION -> -1
     RescueSubmissionStatus.PENDING -> 0
     RescueSubmissionStatus.IN_TRANSIT -> 1
     RescueSubmissionStatus.SHELTER_STORED -> 2

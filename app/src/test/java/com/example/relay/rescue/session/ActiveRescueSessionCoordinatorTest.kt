@@ -7,6 +7,7 @@ import com.example.relay.rescue.RescueCryptography
 import com.example.relay.rescue.RescueEnvelopeState
 import com.example.relay.rescue.RescueRequestDraft
 import com.example.relay.rescue.RescueRequestKey
+import com.example.relay.rescue.RescuePrivateKey
 import com.example.relay.rescue.RescueStoreRejection
 import com.example.relay.rescue.RescueStoreResult
 import com.example.relay.rescue.RescueSubmissionStatus
@@ -135,16 +136,52 @@ class ActiveRescueSessionCoordinatorTest {
         assertEquals(0, fixture.deliveryNotifications)
     }
 
+    @Test
+    fun `SOS is durably queued without a key then materialized only after trusted resolution`() = runBlocking {
+        val fixture = fixture(keysAvailable = false)
+
+        val pending = fixture.coordinator.create(draft()) as RescueSessionOperationResult.PendingDestination
+
+        assertEquals(RescueSubmissionStatus.PENDING_DESTINATION, pending.value.submissionStatus)
+        assertTrue(fixture.envelopes.all().isEmpty())
+        assertFalse(pending.value.session.sealedRecoveryPayload.decodeToString().contains(PRIVATE_NOTE))
+        assertEquals(1, fixture.deliveryNotifications)
+
+        fixture.configuredKeys = fixture.keys
+        assertEquals(1, fixture.coordinator.resolvePendingDestinations())
+
+        val envelope = fixture.envelopes.all().single().envelope
+        assertEquals("shelter-1", envelope.destinationShelterId)
+        assertEquals(PRIVATE_NOTE, RescueCryptography.decrypt(envelope, fixture.recipientPrivateKey).freeText)
+        val restored = fixture.coordinator.restoreLatest() as RescueSessionRestoreResult.Restored
+        assertEquals(RescueSubmissionStatus.PENDING, restored.value.submissionStatus)
+        assertEquals(2, fixture.deliveryNotifications)
+    }
+
+    @Test
+    fun `pending SOS can be discarded before any envelope is emitted`() = runBlocking {
+        val fixture = fixture(keysAvailable = false)
+        val pending = fixture.coordinator.create(draft()) as RescueSessionOperationResult.PendingDestination
+
+        assertEquals(
+            RescueSessionOperationResult.PendingDestinationDiscarded,
+            fixture.coordinator.cancel(pending.value.session.requestId),
+        )
+        assertTrue(fixture.store.all().isEmpty())
+        assertTrue(fixture.envelopes.all().isEmpty())
+    }
+
     private fun fixture(
         now: Long = 1_700_000_000_000L,
         lifetimeMillis: Long = 3L * 24 * 60 * 60 * 1_000,
+        keysAvailable: Boolean = true,
     ): Fixture {
         val recipient = RescueCryptography.generateRecipientKeyPair()
         val receipt = RescueCryptography.generateShelterSigningKeyPair()
         val keys = ShelterPublicKeys("shelter-1", recipient.publicKey, receipt.publicKey)
         val store = FakeSessionStore()
         val cipher = AesGcmRecoveryPayloadCipher(TestKeyProvider(), "TEST ONLY session-key")
-        return Fixture(store, cipher, keys, now, lifetimeMillis)
+        return Fixture(store, cipher, keys, recipient.privateKey, now, lifetimeMillis, keysAvailable)
     }
 
     private fun draft(requestId: String = "request-1") = RescueRequestDraft(
@@ -161,17 +198,20 @@ class ActiveRescueSessionCoordinatorTest {
     private class Fixture(
         val store: FakeSessionStore,
         private val cipher: RecoveryPayloadCipher,
-        private val keys: ShelterPublicKeys,
+        val keys: ShelterPublicKeys,
+        val recipientPrivateKey: RescuePrivateKey,
         var now: Long,
         private val lifetimeMillis: Long,
+        keysAvailable: Boolean,
     ) {
         var deliveryNotifications: Int = 0
+        var configuredKeys: ShelterPublicKeys? = keys.takeIf { keysAvailable }
         val envelopes: InMemoryRescueEnvelopeRepository get() = store.envelopes
         val coordinator: ActiveRescueSessionCoordinator get() = newCoordinator()
         fun newCoordinator() = ActiveRescueSessionCoordinator(
             store = store,
             recoveryCipher = cipher,
-            shelterKeyProvider = ShelterPublicKeyProvider { keys },
+            shelterKeyProvider = ShelterPublicKeyProvider { configuredKeys },
             nowEpochMillis = { now },
             requestLifetimeMillis = lifetimeMillis,
             newEnvelopeId = { "envelope-${++envelopeCounter}" },
@@ -213,6 +253,16 @@ class ActiveRescueSessionCoordinatorTest {
             }
         }
 
+        override fun createPendingDestinationAtomically(
+            session: ActiveRescueSession,
+            receivedAtEpochMillis: Long,
+        ): SessionCommitResult = synchronized(lock) {
+            if (failWrites) return@synchronized SessionCommitResult.Rejected(RescueStoreRejection.EXCEEDS_BYTE_LIMIT)
+            if (sessions.containsKey(session.requestId)) return@synchronized SessionCommitResult.VersionConflict
+            sessions[session.requestId] = session
+            SessionCommitResult.PendingDestinationStored
+        }
+
         override fun updateAtomically(
             expectedVersion: Int,
             session: ActiveRescueSession,
@@ -228,6 +278,41 @@ class ActiveRescueSessionCoordinatorTest {
                 }
                 is RescueStoreResult.Rejected -> SessionCommitResult.Rejected(result.reason)
             }
+        }
+
+        override fun materializePendingDestinationAtomically(
+            expectedVersion: Int,
+            session: ActiveRescueSession,
+            envelope: EncryptedRescueEnvelope,
+            receivedAtEpochMillis: Long,
+        ): SessionCommitResult = synchronized(lock) {
+            if (failWrites) return@synchronized SessionCommitResult.Rejected(RescueStoreRejection.EXCEEDS_BYTE_LIMIT)
+            val current = sessions[session.requestId]
+                ?: return@synchronized SessionCommitResult.VersionConflict
+            if (current.latestVersion != expectedVersion ||
+                current.latestSubmissionStatus != RescueSubmissionStatus.PENDING_DESTINATION.name
+            ) {
+                return@synchronized SessionCommitResult.VersionConflict
+            }
+            when (val result = envelopes.store(envelope, receivedAtEpochMillis)) {
+                is RescueStoreResult.Stored -> {
+                    sessions[session.requestId] = session
+                    SessionCommitResult.Stored(result.record)
+                }
+                is RescueStoreResult.Rejected -> SessionCommitResult.Rejected(result.reason)
+            }
+        }
+
+        override fun discardPendingDestination(requestId: String, expectedVersion: Int): Boolean = synchronized(lock) {
+            val current = sessions[requestId] ?: return@synchronized false
+            if (current.latestVersion != expectedVersion ||
+                current.latestSubmissionStatus != RescueSubmissionStatus.PENDING_DESTINATION.name ||
+                current.terminalStatus != null
+            ) {
+                return@synchronized false
+            }
+            sessions.remove(requestId)
+            true
         }
 
         override fun applyVerifiedReceipt(

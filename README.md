@@ -76,7 +76,7 @@ flowchart LR
 
 ## Relayとは
 
-Relayは、災害や大規模通信障害を想定した**ローカル優先の救助情報中継システム**です。救助要請は端末内へ保存する前に避難所公開鍵で暗号化され、中継端末やBrokerは本文、正確な位置、人数を復号しません。
+Relayは、災害や大規模通信障害を想定した**ローカル優先の救助情報中継システム**です。受信先鍵がある救助要請は避難所公開鍵で暗号化して保存・中継し、中継端末やBrokerは本文、正確な位置、人数を復号しません。受信先鍵が未解決のSOSは、まず送信元端末だけが復元できる暗号化保留状態として保存します。
 
 現在の対象は、広島県安芸郡府中町を想定した限定区域パイロットです。ただし、このリポジトリに正式な府中町Regional RootやRoot署名済みDirectoryは含まれていません。正式な受信先公開鍵が承認済みEnrollment経路で提供されるまで、信頼済みBLE配送や本番運用は成立しません。
 
@@ -91,7 +91,9 @@ Relayは、災害や大規模通信障害を想定した**ローカル優先の�
 7. 避難所の署名済みReceiptだけを確認・対応中・完了として表示する。
 8. 終了結果は利用者が「確認しました」を押すまで保持し、その後に暗号化セッション復元行を削除する。
 
-SOS作成自体にインターネットは不要です。ただし、新規Envelopeの暗号化には承認された避難所受信公開鍵が必要です。中継完了、GatewayへのHTTP成功、Brokerの`BROKER_STORED`は避難所受領を意味しません。
+SOS作成と端末内保存にWi-Fiやモバイル通信は必要ありません。受信先公開鍵がまだ無い場合も、SOSは送信元端末のAES-GCM回復領域へ安全に保留し、Nearby通信を開始します。ただし、受信先を復号できない端末へ本文を渡すことはできないため、**信頼済みの受信先鍵が解決されるまで暗号化Envelopeの中継は開始しません**。PC GatewayやBrokerへ接続できない場合も、作成済みの暗号化依頼は利用可能なNearby/LAN/Broker経路で再試行されます。BLE Gateway配送は承認済みの信頼情報がある場合だけ行われます。
+
+debug/localDev のみ、同一Private LANで発見した `development` profile のPC Gatewayが生成した公開manifestを自動登録できます。この便宜経路は正式な信頼根・署名済みDirectoryの代わりではなく、release/pilotReleaseでは無効です。
 
 ## 配送経路
 
@@ -125,7 +127,7 @@ BLE Gatewayへ暗号文を提出
 - DirectoryはRoot署名、region、generation、有効期限、Shelter Manifest、recipient key、receipt keyを検証してSQLCipherへ保存します。
 - 同一generationで異なる内容、古いgeneration、期限切れ、fingerprint不一致は拒否します。
 - 起動時に保存済みDirectoryを再検証し、完了するまでresolverは空です。
-- unsigned同梱manifestとdebug TOFU自動Enrollmentは削除されています。
+- `release` / `pilotRelease` はunsigned manifestと自動Enrollmentを拒否します。`debug` / `localDev`だけは、明示的なdevelopment profileの同一LAN Gatewayが提示する公開manifestをdevelopment専用として登録できます。
 - 正式Root/Directoryがない現在はBLE配送がfail-closedになります。Nearby、承認済みLAN、Brokerはそれだけを理由に停止しません。
 - Regional Root秘密鍵はリポジトリ、APK、実行中Gatewayへ渡してはいけません。
 

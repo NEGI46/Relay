@@ -118,6 +118,7 @@ data class DashboardSnapshot(
 
 class GatewayStore(private val config: GatewayConfig, private val json: Json = GatewayJson) : AutoCloseable {
     private val lock = Any()
+    private val writeCoordinator = GatewaySqliteWriteCoordinator.forDatabase(config.dbPath)
     private val connection: Connection
     private val rescuePersistenceDelegate = lazy {
         SqliteRescuePersistence(config.dbPath, json)
@@ -138,7 +139,8 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
     init {
         File(config.dbPath).parentFile?.mkdirs()
         connection = DriverManager.getConnection("jdbc:sqlite:${config.dbPath}")
-        connection.createStatement().use { statement ->
+        writeCoordinator.write {
+            connection.createStatement().use { statement ->
             statement.execute("PRAGMA busy_timeout=5000")
             statement.execute("PRAGMA journal_mode=WAL")
             statement.execute("PRAGMA foreign_keys=ON")
@@ -210,6 +212,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                 CREATE TABLE IF NOT EXISTS pairing_codes(code TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0)
                 """.trimIndent(),
             )
+            }
         }
     }
 
@@ -225,10 +228,12 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
 
     fun createPairingCode(now: Long = System.currentTimeMillis()): String = synchronized(lock) {
         val code = (100000..999999).random().toString()
-        connection.prepareStatement("INSERT INTO pairing_codes(code, expires_at) VALUES (?, ?)").use {
-            it.setString(1, code)
-            it.setLong(2, now + 5 * 60_000)
-            it.executeUpdate()
+        writeCoordinator.write {
+            connection.prepareStatement("INSERT INTO pairing_codes(code, expires_at) VALUES (?, ?)").use {
+                it.setString(1, code)
+                it.setLong(2, now + 5 * 60_000)
+                it.executeUpdate()
+            }
         }
         code
     }
@@ -240,12 +245,14 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
                 if (!rs.next() || rs.getInt("used") != 0 || rs.getLong("expires_at") < now) return false
             }
         }
-        connection.prepareStatement(
-            "INSERT INTO bridges(bridge_id,name) VALUES(?,?) ON CONFLICT(bridge_id) DO UPDATE SET name=excluded.name",
-        ).use {
-            it.setString(1, bridgeId)
-            it.setString(2, name.take(80))
-            it.executeUpdate()
+        writeCoordinator.write {
+            connection.prepareStatement(
+                "INSERT INTO bridges(bridge_id,name) VALUES(?,?) ON CONFLICT(bridge_id) DO UPDATE SET name=excluded.name",
+            ).use {
+                it.setString(1, bridgeId)
+                it.setString(2, name.take(80))
+                it.executeUpdate()
+            }
         }
         true
     }
@@ -254,14 +261,16 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
         if (!requestPair(code, bridgeId, bridgeId, now)) return null
         val token = Base64.getUrlEncoder().withoutPadding()
             .encodeToString(ByteArray(32).also { java.security.SecureRandom().nextBytes(it) })
-        connection.prepareStatement("UPDATE bridges SET paired=1, token_hash=? WHERE bridge_id=?").use {
-            it.setString(1, hash(token))
-            it.setString(2, bridgeId)
-            it.executeUpdate()
-        }
-        connection.prepareStatement("UPDATE pairing_codes SET used=1 WHERE code=?").use {
-            it.setString(1, code)
-            it.executeUpdate()
+        writeCoordinator.write {
+            connection.prepareStatement("UPDATE bridges SET paired=1, token_hash=? WHERE bridge_id=?").use {
+                it.setString(1, hash(token))
+                it.setString(2, bridgeId)
+                it.executeUpdate()
+            }
+            connection.prepareStatement("UPDATE pairing_codes SET used=1 WHERE code=?").use {
+                it.setString(1, code)
+                it.executeUpdate()
+            }
         }
         token
     }
@@ -273,30 +282,36 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
     fun rejectPair(bridgeId: String, code: String? = null, now: Long = System.currentTimeMillis()): Boolean = synchronized(lock) {
         var changed = false
         if (!code.isNullOrBlank()) {
-            val updated = connection.prepareStatement(
-                "UPDATE pairing_codes SET used=1 WHERE code=? AND used=0 AND expires_at>=?",
-            ).use {
-                it.setString(1, code)
-                it.setLong(2, now)
-                it.executeUpdate()
+            val updated = writeCoordinator.write {
+                connection.prepareStatement(
+                    "UPDATE pairing_codes SET used=1 WHERE code=? AND used=0 AND expires_at>=?",
+                ).use {
+                    it.setString(1, code)
+                    it.setLong(2, now)
+                    it.executeUpdate()
+                }
             }
             changed = changed || updated > 0
         }
-        val revoked = connection.prepareStatement(
-            "UPDATE bridges SET paired=0, token_hash=NULL, connected=0 WHERE bridge_id=?",
-        ).use {
-            it.setString(1, bridgeId)
-            it.executeUpdate()
+        val revoked = writeCoordinator.write {
+            connection.prepareStatement(
+                "UPDATE bridges SET paired=0, token_hash=NULL, connected=0 WHERE bridge_id=?",
+            ).use {
+                it.setString(1, bridgeId)
+                it.executeUpdate()
+            }
         }
         changed = changed || revoked > 0
         // Ensure a row exists so the dashboard can show the rejected bridge.
         if (revoked == 0) {
-            connection.prepareStatement(
-                "INSERT INTO bridges(bridge_id,name,paired) VALUES(?,?,0) ON CONFLICT(bridge_id) DO NOTHING",
-            ).use {
-                it.setString(1, bridgeId)
-                it.setString(2, bridgeId.take(80))
-                it.executeUpdate()
+            writeCoordinator.write {
+                connection.prepareStatement(
+                    "INSERT INTO bridges(bridge_id,name,paired) VALUES(?,?,0) ON CONFLICT(bridge_id) DO NOTHING",
+                ).use {
+                    it.setString(1, bridgeId)
+                    it.setString(2, bridgeId.take(80))
+                    it.executeUpdate()
+                }
             }
         }
         changed || bridgeId.isNotBlank()
@@ -315,58 +330,62 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
 
     fun ingest(bridgeId: String, messages: List<GatewayMessage>, now: Long = System.currentTimeMillis()): List<StoreOutcome> =
         synchronized(lock) {
-            connection.autoCommit = false
-            try {
-                val results = MutableList<StoreOutcome?>(messages.size) { null }
-                persistenceOrder(messages).forEach { indexed ->
-                    results[indexed.index] = ingestOne(
-                        indexed.value,
-                        now,
-                        VERIFIED_GATEWAY_RECEIPT_TYPE,
-                        sourceBridgeId = bridgeId,
-                        applyTargetStatus = true,
-                    )
+            writeCoordinator.write {
+                connection.autoCommit = false
+                try {
+                    val results = MutableList<StoreOutcome?>(messages.size) { null }
+                    persistenceOrder(messages).forEach { indexed ->
+                        results[indexed.index] = ingestOne(
+                            indexed.value,
+                            now,
+                            VERIFIED_GATEWAY_RECEIPT_TYPE,
+                            sourceBridgeId = bridgeId,
+                            applyTargetStatus = true,
+                        )
+                    }
+                    connection.prepareStatement(
+                        "UPDATE bridges SET connected=1,last_sync_at=?,received_count=received_count+? WHERE bridge_id=?",
+                    ).use {
+                        it.setLong(1, now)
+                        it.setInt(2, messages.size)
+                        it.setString(3, bridgeId)
+                        it.executeUpdate()
+                    }
+                    connection.commit()
+                    results.map { requireNotNull(it) }
+                } catch (error: Exception) {
+                    connection.rollback()
+                    throw error
+                } finally {
+                    connection.autoCommit = true
                 }
-                connection.prepareStatement(
-                    "UPDATE bridges SET connected=1,last_sync_at=?,received_count=received_count+? WHERE bridge_id=?",
-                ).use {
-                    it.setLong(1, now)
-                    it.setInt(2, messages.size)
-                    it.setString(3, bridgeId)
-                    it.executeUpdate()
-                }
-                connection.commit()
-                results.map { requireNotNull(it) }
-            } catch (error: Exception) {
-                connection.rollback()
-                throw error
-            } finally {
-                connection.autoCommit = true
             }
         }
 
     /** Unregistered LAN senders can store validated data but receive only an explicitly unverified receipt. */
     fun ingestUnregistered(messages: List<GatewayMessage>, now: Long = System.currentTimeMillis()): List<StoreOutcome> =
         synchronized(lock) {
-            connection.autoCommit = false
-            try {
-                val results = MutableList<StoreOutcome?>(messages.size) { null }
-                persistenceOrder(messages).forEach { indexed ->
-                    results[indexed.index] = ingestOne(
-                        indexed.value,
-                        now,
-                        UNVERIFIED_GATEWAY_RECEIPT_TYPE,
-                        sourceBridgeId = null,
-                        applyTargetStatus = false,
-                    )
+            writeCoordinator.write {
+                connection.autoCommit = false
+                try {
+                    val results = MutableList<StoreOutcome?>(messages.size) { null }
+                    persistenceOrder(messages).forEach { indexed ->
+                        results[indexed.index] = ingestOne(
+                            indexed.value,
+                            now,
+                            UNVERIFIED_GATEWAY_RECEIPT_TYPE,
+                            sourceBridgeId = null,
+                            applyTargetStatus = false,
+                        )
+                    }
+                    connection.commit()
+                    results.map { requireNotNull(it) }
+                } catch (error: Exception) {
+                    connection.rollback()
+                    throw error
+                } finally {
+                    connection.autoCommit = true
                 }
-                connection.commit()
-                results.map { requireNotNull(it) }
-            } catch (error: Exception) {
-                connection.rollback()
-                throw error
-            } finally {
-                connection.autoCommit = true
             }
         }
 

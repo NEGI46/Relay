@@ -2,7 +2,10 @@
 
 ## `Relay-debug.apk`
 
-This is the local end-to-end test build. It contains the debug-only automatic discovery of a PC Gateway on the same private Wi-Fi and waits briefly for the test shelter manifest to be enrolled. It is not suitable for disaster deployment.
+This is the local end-to-end test build. It can discover a `development` PC Gateway on the same
+private Wi-Fi and, only in this debug/localDev build, pin that Gateway's generated public manifest
+for the local device. The pin is marked development-only and is rejected outside the explicit
+development gate. It is not suitable for disaster deployment.
 
 ## `Relay-release-unsigned.apk`
 

@@ -25,10 +25,15 @@ private const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
 data class RescueSessionRecoveryPayload(
     val schemaVersion: Int = RECOVERY_PAYLOAD_SCHEMA_VERSION,
     val draft: RescueRequestDraft,
-    /** The public recipient key needed to create a later encrypted update after restart. */
-    val recipientPublicKey: RescuePublicKey,
+    /**
+     * The public recipient key needed to create a later encrypted update after restart.
+     *
+     * Both keys are absent only while a sender-owned SOS is waiting for a trusted destination.
+     * That state is kept on the originating device and is never exported to a courier.
+     */
+    val recipientPublicKey: RescuePublicKey? = null,
     /** The public receipt verification key bound to the sender's selected shelter. */
-    val receiptSigningPublicKey: RescuePublicKey,
+    val receiptSigningPublicKey: RescuePublicKey? = null,
     /** Reserved durable consent state. Phase 5 does not start tracking from this value. */
     val trackingEnabled: Boolean = false,
 )

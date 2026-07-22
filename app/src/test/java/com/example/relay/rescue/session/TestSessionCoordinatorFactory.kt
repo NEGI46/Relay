@@ -53,6 +53,15 @@ private class TestSessionStore(
         }
     }
 
+    override fun createPendingDestinationAtomically(
+        session: ActiveRescueSession,
+        receivedAtEpochMillis: Long,
+    ): SessionCommitResult = synchronized(lock) {
+        if (sessions.containsKey(session.requestId)) return@synchronized SessionCommitResult.VersionConflict
+        sessions[session.requestId] = session
+        SessionCommitResult.PendingDestinationStored
+    }
+
     override fun updateAtomically(expectedVersion: Int, session: ActiveRescueSession, envelope: EncryptedRescueEnvelope, receivedAtEpochMillis: Long): SessionCommitResult = synchronized(lock) {
         if (sessions[session.requestId]?.latestVersion != expectedVersion) return@synchronized SessionCommitResult.VersionConflict
         when (val result = envelopes.store(envelope, receivedAtEpochMillis)) {
@@ -62,6 +71,39 @@ private class TestSessionStore(
             }
             is RescueStoreResult.Rejected -> SessionCommitResult.Rejected(result.reason)
         }
+    }
+
+    override fun materializePendingDestinationAtomically(
+        expectedVersion: Int,
+        session: ActiveRescueSession,
+        envelope: EncryptedRescueEnvelope,
+        receivedAtEpochMillis: Long,
+    ): SessionCommitResult = synchronized(lock) {
+        val current = sessions[session.requestId] ?: return@synchronized SessionCommitResult.VersionConflict
+        if (current.latestVersion != expectedVersion ||
+            current.latestSubmissionStatus != com.example.relay.rescue.RescueSubmissionStatus.PENDING_DESTINATION.name
+        ) {
+            return@synchronized SessionCommitResult.VersionConflict
+        }
+        when (val result = envelopes.store(envelope, receivedAtEpochMillis)) {
+            is RescueStoreResult.Stored -> {
+                sessions[session.requestId] = session
+                SessionCommitResult.Stored(result.record)
+            }
+            is RescueStoreResult.Rejected -> SessionCommitResult.Rejected(result.reason)
+        }
+    }
+
+    override fun discardPendingDestination(requestId: String, expectedVersion: Int): Boolean = synchronized(lock) {
+        val current = sessions[requestId] ?: return@synchronized false
+        if (current.latestVersion != expectedVersion ||
+            current.latestSubmissionStatus != com.example.relay.rescue.RescueSubmissionStatus.PENDING_DESTINATION.name ||
+            current.terminalStatus != null
+        ) {
+            return@synchronized false
+        }
+        sessions.remove(requestId)
+        true
     }
 
     override fun applyVerifiedReceipt(

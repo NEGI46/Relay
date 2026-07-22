@@ -43,6 +43,7 @@ import com.example.relay.rescue.ReportSigningKeyStore
 import com.example.relay.rescue.UploadSigningKeyStore
 import com.example.relay.rescue.HttpShelterManifestClient
 import com.example.relay.rescue.ShelterManifestEnrollment
+import com.example.relay.rescue.DevelopmentShelterManifestBootstrap
 import com.example.relay.rescue.RegionalShelterDirectoryResolver
 import com.example.relay.rescue.SignedRegionalShelterDirectory
 import com.example.relay.rescue.ble.AndroidShelterBleClient
@@ -111,10 +112,9 @@ class RelayApplication : Application() {
             shelterKeyProvider = rescueShelterKeyStore,
             locationProvider = locationProvider,
             nowEpochMillis = SystemClock::nowMillis,
-            shelterKeyWaitMillis = if (BuildConfig.DEBUG) 8_000 else 0,
             deliveryNotifier = RescueDeliveryNotifier {
-                // Commit has already succeeded when this is called.  The persisted service flag
-                // and transport notification therefore cannot precede a durable envelope/session.
+                // Commit has already succeeded when this is called. The service can therefore
+                // start Nearby even for a local-only SOS while it waits for a trusted key.
                 RescueDeliveryService.enableAndStart(this)
                 notifyRescueStoreChanged()
             },
@@ -249,6 +249,14 @@ class RelayApplication : Application() {
             context = this,
             onDiagnostic = { diagnostic -> gatewaySettingsStore.recordDiscovery(diagnostic.gatewayIp, diagnostic.result) },
         )
+    }
+    /**
+     * Development-preview only: discovers a local generated-key Gateway and enrolls its manifest
+     * without asking an individual developer to copy a fingerprint. Release/pilot builds receive
+     * a disabled instance and retain the ordinary independently verified enrollment boundary.
+     */
+    val developmentShelterManifestBootstrap: DevelopmentShelterManifestBootstrap by lazy {
+        DevelopmentShelterManifestBootstrap(gatewayDiscovery, rescueShelterKeyStore)
     }
     val gatewaySyncEngine: GatewaySyncEngine by lazy {
         GatewaySyncEngine(

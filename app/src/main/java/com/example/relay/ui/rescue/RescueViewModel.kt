@@ -119,6 +119,13 @@ class RescueViewModel(
                         setFormMessage("この依頼は更新できません。", "This request can no longer be updated.")
                         return@launch
                     }
+                    if (result.value.submissionStatus == RescueSubmissionStatus.PENDING_DESTINATION) {
+                        setFormMessage(
+                            "受信先の確認中は内容を変更できません。取り消す場合は端末内の保留だけを削除します。",
+                            "Details cannot change while a trusted receiver is being resolved. Cancel removes only the local queue.",
+                        )
+                        return@launch
+                    }
                     _state.update { current ->
                         current.copy(
                             screen = RescueScreen.REQUEST_FORM,
@@ -199,6 +206,38 @@ class RescueViewModel(
 
     private fun handleOperation(result: RescueSessionOperationResult, isSos: Boolean) {
         when (result) {
+            is RescueSessionOperationResult.PendingDestination -> {
+                _state.update { current ->
+                    current.copy(
+                        isRequestSubmitting = false,
+                        screen = RescueScreen.BROADCASTING,
+                        draft = newDraft(),
+                        ownRequest = result.value.toOwnRequest(),
+                        broadcast = RescueBroadcastUiState(
+                            isActive = result.value.recovery.draft.action == RescueRequestAction.ACTIVE,
+                            statusMessage = current.language.text(
+                                if (isSos) {
+                                    "SOSを端末に保存しました。Nearby通信を開始し、受信先を安全に確認中です。"
+                                } else {
+                                    "依頼を端末に保存しました。Nearby通信を開始し、受信先を安全に確認中です。"
+                                },
+                                if (isSos) {
+                                    "SOS is saved on this device. Nearby relay has started while a trusted receiver is resolved."
+                                } else {
+                                    "Request is saved on this device. Nearby relay has started while a trusted receiver is resolved."
+                                },
+                            ),
+                        ),
+                        courierAutomation = CourierAutomationUiState(
+                            isEnabled = true,
+                            statusMessage = current.language.text(
+                                "端末内で安全に保留し、Nearby通信と受信先確認を続けます。",
+                                "The request stays safely queued on this device while Nearby and receiver resolution continue.",
+                            ),
+                        ),
+                    )
+                }
+            }
             is RescueSessionOperationResult.Stored -> {
                 _state.update { current ->
                     current.copy(
@@ -265,6 +304,23 @@ class RescueViewModel(
                 "取消の中継中です。避難所からの確認をお待ちください。",
                 "Cancellation is being relayed. Wait for shelter confirmation.",
             )
+            RescueSessionOperationResult.PendingDestinationDiscarded -> {
+                _state.update { current ->
+                    current.copy(
+                        isRequestSubmitting = false,
+                        screen = RescueScreen.HOME,
+                        ownRequest = null,
+                        broadcast = RescueBroadcastUiState(),
+                        courierAutomation = current.courierAutomation.copy(
+                            isEnabled = current.courierItems.isNotEmpty(),
+                        ),
+                        formMessage = current.language.text(
+                            "未送信の救助依頼を端末内から取り消しました。避難所や中継端末には送信されていません。",
+                            "The undelivered rescue request was removed from this device. It was not sent to a shelter or relay device.",
+                        ),
+                    )
+                }
+            }
             RescueSessionOperationResult.Conflict -> failSubmission(
                 "依頼の状態が更新されました。もう一度お試しください。",
                 "The request changed. Please try again.",
@@ -295,8 +351,16 @@ class RescueViewModel(
                     isActive = recovered.recovery.draft.action == RescueRequestAction.ACTIVE &&
                         recovered.session.terminalStatus == null,
                     statusMessage = current.language.text(
-                        "保存された救助依頼の状態を復元しました。",
-                        "Restored the saved rescue request status.",
+                        if (recovered.submissionStatus == RescueSubmissionStatus.PENDING_DESTINATION) {
+                            "保存されたSOSを端末内で保留しています。Nearby通信と受信先確認を続けます。"
+                        } else {
+                            "保存された救助依頼の状態を復元しました。"
+                        },
+                        if (recovered.submissionStatus == RescueSubmissionStatus.PENDING_DESTINATION) {
+                            "The saved SOS is queued on this device while Nearby and receiver resolution continue."
+                        } else {
+                            "Restored the saved rescue request status."
+                        },
                     ),
                 ),
             )

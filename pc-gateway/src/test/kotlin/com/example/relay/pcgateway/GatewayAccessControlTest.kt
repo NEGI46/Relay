@@ -12,6 +12,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.server.testing.testApplication
 import java.nio.file.Files
+import java.sql.DriverManager
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -20,6 +21,50 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GatewayAccessControlTest {
+    @Test
+    fun `authenticated polling does not write session state on every request`() {
+        val db = Files.createTempFile("relay-session-touch", ".db").toString()
+        GatewayAccessStore(db, sessionTouchIntervalMillis = 60_000).use { access ->
+            assertTrue(access.bootstrapAdmin("polling-admin", "a long bootstrap secret", "test", now = 1_000))
+            val session = assertLoginSuccess(
+                access.login("polling-admin", "a long bootstrap secret", "test", sessionTtlMillis = 120_000, now = 2_000),
+            )
+
+            assertNotNull(access.authenticateSession(session.token, now = 2_500))
+            assertEquals(2_000L, sessionLastSeen(db))
+
+            assertNotNull(access.authenticateSession(session.token, now = 62_000))
+            assertEquals(62_000L, sessionLastSeen(db))
+        }
+    }
+
+    @Test
+    fun `map status polling is read-only and does not append audit rows`() = testApplication {
+        val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
+            dbPath = Files.createTempFile("relay-map-polling", ".db").toString(),
+            legacyAdminKeyEnabled = false,
+        )
+        GatewayStore(config).use { store ->
+            val access = store.accessStore()
+            assertTrue(access.bootstrapAdmin("map-polling-admin", "a long bootstrap secret", "test"))
+            GsiTileCache(Files.createTempDirectory("relay-map-cache")).use { cache ->
+                application { gatewayModule(config, store, offlineMap = cache) }
+                val cookie = login("map-polling-admin", "a long bootstrap secret")
+                val before = access.auditRecords(limit = 100).size
+
+                repeat(3) {
+                    assertEquals(
+                        HttpStatusCode.OK,
+                        client.get("/api/map/status") { header(HttpHeaders.Cookie, cookie) }.status,
+                    )
+                }
+
+                assertEquals(before, access.auditRecords(limit = 100).size)
+            }
+        }
+    }
+
     @Test
     fun `production defaults are loopback and deny anonymous legacy management`() {
         val config = GatewayConfig(profile = GatewayProfile.PRODUCTION)
@@ -210,6 +255,15 @@ class GatewayAccessControlTest {
     private fun assertLoginSuccess(result: LoginResult): GatewaySession {
         assertTrue(result is LoginResult.Success)
         return (result as LoginResult.Success).session
+    }
+
+    private fun sessionLastSeen(db: String): Long = DriverManager.getConnection("jdbc:sqlite:$db").use { connection ->
+        connection.prepareStatement("SELECT last_seen_at FROM staff_sessions").use { statement ->
+            statement.executeQuery().use { result ->
+                assertTrue(result.next())
+                result.getLong(1)
+            }
+        }
     }
 
     private fun message() = GatewayMessage(

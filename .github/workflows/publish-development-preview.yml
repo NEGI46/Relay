@@ -1,0 +1,161 @@
+name: Publish Relay development preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Development preview tag (for example, development-preview-20260722)
+        required: true
+        type: string
+      target_ref:
+        description: Immutable commit SHA, branch, or tag to package
+        required: true
+        default: agent/zero-operation-relay
+        type: string
+
+# This workflow is intentionally separate from "Publish Relay formal release". It publishes a
+# debug/localDev Android APK and an unsigned Windows installer strictly for personal development.
+# It never uses, accepts, or claims organization signing, vulnerability attestation, or a formal
+# release trust root.
+permissions:
+  contents: write
+
+concurrency:
+  group: relay-development-preview-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-source:
+    name: Resolve preview source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      commit: ${{ steps.commit.outputs.commit }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.target_ref }}
+      - id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse HEAD)"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo 'Unable to resolve preview source commit.' >&2; exit 1; }
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  android-localdev:
+    name: Build Android localDev preview
+    runs-on: ubuntu-latest
+    needs: resolve-source
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.resolve-source.outputs.commit }}
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Build debug-compatible localDev APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleLocalDev --no-daemon
+          mkdir -p release
+          cp app/build/outputs/apk/localDev/app-localDev.apk release/Relay-Android-development-preview-debug.apk
+          sha256sum release/Relay-Android-development-preview-debug.apk > release/Relay-Android-development-preview-debug.apk.sha256
+          cat > release/ANDROID_DEVELOPMENT_PREVIEW_NOTICE.txt <<'EOF'
+          DEVELOPMENT PREVIEW ONLY
+
+          This artifact is a debug/localDev APK. It is not a formal Relay release, is not
+          organization-signed, and must not be used for pilot or emergency operations.
+          EOF
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: development-preview-android
+          path: release/
+          if-no-files-found: error
+
+  windows-unsigned:
+    name: Build unsigned Windows development preview
+    runs-on: windows-latest
+    needs: resolve-source
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.resolve-source.outputs.commit }}
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Build unsigned installer and development launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/build-pc-gateway-exe.ps1 -AppVersion "0.0.$env:GITHUB_RUN_NUMBER"
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item artifacts/relay-pc-gateway.exe release/Relay-PC-Gateway-development-preview-unsigned.exe -Force
+          (Get-FileHash -LiteralPath release/Relay-PC-Gateway-development-preview-unsigned.exe -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content -LiteralPath release/Relay-PC-Gateway-development-preview-unsigned.exe.sha256 -Encoding ascii
+          Copy-Item artifacts/Relay-PC-Gateway-development.ps1 release/Relay-PC-Gateway-development.ps1 -Force
+          Copy-Item artifacts/Start-Relay-PC-Gateway-Development.cmd release/Start-Relay-PC-Gateway-Development.cmd -Force
+          @'
+          DEVELOPMENT PREVIEW ONLY
+
+          This Windows installer is unsigned. It is not a formal Relay release and must not be
+          used for pilot or emergency operations. Use Start-Relay-PC-Gateway-Development.cmd after
+          installation; it prompts for a local username and password and keeps data under LocalAppData.
+          '@ | Set-Content -LiteralPath release/WINDOWS_DEVELOPMENT_PREVIEW_NOTICE.txt -Encoding utf8
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: development-preview-windows
+          path: release/
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub prerelease
+    runs-on: ubuntu-latest
+    needs: [resolve-source, android-localdev, windows-unsigned]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: development-preview-*
+          path: release
+          merge-multiple: true
+      - name: Refuse accidental formal artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f release/Relay-Android-development-preview-debug.apk
+          test -f release/Relay-PC-Gateway-development-preview-unsigned.exe
+          test -f release/ANDROID_DEVELOPMENT_PREVIEW_NOTICE.txt
+          test -f release/WINDOWS_DEVELOPMENT_PREVIEW_NOTICE.txt
+          if find release -type f \( -name 'Relay-Android-release.apk' -o -name 'Relay-PC-Gateway-setup.exe' \) | grep -q .; then
+            echo 'Development preview must not publish formal-release-named artifacts.' >&2
+            exit 1
+          fi
+      - name: Create or update development prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          TARGET_COMMIT: ${{ needs.resolve-source.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' assets < <(find release -maxdepth 1 -type f -print0)
+          test "${#assets[@]}" -gt 0
+          notes='Development preview only: debug/localDev Android APK and unsigned Windows installer. Not for pilot or emergency operation.'
+          if prerelease="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease' 2>/dev/null)"; then
+            if [ "$prerelease" != 'true' ]; then
+              echo 'Refusing to upload a development preview to a non-prerelease tag.' >&2
+              exit 1
+            fi
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$TARGET_COMMIT" --title "Relay development preview $RELEASE_TAG" --prerelease --notes "$notes"
+          fi

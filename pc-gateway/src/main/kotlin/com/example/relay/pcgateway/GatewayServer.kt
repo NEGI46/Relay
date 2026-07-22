@@ -102,6 +102,11 @@ fun Application.gatewayModule(
     rescueManifest: ShelterPublicKeyManifest? = null,
     /** True only after startup verified a root-signed manifest against this PC's local keys. */
     rescueBleReady: Boolean = false,
+    /**
+     * Allows anonymous encrypted rescue ingress. Production/lab require a verified signed
+     * manifest; development may opt in to generated local keys for debug/localDev interoperability.
+     */
+    rescueDeliveryReady: Boolean = rescueBleReady,
     rescueIntakeService: RescueIntakeService? = null,
     offlineMap: GsiTileCache? = null,
     officialInformation: OfficialInformationService? = null,
@@ -147,7 +152,7 @@ fun Application.gatewayModule(
                     shelterId = config.shelterId,
                     recipientKeyId = config.rescueRecipientKeyId,
                     manifestFingerprint = config.rescueManifestFingerprint,
-                    rescueIngressReady = rescueIntakeService != null && rescueBleReady && config.anonymousIngressEnabled,
+                    rescueIngressReady = rescueIntakeService != null && rescueDeliveryReady && config.anonymousIngressEnabled,
                     rescueKeyStorage = rescueKeyStatus.storage,
                     rescueKeyStatus = rescueKeyStatus.status,
                     rescueKeyExpiresAtEpochMillis = rescueKeyStatus.expiresAtEpochMillis,
@@ -258,9 +263,10 @@ fun Application.gatewayModule(
             }
         }
         get("/api/map/status") {
-            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
+            call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
             val map = offlineMap ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
-            access.audit(staff, null, "MAP_STATUS_VIEW", "SUCCESS", call.remoteSource())
+            // The browser polls this endpoint.  Successful read-only polling is deliberately not
+            // appended to the audit database, otherwise opening the map creates a writer storm.
             call.respond(map.status())
         }
         post("/api/map/prepare") {
@@ -402,7 +408,7 @@ fun Application.gatewayModule(
             call.respond(syncResponse(stored, rejected))
         }
         post("/api/public/rescue/deliver") {
-            if (!config.anonymousIngressEnabled) return@post call.respond(HttpStatusCode.NotFound)
+            if (!config.anonymousIngressEnabled || !rescueDeliveryReady) return@post call.respond(HttpStatusCode.NotFound)
             val service = rescueIntakeService ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
             if (!call.requireBoundedBody(config.maxAnonymousRequestBytes.toLong())) return@post
             val raw = call.receiveText()

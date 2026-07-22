@@ -12,6 +12,8 @@ $gradlew = Join-Path $root 'gradlew.bat'
 $inputDir = Join-Path $root 'pc-gateway\build\jpackage-input'
 $outputDir = Join-Path $root 'artifacts\pc-gateway-exe'
 $finalExe = Join-Path $root 'artifacts\relay-pc-gateway.exe'
+$developmentLauncher = Join-Path $root 'scripts\start-pc-gateway-development.ps1'
+$developmentLauncherCmd = Join-Path $root 'scripts\Start-Relay-PC-Gateway-Development.cmd'
 $wixLocal = Join-Path $root 'tools\wix314'
 $jdkBin = 'C:\Program Files\Java\jdk-17\bin'
 
@@ -73,7 +75,13 @@ try {
 
 $hash = Get-FileHash $finalExe -Algorithm SHA256
 $hash.Hash | Set-Content (Join-Path $root 'artifacts\relay-pc-gateway.exe.sha256')
+# The preview launcher is a separate companion asset. It discovers the installed EXE by the
+# documented Program Files path, so it works whether it is run from the download folder or copied
+# beside the installed app. Formal-release publishing intentionally selects only the signed EXE.
+Copy-Item $developmentLauncher (Join-Path $root 'artifacts\Relay-PC-Gateway-development.ps1') -Force
+Copy-Item $developmentLauncherCmd (Join-Path $root 'artifacts\Start-Relay-PC-Gateway-Development.cmd') -Force
 Write-Output "Created $finalExe"
 Write-Output "Size bytes: $((Get-Item $finalExe).Length)"
 Write-Output "SHA-256: $($hash.Hash)"
 Write-Output "This is a Windows installer (jpackage/WiX). Install then run RelayPcGateway from the Start Menu or Program Files."
+Write-Output 'Development preview companion: artifacts\Start-Relay-PC-Gateway-Development.cmd'

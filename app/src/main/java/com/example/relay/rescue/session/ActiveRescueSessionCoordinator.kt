@@ -13,7 +13,6 @@ import com.example.relay.rescue.StoredRescueRecord
 import com.example.relay.rescue.toPayload
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -32,6 +31,11 @@ sealed interface RescueSessionRestoreResult {
 
 sealed interface RescueSessionOperationResult {
     data class Stored(val value: RecoveredRescueSession, val record: StoredRescueRecord) : RescueSessionOperationResult
+    /**
+     * SOS recovery data is durable, but no courier envelope exists until a trusted destination
+     * key becomes available. This state is intentionally local to the sender device.
+     */
+    data class PendingDestination(val value: RecoveredRescueSession) : RescueSessionOperationResult
     /** A live request already exists; it is restored rather than creating a competing request. */
     data class ActiveSessionExists(val value: RecoveredRescueSession) : RescueSessionOperationResult
     data object ShelterUnavailable : RescueSessionOperationResult
@@ -40,6 +44,8 @@ sealed interface RescueSessionOperationResult {
     data object Terminal : RescueSessionOperationResult
     data object Corrupt : RescueSessionOperationResult
     data object CancelledAlready : RescueSessionOperationResult
+    /** The SOS was removed locally before any encrypted envelope could leave this device. */
+    data object PendingDestinationDiscarded : RescueSessionOperationResult
     data object Conflict : RescueSessionOperationResult
     data object StorageFailure : RescueSessionOperationResult
 }
@@ -56,7 +62,6 @@ class ActiveRescueSessionCoordinator(
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
     private val newEnvelopeId: () -> String = { UUID.randomUUID().toString() },
     private val requestLifetimeMillis: Long = DEFAULT_REQUEST_LIFETIME_MILLIS,
-    private val shelterKeyWaitMillis: Long = 0,
     private val deliveryNotifier: RescueDeliveryNotifier = RescueDeliveryNotifier { },
 ) {
     private val locks = ConcurrentHashMap<String, Mutex>()
@@ -68,40 +73,118 @@ class ActiveRescueSessionCoordinator(
     /** Creates an initial request and durable recovery state as one commit. */
     suspend fun create(draft: RescueRequestDraft): RescueSessionOperationResult {
         existingLiveSession()?.let { return it }
-        val keys = awaitShelterKeys() ?: return RescueSessionOperationResult.ShelterUnavailable
         val now = nowEpochMillis()
         val located = attachCurrentLocation(
             draft.copy(
                 requestVersion = 1,
-                destinationShelterId = keys.shelterId,
                 createdAtEpochMillis = now,
                 expiresAtEpochMillis = now + requestLifetimeMillis,
                 action = RescueRequestAction.ACTIVE,
             ),
         ) ?: return RescueSessionOperationResult.LocationUnavailable
         return mutexFor(located.requestId).withLock {
-            val prepared = prepare(located, keys) ?: return@withLock RescueSessionOperationResult.StorageFailure
-            when (val result = store.createAtomically(prepared.session, prepared.envelope, now)) {
-                is SessionCommitResult.Stored -> {
-                    val stored = RescueSessionOperationResult.Stored(
-                        value = RecoveredRescueSession(
-                        session = prepared.session,
-                        recovery = prepared.recovery,
-                        submissionStatus = result.record.state.submissionStatus,
-                    ),
-                    record = result.record,
-                )
-                    deliveryNotifier.onDeliveryRequired()
-                    stored
+            val keys = shelterKeyProvider.load()
+            if (keys == null) {
+                val pending = preparePendingDestination(located)
+                    ?: return@withLock RescueSessionOperationResult.StorageFailure
+                when (val result = store.createPendingDestinationAtomically(pending.session, now)) {
+                    SessionCommitResult.PendingDestinationStored -> {
+                        val stored = RescueSessionOperationResult.PendingDestination(
+                            RecoveredRescueSession(
+                                session = pending.session,
+                                recovery = pending.recovery,
+                                submissionStatus = RescueSubmissionStatus.PENDING_DESTINATION,
+                            ),
+                        )
+                        deliveryNotifier.onDeliveryRequired()
+                        stored
+                    }
+                    is SessionCommitResult.Rejected,
+                    SessionCommitResult.Invalid,
+                    -> RescueSessionOperationResult.StorageFailure
+                    SessionCommitResult.ActiveSessionExists -> existingLiveSession()
+                        ?: RescueSessionOperationResult.StorageFailure
+                    SessionCommitResult.VersionConflict -> RescueSessionOperationResult.Conflict
+                    is SessionCommitResult.Stored -> RescueSessionOperationResult.StorageFailure
                 }
-                is SessionCommitResult.Rejected,
-                SessionCommitResult.Invalid,
-                -> RescueSessionOperationResult.StorageFailure
-                SessionCommitResult.ActiveSessionExists -> existingLiveSession()
-                    ?: RescueSessionOperationResult.StorageFailure
-                SessionCommitResult.VersionConflict -> RescueSessionOperationResult.Conflict
+            } else {
+                val prepared = prepare(located.copy(destinationShelterId = keys.shelterId), keys)
+                    ?: return@withLock RescueSessionOperationResult.StorageFailure
+                when (val result = store.createAtomically(prepared.session, prepared.envelope, now)) {
+                    is SessionCommitResult.Stored -> {
+                        val stored = RescueSessionOperationResult.Stored(
+                            value = RecoveredRescueSession(
+                                session = prepared.session,
+                                recovery = prepared.recovery,
+                                submissionStatus = result.record.state.submissionStatus,
+                            ),
+                            record = result.record,
+                        )
+                        deliveryNotifier.onDeliveryRequired()
+                        stored
+                    }
+                    is SessionCommitResult.Rejected,
+                    SessionCommitResult.Invalid,
+                    -> RescueSessionOperationResult.StorageFailure
+                    SessionCommitResult.ActiveSessionExists -> existingLiveSession()
+                        ?: RescueSessionOperationResult.StorageFailure
+                    SessionCommitResult.VersionConflict -> RescueSessionOperationResult.Conflict
+                    SessionCommitResult.PendingDestinationStored -> RescueSessionOperationResult.StorageFailure
+                }
             }
         }
+    }
+
+    /**
+     * Materializes sender-owned, local-only SOS sessions after a trusted shelter key arrives.
+     * No unknown or Nearby-advertised key is accepted here: [shelterKeyProvider] is the sole
+     * trust boundary. Call this from durable delivery work, not from a UI lifecycle.
+     */
+    suspend fun resolvePendingDestinations(): Int {
+        val candidates = store.all()
+            .filter { it.terminalStatus == null && it.latestSubmissionStatus == RescueSubmissionStatus.PENDING_DESTINATION.name }
+            .sortedBy { it.requestId }
+        if (candidates.isEmpty()) return 0
+        val keys = shelterKeyProvider.load() ?: return 0
+        var resolved = 0
+        candidates.forEach { candidate ->
+            val didResolve = mutexFor(candidate.requestId).withLock {
+                val restored = (restore(candidate) as? RescueSessionRestoreResult.Restored)?.value ?: return@withLock false
+                if (restored.submissionStatus != RescueSubmissionStatus.PENDING_DESTINATION) return@withLock false
+                if (nowEpochMillis() >= restored.session.expiresAtEpochMillis) {
+                    store.markExpired(restored.session.requestId, restored.session.latestVersion, nowEpochMillis())
+                    return@withLock false
+                }
+                val now = nowEpochMillis()
+                val prepared = prepare(
+                    restored.recovery.draft.copy(destinationShelterId = keys.shelterId),
+                    keys,
+                ) ?: return@withLock false
+                val session = prepared.session.copy(
+                    createdAtEpochMillis = restored.session.createdAtEpochMillis,
+                    updatedAtEpochMillis = now,
+                )
+                when (store.materializePendingDestinationAtomically(
+                    expectedVersion = restored.session.latestVersion,
+                    session = session,
+                    envelope = prepared.envelope,
+                    receivedAtEpochMillis = now,
+                )) {
+                    is SessionCommitResult.Stored -> {
+                        deliveryNotifier.onDeliveryRequired()
+                        true
+                    }
+                    else -> false
+                }
+            }
+            if (didResolve) resolved++
+        }
+        return resolved
+    }
+
+    /** Lightweight state check for background work; it exposes no recovery plaintext. */
+    fun hasPendingDestination(): Boolean = store.all().any {
+        it.terminalStatus == null && it.latestSubmissionStatus == RescueSubmissionStatus.PENDING_DESTINATION.name
     }
 
     /** Restores the newest sender session, including a terminal result the user has not dismissed. */
@@ -155,7 +238,10 @@ class ActiveRescueSessionCoordinator(
         )
     }
 
-    suspend fun cancel(requestId: String): RescueSessionOperationResult = mutate(requestId) { recovered, nextVersion, now ->
+    suspend fun cancel(requestId: String): RescueSessionOperationResult = mutate(
+        requestId,
+        discardPendingDestination = true,
+    ) { recovered, nextVersion, now ->
         val current = recovered.recovery.draft
         if (current.action != RescueRequestAction.ACTIVE) return@mutate null
         current.copy(
@@ -168,6 +254,7 @@ class ActiveRescueSessionCoordinator(
 
     private suspend fun mutate(
         requestId: String,
+        discardPendingDestination: Boolean = false,
         transform: (RecoveredRescueSession, Int, Long) -> RescueRequestDraft?,
     ): RescueSessionOperationResult = mutexFor(requestId).withLock {
         repeat(MAX_CONFLICT_RETRIES) {
@@ -184,10 +271,31 @@ class ActiveRescueSessionCoordinator(
                 store.markExpired(requestId, restored.session.latestVersion, nowEpochMillis())
                 return@withLock RescueSessionOperationResult.Expired
             }
+            // A local-only SOS has never been emitted, so changing it before a trusted key is
+            // resolved must not manufacture a different ciphertext or a fake version. It can be
+            // safely discarded on an explicit cancel because no courier ever received an envelope.
+            if (restored.submissionStatus == RescueSubmissionStatus.PENDING_DESTINATION) {
+                if (discardPendingDestination) {
+                    return@withLock if (store.discardPendingDestination(
+                            restored.session.requestId,
+                            restored.session.latestVersion,
+                        )
+                    ) {
+                        RescueSessionOperationResult.PendingDestinationDiscarded
+                    } else {
+                        RescueSessionOperationResult.Conflict
+                    }
+                }
+                return@withLock RescueSessionOperationResult.PendingDestination(restored)
+            }
             val now = nowEpochMillis()
             val draft = transform(restored, restored.session.latestVersion + 1, now)
                 ?: return@withLock RescueSessionOperationResult.CancelledAlready
-            val prepared = prepare(draft, restored.recovery.recipientPublicKey, restored.recovery.receiptSigningPublicKey)
+            val recipientKey = restored.recovery.recipientPublicKey
+                ?: return@withLock RescueSessionOperationResult.Corrupt
+            val receiptKey = restored.recovery.receiptSigningPublicKey
+                ?: return@withLock RescueSessionOperationResult.Corrupt
+            val prepared = prepare(draft, recipientKey, receiptKey)
                 ?: return@withLock RescueSessionOperationResult.StorageFailure
             val session = prepared.session.copy(createdAtEpochMillis = restored.session.createdAtEpochMillis)
             when (val committed = store.updateAtomically(
@@ -199,12 +307,12 @@ class ActiveRescueSessionCoordinator(
                 is SessionCommitResult.Stored -> {
                     val stored = RescueSessionOperationResult.Stored(
                         value = RecoveredRescueSession(
-                        session = session,
-                        recovery = prepared.recovery,
-                        submissionStatus = RescueSubmissionStatus.PENDING,
-                    ),
-                    record = committed.record,
-                )
+                            session = session,
+                            recovery = prepared.recovery,
+                            submissionStatus = RescueSubmissionStatus.PENDING,
+                        ),
+                        record = committed.record,
+                    )
                     deliveryNotifier.onDeliveryRequired()
                     return@withLock stored
                 }
@@ -214,6 +322,7 @@ class ActiveRescueSessionCoordinator(
                 SessionCommitResult.ActiveSessionExists -> return@withLock existingLiveSession()
                     ?: RescueSessionOperationResult.StorageFailure
                 SessionCommitResult.VersionConflict -> Unit // Re-read and safely rebuild after the short DB transaction.
+                SessionCommitResult.PendingDestinationStored -> return@withLock RescueSessionOperationResult.StorageFailure
             }
         }
         RescueSessionOperationResult.Conflict
@@ -236,6 +345,14 @@ class ActiveRescueSessionCoordinator(
         }
         val status = runCatching { RescueSubmissionStatus.valueOf(session.latestSubmissionStatus) }
             .getOrElse { return RescueSessionRestoreResult.Corrupt(session.requestId) }
+        val hasRecipientKey = recovery.recipientPublicKey != null
+        val hasReceiptKey = recovery.receiptSigningPublicKey != null
+        if (hasRecipientKey != hasReceiptKey ||
+            (status == RescueSubmissionStatus.PENDING_DESTINATION && hasRecipientKey) ||
+            (status != RescueSubmissionStatus.PENDING_DESTINATION && !hasRecipientKey)
+        ) {
+            return RescueSessionRestoreResult.Corrupt(session.requestId)
+        }
         return RescueSessionRestoreResult.Restored(RecoveredRescueSession(session, recovery, status))
     }
 
@@ -277,6 +394,31 @@ class ActiveRescueSessionCoordinator(
         )
     }.getOrNull()
 
+    /**
+     * Keeps all request content under the device recovery cipher until a trusted destination key
+     * is available. There is deliberately no envelope, inventory item, or peer export at this
+     * point because another device could not decrypt it safely.
+     */
+    private fun preparePendingDestination(draft: RescueRequestDraft): PendingDestinationSession? = runCatching {
+        val recovery = RescueSessionRecoveryPayload(draft = draft)
+        val sealed = recoveryCipher.seal(recovery)
+        PendingDestinationSession(
+            recovery = recovery,
+            session = ActiveRescueSession(
+                requestId = draft.requestId,
+                latestVersion = draft.requestVersion,
+                sealedRecoveryPayload = sealed.ciphertext,
+                recoveryNonce = sealed.nonce,
+                trackingMode = ActiveRescueSession.TRACKING_DISABLED,
+                latestSubmissionStatus = RescueSubmissionStatus.PENDING_DESTINATION.name,
+                createdAtEpochMillis = draft.createdAtEpochMillis,
+                updatedAtEpochMillis = draft.createdAtEpochMillis,
+                expiresAtEpochMillis = draft.expiresAtEpochMillis,
+                terminalStatus = null,
+            ),
+        )
+    }.getOrNull()
+
     private suspend fun attachCurrentLocation(draft: RescueRequestDraft): RescueRequestDraft? {
         val provider = locationProvider ?: return draft
         val fix = runCatching { provider.currentFix(8_000) }.getOrNull() ?: return null
@@ -289,16 +431,6 @@ class ActiveRescueSessionCoordinator(
                 capturedAtEpochMillis = fix.capturedAtEpochMillis,
             ),
         )
-    }
-
-    private suspend fun awaitShelterKeys(): ShelterPublicKeys? {
-        shelterKeyProvider.load()?.let { return it }
-        val deadline = nowEpochMillis() + shelterKeyWaitMillis.coerceIn(0, MAX_KEY_WAIT_MILLIS)
-        while (nowEpochMillis() < deadline) {
-            delay(KEY_RETRY_MILLIS)
-            shelterKeyProvider.load()?.let { return it }
-        }
-        return null
     }
 
     private fun mutexFor(requestId: String): Mutex = locks.computeIfAbsent(requestId) { Mutex() }
@@ -323,10 +455,13 @@ class ActiveRescueSessionCoordinator(
         val envelope: EncryptedRescueEnvelope,
     )
 
+    private data class PendingDestinationSession(
+        val recovery: RescueSessionRecoveryPayload,
+        val session: ActiveRescueSession,
+    )
+
     private companion object {
         const val DEFAULT_REQUEST_LIFETIME_MILLIS = 3L * 24 * 60 * 60 * 1_000
-        const val MAX_KEY_WAIT_MILLIS = 15_000L
-        const val KEY_RETRY_MILLIS = 250L
         const val MAX_CONFLICT_RETRIES = 3
     }
 }
