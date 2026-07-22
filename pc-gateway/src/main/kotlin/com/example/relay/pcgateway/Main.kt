@@ -17,8 +17,11 @@ import java.io.File
 import java.nio.file.Path
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
@@ -50,7 +53,7 @@ fun main() {
     val offlineMap = GsiTileCache(Path.of(config.offlineMapPath))
     val officialInformation = OfficialInformationService(Path.of(config.officialInfoCachePath))
     val rescueIngress = verifiedBleManifest?.let { RescueDeliveryIngress(rescueIntakeService) }
-    val beacon = GatewayLanBeacon(config)
+    val beacon = GatewayLanBeacon(config, rescueTrustReady = verifiedBleManifest != null)
     val consoleHost = if (config.host in setOf("0.0.0.0", "::")) "127.0.0.1" else config.host
     println("Relay PC Gateway listening on http://${config.host}:${config.port}")
     println("Operator console: http://$consoleHost:${config.port}/")
@@ -149,6 +152,7 @@ fun main() {
     } finally {
         beacon.close()
         offlineMap.close()
+        runBlocking { brokerScope.coroutineContext[Job]?.cancelAndJoin() }
         brokerHttpClient?.close()
         store.close()
     }

@@ -77,9 +77,10 @@ class RescueNearbyCoordinator(
             .filter { it.isAdvertisableAt(now) }
             .map { it.toInventoryEntry() }
             .sortedWith(compareBy<RescueInventoryEntry>({ it.requestId }, { it.requestVersion }, { it.ciphertextSha256Hex }))
-            .take(maxInventoryEntries)
             .toList()
-        send(peerId, RescueNearbyPacket.Inventory(entries))
+        entries.chunked(maxInventoryEntries).ifEmpty { listOf(emptyList()) }.forEach { page ->
+            send(peerId, RescueNearbyPacket.Inventory(page))
+        }
     }
 
     private suspend fun handleInventory(peerId: String, packet: RescueNearbyPacket.Inventory) {
@@ -89,18 +90,20 @@ class RescueNearbyCoordinator(
             .filter { it.isValidAt(now) }
             .filter { remote -> needsEnvelope(remote) }
             .distinctBy { it.requestId to it.requestVersion }
-            .take(maxRequestedEntries)
             .map { RescueRequestKeyWire(it.requestId, it.requestVersion) }
             .toList()
-        if (requested.isNotEmpty()) send(peerId, RescueNearbyPacket.Request(requested))
+        requested.chunked(maxRequestedEntries).forEach { page ->
+            send(peerId, RescueNearbyPacket.Request(page))
+        }
         val receiptKeys = packet.entries
             .asSequence()
             .filter { it.isValidAt(now) && needsReceipt(it) }
             .distinctBy { it.requestId to it.requestVersion }
-            .take(maxRequestedEntries)
             .map { RescueRequestKeyWire(it.requestId, it.requestVersion) }
             .toList()
-        if (receiptKeys.isNotEmpty()) send(peerId, RescueNearbyPacket.ReceiptRequest(receiptKeys))
+        receiptKeys.chunked(maxRequestedEntries).forEach { page ->
+            send(peerId, RescueNearbyPacket.ReceiptRequest(page))
+        }
     }
 
     private fun needsEnvelope(remote: RescueInventoryEntry): Boolean {

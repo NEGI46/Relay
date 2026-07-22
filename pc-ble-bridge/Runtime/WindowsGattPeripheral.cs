@@ -28,7 +28,9 @@ public sealed class WindowsGattPeripheral : IBleGattPeripheral
 
     private readonly Channel<GattFrame> _incoming = Channel.CreateBounded<GattFrame>(new BoundedChannelOptions(256)
     {
-        FullMode = BoundedChannelFullMode.DropWrite,
+        // TryWrite must return false when the worker cannot keep up. DropWrite can report success
+        // while discarding the new frame, which would acknowledge data that was never reassembled.
+        FullMode = BoundedChannelFullMode.Wait,
         SingleReader = true,
         SingleWriter = false,
     });

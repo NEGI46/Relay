@@ -4,11 +4,11 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.util.Base64
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
 import java.security.Signature
-import java.util.Base64
 import java.util.UUID
 
 /**
@@ -58,7 +58,7 @@ class UploadSigningKeyStore(context: Context) {
         val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry
             ?: return@synchronized ""
         val publicKey = entry.certificate.publicKey
-        Base64.getEncoder().encodeToString(publicKey.encoded)
+        Base64.encodeToString(publicKey.encoded, Base64.NO_WRAP)
     }
 
     /**
@@ -72,7 +72,16 @@ class UploadSigningKeyStore(context: Context) {
         val signature = Signature.getInstance(SIGNATURE_ALGORITHM)
         signature.initSign(privateKey)
         signature.update(dataToSign)
-        Base64.getEncoder().encodeToString(signature.sign())
+        Base64.encodeToString(signature.sign(), Base64.NO_WRAP)
+    }
+
+    /** Proves possession of the private key when registering or recovering a Broker capability. */
+    fun signRegistration(deviceKeyId: String, publicKeyBase64: String): String = synchronized(identityLock) {
+        ensureKeyExists()
+        val signature = Signature.getInstance(SIGNATURE_ALGORITHM)
+        signature.initSign(getOrCreatePrivateKey())
+        signature.update(brokerDeviceRegistrationBytes(deviceKeyId, publicKeyBase64))
+        Base64.encodeToString(signature.sign(), Base64.NO_WRAP)
     }
 
     private fun ensureKeyExists() {

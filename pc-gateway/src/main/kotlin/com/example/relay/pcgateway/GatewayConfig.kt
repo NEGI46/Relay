@@ -73,7 +73,8 @@ data class GatewayConfig(
         require(it.startsWith("https://")) { "RELAY_BROKER_URL must use HTTPS (got: $it)" }
     },
     val brokerApiKey: String? = System.getenv("RELAY_BROKER_API_KEY")?.trim()?.takeIf { it.isNotEmpty() },
-    val brokerPollIntervalMs: Long = (System.getenv("RELAY_BROKER_POLL_INTERVAL_MS") ?: "10000").toLongOrNull() ?: 10_000L,
+    val brokerPollIntervalMs: Long = (System.getenv("RELAY_BROKER_POLL_INTERVAL_MS") ?: "10000")
+        .toLongOrNull()?.takeIf { it in 1_000L..300_000L } ?: 10_000L,
 )
 
 /** Exact non-secret environment consumed by the Windows BLE bridge launcher. */

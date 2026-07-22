@@ -104,12 +104,13 @@ Brokerは**復号しません**。暗号文の一時保存、重複排除、衝�
 最新実装の主な保護:
 
 - 端末ごとに初回生成したUUID `deviceKeyId`とAndroid Keystore ECDSA P-256鍵を使用
-- 端末登録時に公開鍵をBrokerへ登録し、アップロード署名をBroker側で検証
-- Receipt取得には公開`deviceKeyId`ではなく、推測困難なcapability tokenを使用
+- 端末登録時にも秘密鍵の所持証明を検証し、登録済みIDのtokenを別鍵へ返さない
+- Receipt取得には公開`deviceKeyId`ではなく、Authorization Bearerで推測困難なcapability tokenを使用
 - AndroidはBroker URLをHTTPSに限定し、HTTPとredirectを拒否
 - 64 KiBの`Content-Length`を本文読込前に確認し、読込後も再検査
 - PC GatewayのPull / Receipt APIはBearer token認証に対応
 - Envelope取得は`stored_at + envelope_id`の複合cursorで欠落を防止
+- 同じ暗号文を運んだ各端末を記録し、署名Receiptを元端末と中継端末の双方へ返送
 - Receipt取得はBroker採番の単調増加`seq`を使い、Android再起動後もcursorを保持
 - PC GatewayのPull cursorをファイルへ保存
 - Receipt Outboxを救助状態と同じSQLite接続・トランザクション境界で管理
@@ -153,9 +154,9 @@ Broker本体はHTTPで待ち受けます。本番ではnginxやCaddyなどの**T
 |---|---|
 | Android | SharedPreferences `relay_broker_config/broker_endpoint`、または`app/src/main/res/values/broker.xml`。空なら無効、HTTPSのみ |
 | PC Gateway | `RELAY_BROKER_URL`、`RELAY_BROKER_API_KEY`、任意で`RELAY_BROKER_POLL_INTERVAL_MS` |
-| Broker | `RELAY_BROKER_PORT`、`RELAY_BROKER_DB_PATH`、`RELAY_BROKER_GATEWAY_API_KEY` |
+| Broker | `RELAY_BROKER_PORT`、`RELAY_BROKER_DB_PATH`、`RELAY_BROKER_GATEWAY_API_KEY`、開発時のみ`RELAY_BROKER_ALLOW_INSECURE_GATEWAY=true` |
 
-`RELAY_BROKER_API_KEY`と`RELAY_BROKER_GATEWAY_API_KEY`には同じ共有秘密を設定します。Broker側でキーを省略するとGateway APIが開くため、開発環境以外では設定必須です。
+`RELAY_BROKER_API_KEY`と`RELAY_BROKER_GATEWAY_API_KEY`には同じ共有秘密を設定します。Brokerはキー未設定時に起動を拒否します。認証なしで起動できるのは、ローカル開発で`RELAY_BROKER_ALLOW_INSECURE_GATEWAY=true`を明示した場合だけです。
 
 ## 開発者向け
 
@@ -236,7 +237,7 @@ adb emu geo fix 132.504 34.392
 
 Relay v1 is a local-first rescue-request relay for the Fuchu Town pilot in Hiroshima, Japan. Android users can create a two-second SOS or a normal GPS-backed rescue request. The request is encrypted before storage and can travel through Nearby/BLE Store–Carry–Forward, a local PC Gateway path, and an optional HTTPS Broker path in parallel.
 
-The Broker never decrypts rescue content. Devices register per-device ECDSA P-256 public keys, uploads are signature-verified, receipt polling uses an unguessable capability token, Gateway APIs support Bearer authentication, and persistent cursors/outboxes provide restart-safe at-least-once delivery. The Broker itself is intended to run behind a TLS-terminating reverse proxy.
+The Broker never decrypts rescue content. Devices prove possession of per-device ECDSA P-256 keys during registration, uploads are signature-verified, receipt polling uses an unguessable Bearer capability token, Gateway APIs fail closed without authentication unless an explicit development override is set, and persistent cursors/outboxes provide restart-safe at-least-once delivery. The Broker itself is intended to run behind a TLS-terminating reverse proxy.
 
 The staff PC Gateway decrypts only requests addressed to its shelter, manages claim and response states, and returns signed receipts to the requester. Relay remains a pilot, not an emergency-service replacement. Physical RF, mobile-network, operational, TLS, key-management, and production-signing validation are required before deployment.
 
