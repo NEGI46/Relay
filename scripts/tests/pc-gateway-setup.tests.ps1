@@ -29,8 +29,8 @@ $setup = Get-Content -LiteralPath (Join-Path $scriptsDirectory 'setup-pc-gateway
 $firewall = Get-Content -LiteralPath (Join-Path $scriptsDirectory 'configure-pc-gateway-firewall.ps1') -Raw
 
 Assert-Condition ($autostart -notmatch '\bStart-Process\b') 'Gateway launch must remain attached to the scheduled task.'
-Assert-Condition ($autostart -match "\[string\]\$Profile = 'production'") 'Autostart must default to the production profile.'
-Assert-Condition ($autostart -match "\[string\]\$HostBind = '127.0.0.1'") 'Autostart must default to loopback.'
+Assert-Condition ($autostart -match '\[string\]\$Profile = ''production''') 'Autostart must default to the production profile.'
+Assert-Condition ($autostart -match '\[string\]\$HostBind = ''127.0.0.1''') 'Autostart must default to loopback.'
 Assert-Condition ($autostart -match 'RELAY_GATEWAY_BOOTSTRAP_CLI_SECRET') 'Autostart documentation must direct named one-time bootstrap without a default password.'
 Assert-Condition ($autostart -notmatch 'RELAY_GATEWAY_ADMIN_KEY_FILE') 'Production runner must not create or use the legacy shared admin key file.'
 Assert-Condition ($autostart -notmatch 'RELAY_GATEWAY_ADMIN_KEY\s*=') 'Task runner must not embed a legacy admin key value.'
