@@ -36,6 +36,10 @@ artifacts/relay-before-device-test.patch
 artifacts/relay-untracked-list.txt
 artifacts/relay_status.pre-run.json
 artifacts/relay-pc-gateway-appimage.exe*
+artifacts/windows-validation-report.json
+artifacts/windows-validation-logs/
+artifacts/osv.json
+artifacts/osv.json.status.json
 **/__pycache__/
 **/*.pyc
 **/test-results/
