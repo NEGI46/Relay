@@ -1,4 +1,4 @@
-# Structural + behavioral checks for the development PC Gateway logon autostart script.
+﻿# Structural + behavioral checks for the development PC Gateway logon autostart script.
 # Run: powershell -ExecutionPolicy Bypass -File .\scripts\tests\register-poc-gateway-autostart.tests.ps1
 #
 # These tests never touch the real Task Scheduler, Docker, or the real %LOCALAPPDATA%. The target

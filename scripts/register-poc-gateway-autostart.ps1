@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Windows ログオン時に development プロファイルの PC Gateway (Docker) を自動起動する補助スクリプト。
 
