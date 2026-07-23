@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -22,6 +23,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -189,12 +191,45 @@ private fun OwnRequestCard(request: OwnRescueRequestUiState, language: RescueLan
             MiniLocationMap(request.urgency == RescueUrgency.IMMEDIATE)
             Text("GPS: %.5f, %.5f".format(request.latitude, request.longitude))
             Text(language.text("位置の取得時刻", "Location captured") + ": ${formatRescueTime(request.locationCapturedAtEpochMillis)}${request.accuracyMeters?.let { language.text("（精度 約${it.toInt()}m）", " (accuracy about ${it.toInt()} m)") }.orEmpty()}")
-            Text(
-                language.text(
-                    "位置は依頼の作成時と更新の送信時に取得します。常時追跡はしません。",
-                    "Location is captured when you create the request and when you send an update. It is not tracked continuously.",
-                ),
-            )
+            if (!request.isCancelled && request.terminalStatus == null) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        language.text(
+                            "位置情報を共有して最新の現在地を送る",
+                            "Share my location to send my latest position",
+                        ),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = request.trackingEnabled,
+                        onCheckedChange = callbacks::onSetLocationConsent,
+                    )
+                }
+                Text(
+                    if (request.trackingEnabled) {
+                        language.text(
+                            "同意により、更新のたびに現在地を暗号化して共有します。オフにするといつでも停止できます。",
+                            "With your consent, your location is shared encrypted on each update. Turn it off to stop at any time.",
+                        )
+                    } else {
+                        language.text(
+                            "位置は依頼の作成時と更新の送信時のみ取得します。常時追跡はしません。",
+                            "Location is captured only when you create the request and send an update. It is not tracked continuously.",
+                        )
+                    },
+                )
+            } else {
+                Text(
+                    language.text(
+                        "位置は依頼の作成時と更新の送信時に取得します。常時追跡はしません。",
+                        "Location is captured when you create the request and when you send an update. It is not tracked continuously.",
+                    ),
+                )
+            }
             if (!request.isCancelled && request.terminalStatus == null) {
                 Button(onClick = callbacks::onPrepareUpdate, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
                     Text(language.text("状況・人数を更新", "Update situation or group size"))

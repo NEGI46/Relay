@@ -43,7 +43,7 @@ data class OwnRescueRequestUiState(
     val createdAtEpochMillis: Long,
     val submissionStatus: RescueSubmissionStatus,
     val isCancelled: Boolean = false,
-    /** Phase 5 is not implemented yet; restored sessions explicitly report this as false. */
+    /** Phase 5 consent state: true only after the sender explicitly opted in to location tracking. */
     val trackingEnabled: Boolean = false,
     /** Public terminal state only; rescue contents remain in the encrypted recovery payload. */
     val terminalStatus: String? = null,
@@ -82,4 +82,6 @@ interface RescueCallbacks {
     fun onAcknowledgeTerminalResult()
     fun onRefreshStatus()
     fun onStopBroadcasting()
+    /** Phase 5: record the sender's explicit opt-in/out for periodic location updates. */
+    fun onSetLocationConsent(enabled: Boolean)
 }

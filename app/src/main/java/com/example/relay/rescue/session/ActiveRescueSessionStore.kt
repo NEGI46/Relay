@@ -41,9 +41,11 @@ data class ActiveRescueSession(
 
     companion object {
         const val TRACKING_DISABLED = "DISABLED"
+        /** Phase 5 consent state: the sender has explicitly opted in to periodic location updates. */
+        const val TRACKING_ENABLED = "ENABLED"
         const val SESSION_EXPIRED = "EXPIRED"
         private const val GCM_AUTH_TAG_BYTES = 16
-        private val supportedTrackingModes = setOf(TRACKING_DISABLED)
+        private val supportedTrackingModes = setOf(TRACKING_DISABLED, TRACKING_ENABLED)
         private val supportedTerminalStatuses = setOf(
             SESSION_EXPIRED,
             RescueSubmissionStatus.SHELTER_COMPLETED.name,

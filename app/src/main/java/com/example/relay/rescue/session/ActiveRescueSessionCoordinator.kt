@@ -46,6 +46,10 @@ sealed interface RescueSessionOperationResult {
     data object CancelledAlready : RescueSessionOperationResult
     /** The SOS was removed locally before any encrypted envelope could leave this device. */
     data object PendingDestinationDiscarded : RescueSessionOperationResult
+    /** A consented location update was requested, but the sender has not opted in to tracking. */
+    data object TrackingNotConsented : RescueSessionOperationResult
+    /** Consent already matched the requested value, so no new version or envelope was produced. */
+    data class TrackingConsentUnchanged(val value: RecoveredRescueSession) : RescueSessionOperationResult
     data object Conflict : RescueSessionOperationResult
     data object StorageFailure : RescueSessionOperationResult
 }
@@ -252,9 +256,80 @@ class ActiveRescueSessionCoordinator(
         )
     }
 
+    /**
+     * Records the sender's explicit Phase 5 tracking decision. Enabling requires an active,
+     * already-materialized request; the durable consent flag is persisted inside the encrypted
+     * recovery payload and mirrored to the public [ActiveRescueSession.trackingMode]. An unchanged
+     * decision commits no new version or envelope. This never itself captures a location; callers
+     * drive fixes through [recordConsentedLocationUpdate] once consent is granted.
+     */
+    suspend fun setTrackingConsent(requestId: String, enabled: Boolean): RescueSessionOperationResult {
+        (restore(requestId) as? RescueSessionRestoreResult.Restored)?.value?.let { current ->
+            if (current.session.terminalStatus == null &&
+                current.submissionStatus != RescueSubmissionStatus.PENDING_DESTINATION &&
+                current.recovery.trackingEnabled == enabled
+            ) {
+                return RescueSessionOperationResult.TrackingConsentUnchanged(current)
+            }
+        }
+        return mutate(requestId, trackingConsent = { enabled }) { recovered, nextVersion, now ->
+            if (recovered.recovery.draft.action != RescueRequestAction.ACTIVE) return@mutate null
+            recovered.recovery.draft.copy(
+                requestVersion = nextVersion,
+                createdAtEpochMillis = now,
+                expiresAtEpochMillis = now + requestLifetimeMillis,
+                action = RescueRequestAction.ACTIVE,
+            )
+        }
+    }
+
+    /**
+     * Captures one fresh fix and emits it as a new encrypted request version, but only while the
+     * sender has consented to tracking. Without consent this is a no-op ([TrackingNotConsented])
+     * so location is never captured or transmitted implicitly. Callers invoke this periodically
+     * while a request is active.
+     */
+    suspend fun recordConsentedLocationUpdate(requestId: String): RescueSessionOperationResult {
+        val restored = when (val result = restore(requestId)) {
+            is RescueSessionRestoreResult.Restored -> result.value
+            RescueSessionRestoreResult.None -> return RescueSessionOperationResult.StorageFailure
+            is RescueSessionRestoreResult.Corrupt -> return RescueSessionOperationResult.Corrupt
+        }
+        if (restored.session.terminalStatus == ActiveRescueSession.SESSION_EXPIRED) {
+            return RescueSessionOperationResult.Expired
+        }
+        if (restored.session.terminalStatus != null) return RescueSessionOperationResult.Terminal
+        if (restored.submissionStatus == RescueSubmissionStatus.PENDING_DESTINATION) {
+            return RescueSessionOperationResult.PendingDestination(restored)
+        }
+        // Consent is the gate: never touch the location hardware before an explicit opt-in.
+        if (!restored.recovery.trackingEnabled) return RescueSessionOperationResult.TrackingNotConsented
+        val provider = locationProvider ?: return RescueSessionOperationResult.LocationUnavailable
+        val fix = runCatching { provider.currentFix(8_000) }.getOrNull()
+            ?: return RescueSessionOperationResult.LocationUnavailable
+        return mutate(requestId, trackingConsent = { it.recovery.trackingEnabled }) { recovered, nextVersion, now ->
+            if (recovered.recovery.draft.action != RescueRequestAction.ACTIVE) return@mutate null
+            if (!recovered.recovery.trackingEnabled) return@mutate null
+            recovered.recovery.draft.copy(
+                requestVersion = nextVersion,
+                createdAtEpochMillis = now,
+                expiresAtEpochMillis = now + requestLifetimeMillis,
+                action = RescueRequestAction.ACTIVE,
+                location = RescueLocation(
+                    latitude = fix.latitude,
+                    longitude = fix.longitude,
+                    accuracyMeters = fix.accuracyMeters,
+                    description = recovered.recovery.draft.location?.description.orEmpty(),
+                    capturedAtEpochMillis = fix.capturedAtEpochMillis,
+                ),
+            )
+        }
+    }
+
     private suspend fun mutate(
         requestId: String,
         discardPendingDestination: Boolean = false,
+        trackingConsent: (RecoveredRescueSession) -> Boolean = { it.recovery.trackingEnabled },
         transform: (RecoveredRescueSession, Int, Long) -> RescueRequestDraft?,
     ): RescueSessionOperationResult = mutexFor(requestId).withLock {
         repeat(MAX_CONFLICT_RETRIES) {
@@ -295,7 +370,7 @@ class ActiveRescueSessionCoordinator(
                 ?: return@withLock RescueSessionOperationResult.Corrupt
             val receiptKey = restored.recovery.receiptSigningPublicKey
                 ?: return@withLock RescueSessionOperationResult.Corrupt
-            val prepared = prepare(draft, recipientKey, receiptKey)
+            val prepared = prepare(draft, recipientKey, receiptKey, trackingConsent(restored))
                 ?: return@withLock RescueSessionOperationResult.StorageFailure
             val session = prepared.session.copy(createdAtEpochMillis = restored.session.createdAtEpochMillis)
             when (val committed = store.updateAtomically(
@@ -364,11 +439,13 @@ class ActiveRescueSessionCoordinator(
         draft: RescueRequestDraft,
         recipientPublicKey: com.example.relay.rescue.RescuePublicKey,
         receiptSigningPublicKey: com.example.relay.rescue.RescuePublicKey,
+        trackingEnabled: Boolean = false,
     ): PreparedSession? = runCatching {
         val recovery = RescueSessionRecoveryPayload(
             draft = draft,
             recipientPublicKey = recipientPublicKey,
             receiptSigningPublicKey = receiptSigningPublicKey,
+            trackingEnabled = trackingEnabled,
         )
         val sealed = recoveryCipher.seal(recovery)
         val envelope = RescueCryptography.encrypt(
@@ -384,7 +461,7 @@ class ActiveRescueSessionCoordinator(
                 latestVersion = draft.requestVersion,
                 sealedRecoveryPayload = sealed.ciphertext,
                 recoveryNonce = sealed.nonce,
-                trackingMode = ActiveRescueSession.TRACKING_DISABLED,
+                trackingMode = trackingModeFor(trackingEnabled),
                 latestSubmissionStatus = RescueSubmissionStatus.PENDING.name,
                 createdAtEpochMillis = draft.createdAtEpochMillis,
                 updatedAtEpochMillis = draft.createdAtEpochMillis,
@@ -434,6 +511,9 @@ class ActiveRescueSessionCoordinator(
     }
 
     private fun mutexFor(requestId: String): Mutex = locks.computeIfAbsent(requestId) { Mutex() }
+
+    private fun trackingModeFor(enabled: Boolean): String =
+        if (enabled) ActiveRescueSession.TRACKING_ENABLED else ActiveRescueSession.TRACKING_DISABLED
 
     /** A corrupted durable record blocks new creation instead of being mistaken for an empty app. */
     private fun existingLiveSession(): RescueSessionOperationResult? {

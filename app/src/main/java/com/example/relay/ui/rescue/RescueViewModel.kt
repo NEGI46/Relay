@@ -191,6 +191,26 @@ class RescueViewModel(
         _state.update { current -> current.copy(screen = RescueScreen.HOME) }
     }
 
+    override fun onSetLocationConsent(enabled: Boolean) {
+        val requestId = _state.value.ownRequest
+            ?.takeIf { it.terminalStatus == null && !it.isCancelled }
+            ?.requestId ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val result = coordinator.setTrackingConsent(requestId, enabled)) {
+                // Consent already matched; just refresh the displayed state.
+                is RescueSessionOperationResult.TrackingConsentUnchanged -> showRecovered(result.value)
+                is RescueSessionOperationResult.Stored -> {
+                    showRecovered(result.value)
+                    // Opting in immediately shares one consented fix; opting out never captures one.
+                    if (enabled) coordinator.recordConsentedLocationUpdate(requestId).let { update ->
+                        if (update is RescueSessionOperationResult.Stored) showRecovered(update.value)
+                    }
+                }
+                else -> handleOperation(result, isSos = false)
+            }
+        }
+    }
+
     private fun submit(
         source: RescueRequestDraft,
         isSos: Boolean,
@@ -321,6 +341,11 @@ class RescueViewModel(
                     )
                 }
             }
+            RescueSessionOperationResult.TrackingNotConsented -> failSubmission(
+                "位置情報の共有に同意していません。まず位置情報の共有をオンにしてください。",
+                "Location sharing is not enabled. Turn on location sharing first.",
+            )
+            is RescueSessionOperationResult.TrackingConsentUnchanged -> showRecovered(result.value)
             RescueSessionOperationResult.Conflict -> failSubmission(
                 "依頼の状態が更新されました。もう一度お試しください。",
                 "The request changed. Please try again.",

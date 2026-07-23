@@ -34,7 +34,12 @@ data class RescueSessionRecoveryPayload(
     val recipientPublicKey: RescuePublicKey? = null,
     /** The public receipt verification key bound to the sender's selected shelter. */
     val receiptSigningPublicKey: RescuePublicKey? = null,
-    /** Reserved durable consent state. Phase 5 does not start tracking from this value. */
+    /**
+     * Durable Phase 5 consent state, the source of truth for whether periodic location updates are
+     * permitted. It is set only by an explicit sender opt-in and mirrored to the public
+     * [ActiveRescueSession.trackingMode]. Fresh requests default to false; tracking never starts
+     * implicitly on creation or recovery.
+     */
     val trackingEnabled: Boolean = false,
 )
 

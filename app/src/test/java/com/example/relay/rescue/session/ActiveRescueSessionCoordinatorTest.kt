@@ -1,5 +1,7 @@
 package com.example.relay.rescue.session
 
+import com.example.relay.location.GeoFix
+import com.example.relay.location.LocationProvider
 import com.example.relay.rescue.EncryptedRescueEnvelope
 import com.example.relay.rescue.InMemoryRescueEnvelopeRepository
 import com.example.relay.rescue.ReceiptApplicationResult
@@ -171,17 +173,93 @@ class ActiveRescueSessionCoordinatorTest {
         assertTrue(fixture.envelopes.all().isEmpty())
     }
 
+    @Test
+    fun `tracking consent is off by default and a location update is refused before opt-in`() = runBlocking {
+        val location = MutableLocationProvider(GeoFix(34.392, 132.504, 5f, 1_000))
+        val fixture = fixture(locationProvider = location)
+        val created = fixture.coordinator.create(draft()) as RescueSessionOperationResult.Stored
+        val requestId = created.value.session.requestId
+
+        assertEquals(ActiveRescueSession.TRACKING_DISABLED, created.value.session.trackingMode)
+        val restored = fixture.coordinator.restore(requestId) as RescueSessionRestoreResult.Restored
+        assertFalse(restored.value.recovery.trackingEnabled)
+
+        // Without consent the update is a no-op: no fresh version, no new envelope.
+        assertEquals(
+            RescueSessionOperationResult.TrackingNotConsented,
+            fixture.coordinator.recordConsentedLocationUpdate(requestId),
+        )
+        assertEquals(1, fixture.store.find(requestId)!!.latestVersion)
+        assertEquals(1, fixture.envelopes.all().size)
+    }
+
+    @Test
+    fun `consent durably enables tracking and a consented update emits a fresh encrypted fix`() = runBlocking {
+        val location = MutableLocationProvider(GeoFix(34.392, 132.504, 5f, 1_000))
+        val fixture = fixture(locationProvider = location)
+        val created = fixture.coordinator.create(draft()) as RescueSessionOperationResult.Stored
+        val requestId = created.value.session.requestId
+
+        val consented = fixture.coordinator.setTrackingConsent(requestId, true) as RescueSessionOperationResult.Stored
+        assertEquals(2, consented.value.session.latestVersion)
+        assertEquals(ActiveRescueSession.TRACKING_ENABLED, consented.value.session.trackingMode)
+        assertTrue(consented.value.recovery.trackingEnabled)
+
+        // Durable: a fresh coordinator (process restart) still sees consent and the enabled mode.
+        val afterRestart = fixture.newCoordinator().restoreLatest() as RescueSessionRestoreResult.Restored
+        assertTrue(afterRestart.value.recovery.trackingEnabled)
+        assertEquals(ActiveRescueSession.TRACKING_ENABLED, afterRestart.value.session.trackingMode)
+
+        // A newer fix arrives; the consented update publishes it as the next encrypted version.
+        location.fix = GeoFix(35.6586, 139.7454, 3f, 2_000)
+        val updated = fixture.coordinator.recordConsentedLocationUpdate(requestId) as RescueSessionOperationResult.Stored
+        assertEquals(3, updated.value.session.latestVersion)
+        assertEquals(ActiveRescueSession.TRACKING_ENABLED, updated.value.session.trackingMode)
+        val envelope = fixture.envelopes.all().maxByOrNull { it.envelope.requestVersion }!!.envelope
+        val payload = RescueCryptography.decrypt(envelope, fixture.recipientPrivateKey)
+        assertEquals(35.6586, payload.location!!.latitude!!, 1e-9)
+        assertEquals(139.7454, payload.location!!.longitude!!, 1e-9)
+    }
+
+    @Test
+    fun `withdrawing consent disables tracking, stops updates, and is idempotent`() = runBlocking {
+        val location = MutableLocationProvider(GeoFix(34.392, 132.504, 5f, 1_000))
+        val fixture = fixture(locationProvider = location)
+        val created = fixture.coordinator.create(draft()) as RescueSessionOperationResult.Stored
+        val requestId = created.value.session.requestId
+        fixture.coordinator.setTrackingConsent(requestId, true) as RescueSessionOperationResult.Stored
+
+        val withdrawn = fixture.coordinator.setTrackingConsent(requestId, false) as RescueSessionOperationResult.Stored
+        assertEquals(ActiveRescueSession.TRACKING_DISABLED, withdrawn.value.session.trackingMode)
+        assertFalse(withdrawn.value.recovery.trackingEnabled)
+
+        val versionAfterWithdraw = fixture.store.find(requestId)!!.latestVersion
+        assertEquals(
+            RescueSessionOperationResult.TrackingNotConsented,
+            fixture.coordinator.recordConsentedLocationUpdate(requestId),
+        )
+        assertEquals(versionAfterWithdraw, fixture.store.find(requestId)!!.latestVersion)
+
+        // Re-applying the same decision changes nothing: no new version and no new envelope.
+        val envelopesBefore = fixture.envelopes.all().size
+        val unchanged = fixture.coordinator.setTrackingConsent(requestId, false)
+        assertTrue(unchanged is RescueSessionOperationResult.TrackingConsentUnchanged)
+        assertEquals(versionAfterWithdraw, fixture.store.find(requestId)!!.latestVersion)
+        assertEquals(envelopesBefore, fixture.envelopes.all().size)
+    }
+
     private fun fixture(
         now: Long = 1_700_000_000_000L,
         lifetimeMillis: Long = 3L * 24 * 60 * 60 * 1_000,
         keysAvailable: Boolean = true,
+        locationProvider: LocationProvider? = null,
     ): Fixture {
         val recipient = RescueCryptography.generateRecipientKeyPair()
         val receipt = RescueCryptography.generateShelterSigningKeyPair()
         val keys = ShelterPublicKeys("shelter-1", recipient.publicKey, receipt.publicKey)
         val store = FakeSessionStore()
         val cipher = AesGcmRecoveryPayloadCipher(TestKeyProvider(), "TEST ONLY session-key")
-        return Fixture(store, cipher, keys, recipient.privateKey, now, lifetimeMillis, keysAvailable)
+        return Fixture(store, cipher, keys, recipient.privateKey, now, lifetimeMillis, keysAvailable, locationProvider)
     }
 
     private fun draft(requestId: String = "request-1") = RescueRequestDraft(
@@ -203,6 +281,7 @@ class ActiveRescueSessionCoordinatorTest {
         var now: Long,
         private val lifetimeMillis: Long,
         keysAvailable: Boolean,
+        private val locationProvider: LocationProvider? = null,
     ) {
         var deliveryNotifications: Int = 0
         var configuredKeys: ShelterPublicKeys? = keys.takeIf { keysAvailable }
@@ -212,6 +291,7 @@ class ActiveRescueSessionCoordinatorTest {
             store = store,
             recoveryCipher = cipher,
             shelterKeyProvider = ShelterPublicKeyProvider { configuredKeys },
+            locationProvider = locationProvider,
             nowEpochMillis = { now },
             requestLifetimeMillis = lifetimeMillis,
             newEnvelopeId = { "envelope-${++envelopeCounter}" },
@@ -219,6 +299,10 @@ class ActiveRescueSessionCoordinatorTest {
         )
 
         private var envelopeCounter = 0
+    }
+
+    private class MutableLocationProvider(var fix: GeoFix?) : LocationProvider {
+        override suspend fun currentFix(timeoutMs: Long): GeoFix? = fix
     }
 
     private class TestKeyProvider : SessionSecretKeyProvider {
