@@ -18,6 +18,18 @@ tasks.register<JavaExec>("regionalTrustProvisioning") {
     mainClass.set("com.example.relay.pcgateway.rescue.provisioning.RegionalTrustProvisioningCliKt")
 }
 
+/**
+ * Test-only launcher for the Playwright staff-console browser E2E. It boots the real operator
+ * console (static SPA + real gatewayModule routes) with a seeded admin and rescue requests.
+ * Configuration comes entirely from the environment set by staff-console-e2e/playwright.config.ts.
+ */
+tasks.register<JavaExec>("staffConsoleE2eServer") {
+    group = "relay verification"
+    description = "Launch the real staff console for the Playwright browser E2E (test-only harness)."
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("com.example.relay.pcgateway.e2e.StaffConsoleE2eServer")
+}
+
 dependencies {
     implementation(project(":relay-protocol"))
     implementation(project(":shared"))
