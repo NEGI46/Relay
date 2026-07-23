@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Starts the Relay PC Gateway development preview with only a username and password prompt.
 
