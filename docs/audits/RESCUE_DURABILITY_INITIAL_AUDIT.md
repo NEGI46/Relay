@@ -20,7 +20,7 @@ physical-device result.
 | 7. Delivery lifecycle | Connected-device delivery was sticky and restarted from app/boot/package/Bluetooth events. | Preserved for encrypted-envelope delivery; active session restores independently. |
 | 8. BOOT_COMPLETED | Existing receiver starts the connected-device service when enabled. | No location FGS has been added or started at boot. |
 | 9. Notification denial | No explicit notification-denied recovery UI was found. | Still not addressed; Phase 5/device work remains required. |
-| 10. Android 14+ location FGS | No user consent flow, location FGS type, or visible-Activity start discipline existed. | Phase 5 is deliberately NOT_STARTED; old ViewModel periodic tracking was removed. |
+| 10. Android 14+ location FGS | No user consent flow, location FGS type, or visible-Activity start discipline existed. | Phase 5 consent-driven **foreground** updates are now implemented (explicit opt-in, durable consent in the encrypted recovery payload, one-shot gated fix); continuous background location, location FGS type, and WorkManager scheduling remain NOT_STARTED. |
 | 11. Existing tests | No tests covered persisted Directory or sender-session recovery/CAS. | New contract tests were added; execution evidence is pending. |
 | 12. README/code alignment | README implied trusted BLE and restart update/cancel coverage not established by code. | README now distinguishes Phase 0A implementation from blocked Phase 0B and marks device evidence as required. |
 
@@ -86,14 +86,20 @@ physical-device result.
   acknowledgement deletes only the encrypted `active_rescue_sessions` row; it never converts the
   result into a new request or silently deletes corrupt recovery material.
 
-### Phase 5 — intentionally excluded
+### Phase 5 — consent-driven foreground updates implemented; background tracking still excluded
 
-- Continuous background location tracking, location FGS declaration, background location
-  permission, and WorkManager GPS scheduling are **not** implemented in this change.
-- The prior ViewModel minute loop was removed. The restored UI explicitly reports that location
-  updates are stopped. A separate Phase 5 review must implement explicit consent, foreground
-  start while visible, Android 14+ restrictions, distance/time/accuracy policy, and terminal stop
-  conditions.
+- Implemented in this branch (`5c0fddb`): durable location-tracking consent is stored inside the
+  AES-GCM-encrypted recovery payload (`RescueSessionRecoveryPayload.trackingEnabled`) as the source
+  of truth and mirrored to the public `ActiveRescueSession.trackingMode` (`DISABLED`/`ENABLED`).
+  `setTrackingConsent` records an explicit, idempotent opt-in/out; `recordConsentedLocationUpdate`
+  is consent-gated and never touches location hardware before opt-in, capturing one fresh fix and
+  emitting it as the next encrypted request version via the existing atomic version-CAS update path.
+  The broadcasting UI exposes a consent `Switch`; fresh requests and every recovery default to false
+  and tracking never starts implicitly.
+- Still **not** implemented: continuous background location tracking, location FGS declaration,
+  background location permission, and WorkManager GPS scheduling. A separate review must still cover
+  foreground-start-while-visible discipline, Android 14+ restrictions, distance/time/accuracy policy,
+  and terminal stop conditions before any background-tracking claim.
 
 ## AUTOMATED_TESTED
 

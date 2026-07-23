@@ -129,7 +129,7 @@ Compose Multiplatform:
 
 ## 未実装・運用未確認（表記を控えめにした箇所）
 
-- 継続バックグラウンドGPS（Phase 5）は未実装。`trackingEnabled` は復元時 false 固定。
+- Phase 5 の同意ベース位置更新を実装: 送信者が明示的にオプトインした場合のみ現在地を1回取得し、暗号化リカバリペイロード（`trackingEnabled`、永続的同意の真実源）と公開 `trackingMode` に反映する。同意前は位置ハードウェアに触れず、`trackingEnabled` は依頼作成・復元時とも false 既定。継続バックグラウンドGPS・Foreground Service 宣言・WorkManager 定期追跡は引き続き未実装。
 - 外部消防・救助機関への自動要請は未確認。RESCUE_REQUESTED は「外部連携未確認」と明示。
 - BLE 信頼チェーンはコード対応済みだが正式 Root/Directory/Manifest は別途必要。
 - Compose のゲートウェイ探索はプラットフォーム依存で未配線。開発時は override/localhost。
