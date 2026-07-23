@@ -27,6 +27,7 @@ param(
     [int]$Port = 8080,
     [string]$Username,
     [securestring]$Password,
+    [switch]$ResetAdmin,
     [switch]$EnableLanEnrollment,
     [switch]$NoBrowser,
     [switch]$Down
@@ -244,19 +245,38 @@ if ($EnableLanEnrollment) {
     $env:RELAY_GATEWAY_ANONYMOUS_INGRESS = 'false'
 }
 
+$gatewayDbPath = $env:RELAY_GATEWAY_DB
 try {
-    $admin = Read-DevelopmentAdministrator -InitialUsername $Username -InitialPassword $Password
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($admin.Password)
-    try {
-        $env:RELAY_GATEWAY_BOOTSTRAP_CLI_SECRET = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-        & $gateway bootstrap-admin --username $admin.Username
-        $bootstrapExitCode = $LASTEXITCODE
-    } finally {
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-        Remove-Item Env:RELAY_GATEWAY_BOOTSTRAP_CLI_SECRET -ErrorAction SilentlyContinue
+    if ($ResetAdmin -and (Test-Path -LiteralPath $gatewayDbPath)) {
+        # Development-only reset: clear this profile's gateway database so the next bootstrap can
+        # create the administrator you enter below. This discards locally queued development data;
+        # rescue keys (rescue-keys.json) are preserved, so previously encrypted envelopes still open.
+        Get-ChildItem -LiteralPath $stateRoot -Filter 'relay-gateway.db*' -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-Host 'Reset: cleared the existing gateway database for this development profile.' -ForegroundColor Yellow
     }
-    if ($bootstrapExitCode -ne 0) {
-        Write-Host 'An existing administrator may be present, so first-run creation was skipped.' -ForegroundColor Yellow
+
+    # bootstrap-admin only creates the FIRST administrator; on a re-run it throws and any name or
+    # password entered here would be silently ignored (a frequent "my login does not work" trap).
+    # Only prompt and bootstrap when there is no existing database for this profile.
+    if (Test-Path -LiteralPath $gatewayDbPath) {
+        Write-Host 'An administrator already exists for this development profile.' -ForegroundColor Yellow
+        Write-Host 'Sign in with the username and password created on the first run.'
+        Write-Host 'To set a different username/password, re-run with -ResetAdmin (clears this dev gateway database).'
+    } else {
+        $admin = Read-DevelopmentAdministrator -InitialUsername $Username -InitialPassword $Password
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($admin.Password)
+        try {
+            $env:RELAY_GATEWAY_BOOTSTRAP_CLI_SECRET = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+            & $gateway bootstrap-admin --username $admin.Username
+            $bootstrapExitCode = $LASTEXITCODE
+        } finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+            Remove-Item Env:RELAY_GATEWAY_BOOTSTRAP_CLI_SECRET -ErrorAction SilentlyContinue
+        }
+        if ($bootstrapExitCode -ne 0) {
+            throw 'Could not create the administrator. Use a 3-64 character username and a 12+ character password, then run again.'
+        }
     }
 
     $process = Start-Process -FilePath $gateway -WorkingDirectory (Split-Path -Parent $gateway) -PassThru
@@ -277,7 +297,7 @@ if (-not $health) {
 }
 if ($health.status -eq 'bootstrap_required') {
     if (-not $process.HasExited) { Stop-Process -Id $process.Id -ErrorAction SilentlyContinue }
-    throw 'Could not create the administrator account. Verify the username and a 12+ character password, then run again.'
+    throw 'No administrator exists yet. Re-run with -ResetAdmin to (re)create one with a 3-64 character username and a 12+ character password.'
 }
 
 Write-Host ''

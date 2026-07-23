@@ -357,6 +357,7 @@ Start-Relay-Broker-Tunnel-Development.cmd -Down
 
 - 状態・生成鍵: `%LOCALAPPDATA%\Relay\broker-tunnel`へ隔離
 - 既定credential有効期間: 2時間（`-CredentialLifetimeHours`で1〜24）
+- 管理者は**初回のみ**作成されます。2回目以降に別の名前/passwordを入力しても登録されないため、既存の資格情報でサインインしてください。別の資格情報にしたい場合は`-ResetAdmin`付きで再実行するとこのプロファイルのGateway DBを初期化して作り直せます
 - 初回のAndroid鍵登録だけprivate-LANが要る場合は`-EnableLanEnrollment`
 - Cloudflare Quick TunnelはSLA無し。開発・動作確認専用で、pilot/緊急運用には使用しないでください
 
