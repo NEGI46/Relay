@@ -16,11 +16,14 @@
   Isolated installation directory. Default: <repo>\tools\security-windows
 
 .PARAMETER Tools
-  Comma-separated subset to install. Default: syft,osv-scanner,grype,litestream
+  Comma-separated subset to install. Default: syft,osv-scanner,grype
   Note: 'age' is intentionally NOT in the default set. The age release publishes only Sigstore
   '.proof' attestations and no plain SHA-256 checksums file, so this script cannot verify it with
   a published checksum and refuses to install it unverified (fail-closed). Request it explicitly
   with -Tools age only after supplying a trusted sha256 in the catalog below.
+  Note: litestream is deliberately absent from this Windows catalog because the official litestream
+  release ships no Windows binary (darwin/linux only); the gateway backup script that needs it is
+  therefore exercised on Linux CI, not via this Windows installer.
 
 .PARAMETER MetadataPath
   Where to write the tool metadata JSON. Default: <ToolDir>\tools-metadata.json
@@ -33,7 +36,7 @@
 [CmdletBinding()]
 param(
     [string]$ToolDir = '',
-    [string]$Tools = 'syft,osv-scanner,grype,litestream',
+    [string]$Tools = 'syft,osv-scanner,grype',
     [string]$MetadataPath = ''
 )
 
@@ -85,14 +88,8 @@ $catalog = @{
         # out-of-band checksum is recorded here. Do NOT fabricate a value.
         sha256     = 'REPLACE_WITH_PUBLISHED_AGE_SHA256'
     }
-    'litestream' = @{
-        version    = '0.3.13'
-        repo       = 'benbjohnson/litestream'
-        asset      = 'litestream-v0.3.13-windows-amd64.zip'
-        checksums  = 'litestream-v0.3.13-checksums.txt'
-        binary     = 'litestream.exe'
-        versionArg = 'version'
-    }
+    # litestream intentionally omitted: the official release publishes no Windows binary
+    # (darwin/linux only), so it cannot be installed here. See the .PARAMETER Tools note above.
 }
 
 $selected = @($Tools -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
