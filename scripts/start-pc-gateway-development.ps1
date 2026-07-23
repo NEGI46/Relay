@@ -39,9 +39,9 @@ function Find-RelayPcGatewayExecutable {
         }
     }
     throw @"
-RelayPcGateway.exe が見つかりません。
-開発版インストーラーを完了してから再実行するか、-Executable に RelayPcGateway.exe のフルパスを指定してください。
-既定のインストール先: $env:ProgramFiles\RelayPcGateway\RelayPcGateway.exe
+RelayPcGateway.exe was not found.
+Finish the development installer and run this again, or pass the full path to RelayPcGateway.exe with -Executable.
+Default install path: $env:ProgramFiles\RelayPcGateway\RelayPcGateway.exe
 "@
 }
 
@@ -68,14 +68,14 @@ function Read-DevelopmentAdministrator {
 
     $name = $InitialUsername
     while ([string]::IsNullOrWhiteSpace($name)) {
-        $name = Read-Host '管理者ユーザー名（3〜64文字、英数字・._-）'
+        $name = Read-Host 'Administrator username (3-64 chars: letters, digits, . _ -)'
     }
     if ($name -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$') {
-        throw 'ユーザー名は3〜64文字で、先頭を英数字にしてください。使用できる記号は . _ - です。'
+        throw 'Username must be 3-64 characters, start with a letter or digit, and use only . _ - as symbols.'
     }
     $secret = $InitialPassword
     if ($null -eq $secret) {
-        $secret = Read-Host '管理者パスワード（12文字以上）' -AsSecureString
+        $secret = Read-Host 'Administrator password (12+ characters)' -AsSecureString
     }
     return [pscustomobject]@{ Username = $name; Password = $secret }
 }
@@ -112,12 +112,12 @@ $consoleUrl = "http://127.0.0.1:$Port/"
 $healthUrl = "http://127.0.0.1:$Port/api/health"
 $health = Test-GatewayHealth -HealthUrl $healthUrl
 if ($health) {
-    Write-Host "Relay PC Gateway は既に起動しています: $consoleUrl"
+    Write-Host "Relay PC Gateway is already running: $consoleUrl"
     if (-not $NoBrowser) { Start-Process $consoleUrl | Out-Null }
     return
 }
 if (Test-ListeningPort -PortNumber $Port) {
-    throw "TCP ポート $Port は別のプログラムが使用中です。既存のGatewayを終了するか、-Port で別の番号を指定してください。"
+    throw "TCP port $Port is already in use by another program. Stop the existing gateway or choose a different port with -Port."
 }
 
 $admin = Read-DevelopmentAdministrator -InitialUsername $Username -InitialPassword $Password
@@ -134,7 +134,7 @@ try {
 if ($bootstrapExitCode -ne 0) {
     # A nonzero result normally means an existing named administrator. Starting continues; health
     # below still fails closed if this was actually a first-run validation failure.
-    Write-Host '既存の管理者があるため、初期作成をスキップした可能性があります。Gatewayを起動して状態を確認します。' -ForegroundColor Yellow
+    Write-Host 'An existing administrator may be present, so first-run creation was skipped. Starting the gateway to verify its state.' -ForegroundColor Yellow
 }
 
 $process = Start-Process -FilePath $gateway -WorkingDirectory (Split-Path -Parent $gateway) -PassThru
@@ -147,13 +147,13 @@ do {
 
 if (-not $health) {
     if (-not $process.HasExited) { Stop-Process -Id $process.Id -ErrorAction SilentlyContinue }
-    throw 'Gatewayを30秒以内に起動できませんでした。表示されたGatewayウィンドウとWindowsのイベントを確認してください。'
+    throw 'The gateway did not become healthy within 30 seconds. Check the gateway window that opened and the Windows Event Log.'
 }
 if ($health.status -eq 'bootstrap_required') {
     if (-not $process.HasExited) { Stop-Process -Id $process.Id -ErrorAction SilentlyContinue }
-    throw '管理者アカウントを作成できませんでした。ユーザー名と12文字以上のパスワードを確認して再実行してください。'
+    throw 'Could not create the administrator account. Verify the username and a 12+ character password, then run again.'
 }
 
-Write-Host "Relay PC Gateway development preview を起動しました: $consoleUrl"
-Write-Host 'ブラウザでは、ここで入力した同じユーザー名とパスワードでログインしてください。'
+Write-Host "Relay PC Gateway development preview started: $consoleUrl"
+Write-Host 'In the browser, sign in with the same username and password you entered here.'
 if (-not $NoBrowser) { Start-Process $consoleUrl | Out-Null }

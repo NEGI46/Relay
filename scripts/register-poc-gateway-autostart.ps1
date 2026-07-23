@@ -1,35 +1,37 @@
 <#
 .SYNOPSIS
-Windows ログオン時に development プロファイルの PC Gateway (Docker) を自動起動する補助スクリプト。
+Helper script that auto-starts the development-profile PC Gateway (Docker) at Windows logon.
 
 .DESCRIPTION
-実証 (development / PoC) 用途のみを想定しています。Windows Task Scheduler に「ログオン時」タスクを
-登録し、現在のユーザー権限で（パスワードを保存せずに）Docker ベースの PC Gateway を復旧します。
-本番用の scripts/register-pc-gateway-autostart.ps1（native EXE / SYSTEM 常駐）とは別系統であり、
-本番運用機能は追加しません。
+Intended for development / PoC use only. It registers an "at logon" task in Windows Task
+Scheduler and, running as the current user (without storing a password), recovers the
+Docker-based PC Gateway. This is a separate track from the production
+scripts/register-pc-gateway-autostart.ps1 (native EXE / SYSTEM service) and adds no
+production operational features.
 
-起動処理は既存の scripts/start-poc-broker-gateway-docker.ps1 を利用します。
-Docker Desktop の起動完了を待ち、Gateway の health を確認し、結果を秘密情報を含めずにログへ記録します。
+Startup reuses the existing scripts/start-poc-broker-gateway-docker.ps1. It waits for Docker
+Desktop to finish starting, checks the Gateway health, and records the result to a log without
+any secret information.
 
 .NOTES
-Broker 資格情報・管理者パスワード・救助内容・GPS・秘密鍵は一切ログへ出力しません。
-Windows 以外では明確に失敗し、何も変更しません。
+Broker credentials, administrator passwords, rescue content, GPS, and private keys are never
+written to the log. On non-Windows platforms it fails clearly and changes nothing.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Register')]
 param(
-    # 既定動作: ログオン時タスクを登録する。
+    # Default action: register the at-logon task.
     [Parameter(ParameterSetName = 'Register')]
     [switch]$Register,
 
-    # タスクから内部的に呼び出される実行モード（手動指定は不要）。
+    # Run mode invoked internally by the task (no need to specify manually).
     [Parameter(ParameterSetName = 'Run')]
     [switch]$Run,
 
-    # 登録済みタスクを安全に削除する。
+    # Safely remove the registered task.
     [Parameter(ParameterSetName = 'Unregister')]
     [switch]$Unregister,
 
-    # タスク登録状況 / Docker 稼働状況 / Gateway health のみ表示する。
+    # Show only task registration / Docker status / Gateway health.
     [Parameter(ParameterSetName = 'Status')]
     [switch]$Status,
 
@@ -43,7 +45,7 @@ param(
 
     [string]$HealthUrl = 'http://127.0.0.1:8080/api/health',
 
-    # 以下は start-poc-broker-gateway-docker.ps1 への任意の非秘密パススルー。
+    # The following are optional non-secret passthrough to start-poc-broker-gateway-docker.ps1.
     [string]$BrokerUrl,
     [string]$StateRoot,
     [switch]$EnableLanEnrollment,
@@ -53,10 +55,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# --- OS ガード -------------------------------------------------------------
+# --- OS guard --------------------------------------------------------------
 
 function Test-IsWindowsOs {
-    # Windows PowerShell 5.1 には $IsWindows が存在しない（=Windows 上でのみ動作）。
+    # Windows PowerShell 5.1 has no $IsWindows variable (so it only runs on Windows).
     if ($null -ne (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue)) {
         return [bool]$IsWindows
     }
@@ -69,7 +71,7 @@ function Assert-Windows {
     }
 }
 
-# --- ログ（秘密情報を含めない） -------------------------------------------
+# --- Logging (never includes secrets) --------------------------------------
 
 function Get-RelayLogPath {
     $base = $env:LOCALAPPDATA
@@ -80,26 +82,26 @@ function Get-RelayLogPath {
 }
 
 function Remove-RelaySecret {
-    # 万一ログ経路へ秘密情報が混入しても出力されないようにする多層防御。
+    # Defense in depth so that no secret is emitted even if one reaches the log path.
     param([string]$Text)
     if ([string]::IsNullOrEmpty($Text)) { return $Text }
     $redacted = $Text
-    # key=value / key: value 形式の資格情報・トークン・パスワード・救助関連。
+    # key=value / key: value style credentials, tokens, passwords, rescue material.
     $redacted = [regex]::Replace(
         $redacted,
         '(?i)((?:RELAY_[A-Z0-9_]*)?(?:credential|password|passwd|secret|token|api[_-]?key|private[_-]?key|rescue)[A-Za-z0-9_]*)\s*[:=]\s*("?)[^\s"]+("?)',
         '$1=***REDACTED***')
-    # PEM 秘密鍵ブロック。
+    # PEM private key blocks.
     $redacted = [regex]::Replace(
         $redacted,
         '(?is)-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----',
         '***REDACTED_PRIVATE_KEY***')
-    # GPS 座標。
+    # GPS coordinates.
     $redacted = [regex]::Replace(
         $redacted,
         '(?i)\b(lat|latitude|lon|lng|longitude|gps)\b\s*[:=]\s*-?\d{1,3}\.\d+',
         '$1=***REDACTED***')
-    # 長い不透明トークン（base64/hex 相当、40 文字以上）。
+    # Long opaque tokens (base64/hex-like, 40+ characters).
     $redacted = [regex]::Replace($redacted, '\b[A-Za-z0-9+/=_-]{40,}\b', '***REDACTED***')
     return $redacted
 }
@@ -119,7 +121,7 @@ function Write-AutostartLog {
     Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
 }
 
-# --- Docker / Gateway 判定（テストで差し替え可能な薄いラッパー） -----------
+# --- Docker / Gateway checks (thin wrappers, replaceable in tests) ----------
 
 function Get-DockerInfoExitCode {
     # Discard every stream: a stopped daemon writes to stderr, and command-not-found throws.
@@ -186,14 +188,14 @@ function Invoke-GatewayStart {
     if (-not (Test-Path -LiteralPath $StartScriptPath)) {
         throw "Gateway start script not found: $StartScriptPath"
     }
-    # 起動スクリプトの標準出力は取り込まない（非秘密の URL 等でもログを汚さない）。
+    # Do not capture the start script's stdout (keeps the log clean even of non-secret URLs).
     & $StartScriptPath @ForwardParameters
     if (($null -ne $LASTEXITCODE) -and ($LASTEXITCODE -ne 0)) {
         throw "Gateway start script exited with code $LASTEXITCODE"
     }
 }
 
-# --- タスク定義（純粋関数：ScheduledTasks モジュール無しでも検証可能） ------
+# --- Task definition (pure functions: verifiable without the ScheduledTasks module) ------
 
 function Get-AutostartPowerShellPath {
     return (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')
@@ -232,8 +234,8 @@ function Get-AutostartTaskPlan {
         Argument      = Get-AutostartActionArgument -ScriptPath $ScriptPath -ForwardParameters $ForwardParameters
         TriggerType   = 'AtLogon'
         UserId        = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-        LogonType     = 'Interactive'  # 現在のユーザー。パスワードは保存しない。
-        RunLevel      = 'Limited'      # 現在のユーザー権限（昇格しない）。
+        LogonType     = 'Interactive'  # Current user. The password is not stored.
+        RunLevel      = 'Limited'      # Current-user privileges (no elevation).
         StorePassword = $false
     }
 }
@@ -265,7 +267,7 @@ function Unregister-AutostartTask {
     if ($existing.State -eq 'Running') {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     }
-    # 対象タスクのみを削除する（ワイルドカードや他タスクには触れない）。
+    # Remove only the target task (never a wildcard or other tasks).
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
     return $true
 }
@@ -300,7 +302,7 @@ function Show-AutostartStatus {
     Write-Output ('  Gateway healthy : {0}' -f $s.GatewayHealthy)
 }
 
-# --- 実行モード（タスクが呼び出す本体） -----------------------------------
+# --- Run mode (the body the task invokes) ----------------------------------
 
 function Invoke-AutostartRun {
     param(
@@ -341,13 +343,13 @@ function Invoke-AutostartRun {
     return [pscustomobject]@{ Success = $false; Reason = 'unhealthy' }
 }
 
-# --- ディスパッチ ----------------------------------------------------------
+# --- Dispatch --------------------------------------------------------------
 
 function Main {
     $scriptPath = $PSCommandPath
     $startScriptPath = Join-Path (Split-Path -Parent $scriptPath) 'start-poc-broker-gateway-docker.ps1'
 
-    # 提供された引数から非秘密のパススルーのみを組み立てる。
+    # Build only the non-secret passthrough from the provided arguments.
     $forward = @{}
     if ($PSBoundParameters.ContainsKey('BrokerUrl') -and $BrokerUrl) { $forward['BrokerUrl'] = $BrokerUrl }
     if ($PSBoundParameters.ContainsKey('StateRoot') -and $StateRoot) { $forward['StateRoot'] = $StateRoot }
@@ -396,7 +398,7 @@ function Main {
     }
 }
 
-# ドットソース（テスト）時は Main を実行しない。
+# Do not run Main when dot-sourced (tests).
 if ($MyInvocation.InvocationName -ne '.') {
     Main
 }
