@@ -188,6 +188,14 @@ function Invoke-Gradle { param([string]$Name, [string[]]$Tasks) return (Invoke-L
 function Invoke-PsTest { param([string]$Name, [string]$RelPath) return (Invoke-Logged -Name $Name -Exe 'powershell' -CommandArgs @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $Root $RelPath))) }
 function Invoke-Python { param([string]$Name, [string[]]$PythonArgs) return (Invoke-Logged -Name $Name -Exe 'python' -CommandArgs $PythonArgs) }
 
+# Tri-state PowerShell test: the callee uses exit code 2 to mean BLOCKED (missing external tooling),
+# which must never be reported as PASS. 0 = PASS, 2 = BLOCKED, anything else = FAIL.
+function Invoke-PsTestTri { param([string]$Name, [string]$RelPath)
+    $r = Invoke-Logged -Name $Name -Exe 'powershell' -CommandArgs @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $Root $RelPath))
+    if ($r.exitCode -eq 2) { $r.status = 'BLOCKED'; $r.detail = 'blocked (exitCode=2) ' + $r.detail }
+    return $r
+}
+
 # --- Check catalog -----------------------------------------------------------
 
 $androidBlocked = if ($androidSdk) { '' } else { 'Android SDK not found (set ANDROID_HOME or install Android Studio)' }
@@ -207,6 +215,7 @@ Invoke-Step -Name 'windows-launcher-test' -Category 'script' -Mandatory $true -C
 Invoke-Step -Name 'windows-autostart-test' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'windows-autostart-test' 'scripts\tests\register-poc-gateway-autostart.tests.ps1' }
 Invoke-Step -Name 'windows-setup-test' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'windows-setup-test' 'scripts\tests\pc-gateway-setup.tests.ps1' }
 Invoke-Step -Name 'cp932-ascii-regression' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'cp932-ascii-regression' 'scripts\tests\launcher-encoding.tests.ps1' }
+Invoke-Step -Name 'gateway-backup-restore' -Category 'script' -Mandatory $false -BlockedReason $(if ($hasPython) { '' } else { 'python not found (needed to seed/verify the SQLite database)' }) -Check { Invoke-PsTestTri 'gateway-backup-restore' 'scripts\tests\gateway-backup-restore.tests.ps1' }
 
 if ($SkipBuild) {
     foreach ($n in @('pc-gateway-build', 'android-debug-build', 'android-localdev-build')) {
