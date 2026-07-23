@@ -44,6 +44,12 @@ function Assert-Docker {
     }
     & docker compose version *> $null
     if ($LASTEXITCODE -ne 0) { throw 'Docker Compose v2 is required. Update Docker Desktop, then run this again.' }
+    # `docker compose version` is client-only; confirm the engine is actually reachable so the
+    # failure is a clear message here rather than a cryptic pipe error during `compose up`.
+    & docker info *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Docker is installed but its engine is not reachable. Start Docker Desktop, wait until it reports "Engine running", then run this again.'
+    }
 }
 
 function Find-RelayPcGatewayExecutable {
