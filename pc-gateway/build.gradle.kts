@@ -35,4 +35,6 @@ dependencies {
     implementation("org.slf4j:slf4j-simple:2.0.17")
     testImplementation(libs.ktor.server.test.host)
     testImplementation(libs.junit)
+    // Test-only: exercise the real Broker HTTP server in the end-to-end intake flow.
+    testImplementation(project(":broker"))
 }
