@@ -250,3 +250,97 @@ jobs:
         run: python -m unittest discover -s tests/security -p 'test_*.py' -v
       - name: Run TUF metadata chain contract tests
         run: python test-lab/tuf_metadata_test.py -v
+
+  windows-validation:
+    name: Windows PowerShell and PC Gateway validation
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      # Windows-specific guard: the PC Gateway launchers are executed by Windows PowerShell 5.1,
+      # which parses BOM-less scripts using the system ANSI code page (CP932 on Japanese Windows).
+      # Any non-ASCII byte would be misread and break the launcher, so the launchers must stay
+      # ASCII-only and parse cleanly under both CP932 and UTF-8.
+      - name: Windows PowerShell 5.1 syntax and encoding check
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scripts = @(
+            'scripts\start-pc-gateway-development.ps1',
+            'scripts\register-poc-gateway-autostart.ps1',
+            'scripts\run-pc-gateway.ps1',
+            'scripts\setup-pc-gateway.ps1',
+            'scripts\register-pc-gateway-autostart.ps1',
+            'scripts\configure-pc-gateway-firewall.ps1',
+            'scripts\smoke-test-pc-gateway.ps1'
+          )
+          foreach ($s in $scripts) {
+            $errors = $null
+            $tokens = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $s).Path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors -and $errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host $_.Message }
+              throw "Windows PowerShell 5.1 parse failed: $s"
+            }
+            Write-Host "Windows PowerShell 5.1 parse OK: $s"
+          }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tests\launcher-encoding.tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'CP932/ASCII encoding regression test failed (Windows PowerShell 5.1)' }
+      - name: PowerShell 7 syntax and encoding check
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scripts = @(
+            'scripts\start-pc-gateway-development.ps1',
+            'scripts\register-poc-gateway-autostart.ps1',
+            'scripts\run-pc-gateway.ps1',
+            'scripts\setup-pc-gateway.ps1',
+            'scripts\register-pc-gateway-autostart.ps1',
+            'scripts\configure-pc-gateway-firewall.ps1',
+            'scripts\smoke-test-pc-gateway.ps1'
+          )
+          foreach ($s in $scripts) {
+            $errors = $null
+            $tokens = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $s).Path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors -and $errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host $_.Message }
+              throw "PowerShell 7 parse failed: $s"
+            }
+            Write-Host "PowerShell 7 parse OK: $s"
+          }
+          ./scripts/tests/launcher-encoding.tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'CP932/ASCII encoding regression test failed (PowerShell 7)' }
+      - name: Windows PowerShell launcher contract tests
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tests\run-pc-gateway-launcher.tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'run-pc-gateway-launcher.tests.ps1 failed' }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tests\register-poc-gateway-autostart.tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'register-poc-gateway-autostart.tests.ps1 failed' }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tests\pc-gateway-setup.tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'pc-gateway-setup.tests.ps1 failed' }
+      - name: PC Gateway tests, build and installDist
+        shell: pwsh
+        run: ./gradlew.bat :pc-gateway:test :pc-gateway:build :pc-gateway:installDist --no-daemon --console=plain
+      - name: PC Gateway smoke test and /api/health
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-test-pc-gateway.ps1 -SkipBuild -HealthTimeoutSeconds 180
+          if ($LASTEXITCODE -ne 0) { throw 'PC Gateway smoke test failed' }
+      - name: Upload Windows validation logs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: relay-windows-validation
+          path: |
+            pc-gateway/build/reports/**
+            pc-gateway/build/test-results/**
+          if-no-files-found: warn
