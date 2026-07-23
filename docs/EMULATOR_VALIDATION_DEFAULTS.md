@@ -25,3 +25,20 @@ the Android SDK (from `ANDROID_HOME`, `local.properties`, then the default SDK
 location), forces the headless `swiftshader_indirect` GPU, runs the suite, and
 exits non-zero on any failure. A local SDK path belongs only in the gitignored
 `local.properties` (`sdk.dir=...`); it is never committed.
+
+The wrapper also passes
+`-Pandroid.experimental.testOptions.managedDevices.setupTimeoutMinutes=15`
+(`-SetupTimeoutMinutes` to override). The Gradle default is too short for the
+first cold snapshot boot on resource-constrained hosts, where the setup emulator
+otherwise dies with `Unable to start Android emulator ... process = []` before
+the snapshot is written; once the snapshot is cached, later runs finish in a few
+minutes. If a stale emulator from an interrupted run is still attached, stop it
+(`adb -s <serial> emu kill`) before retrying so the managed device can claim its
+own emulator.
+
+The wrapper treats a Gradle `BUILD SUCCESSFUL` as a pass only after confirming
+the managed-device result XML recorded at least one executed test. This guards
+against a false green: both `connectedDebugAndroidTest` (which silently excludes
+Gradle-managed emulators left running from a previous session) and a
+mis-provisioned managed device can report success while running zero tests. The
+last verified run executed all 20 instrumentation tests (0 failed).

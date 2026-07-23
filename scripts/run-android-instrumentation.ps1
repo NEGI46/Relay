@@ -26,12 +26,19 @@
 
 .PARAMETER SkipDaemon
   Pass --no-daemon to Gradle (matches CI).
+
+.PARAMETER SetupTimeoutMinutes
+  Minutes allowed for the managed-device snapshot setup (first cold boot). The
+  Gradle default is too short on resource-constrained hosts, where the setup
+  emulator dies with "Unable to start Android emulator ... process = []" before
+  the snapshot is written. Default 15.
 #>
 [CmdletBinding()]
 param(
     [string]$Device = 'mediumPhoneApi36',
     [string]$Gpu = 'swiftshader_indirect',
     [string]$Tests = '',
+    [int]$SetupTimeoutMinutes = 15,
     [switch]$SkipDaemon
 )
 
@@ -67,7 +74,8 @@ $task = ":app:${Device}DebugAndroidTest"
 $gradleArgs = @(
     $task,
     '--console=plain',
-    "-Pandroid.testoptions.manageddevices.emulator.gpu=$Gpu"
+    "-Pandroid.testoptions.manageddevices.emulator.gpu=$Gpu",
+    "-Pandroid.experimental.testOptions.managedDevices.setupTimeoutMinutes=$SetupTimeoutMinutes"
 )
 if ($SkipDaemon) { $gradleArgs += '--no-daemon' }
 if ($Tests) {
@@ -77,15 +85,36 @@ if ($Tests) {
 Write-Host "Running: gradlew $($gradleArgs -join ' ')"
 & (Join-Path $Root 'gradlew.bat') @gradleArgs
 $code = $LASTEXITCODE
+if ($null -eq $code) { $code = 1 }
 
 $report = Join-Path $Root "app\build\reports\androidTests\managedDevice\debug\$Device"
 if (Test-Path -LiteralPath $report) {
     Write-Host "Instrumentation report: $report"
 }
 
-if ($code -eq 0) {
-    Write-Host 'PASS: instrumentation suite completed successfully.'
+# Guard against a false green: connectedAndroidTest and a mis-provisioned managed
+# device can both report BUILD SUCCESSFUL while running zero tests. Only trust a
+# pass when the managed-device XML shows tests were actually executed.
+$executed = 0
+$failed = 0
+$resultsDir = Join-Path $Root "app\build\outputs\androidTest-results\managedDevice\debug\$Device"
+if (Test-Path -LiteralPath $resultsDir) {
+    foreach ($xml in Get-ChildItem -LiteralPath $resultsDir -Filter 'TEST-*.xml' -ErrorAction SilentlyContinue) {
+        try {
+            $suite = ([xml](Get-Content -LiteralPath $xml.FullName)).testsuite
+            $executed += [int]$suite.tests
+            $failed += [int]$suite.failures + [int]$suite.errors
+        } catch { }
+    }
+}
+
+if ($code -eq 0 -and $executed -gt 0 -and $failed -eq 0) {
+    Write-Host "PASS: instrumentation suite completed successfully ($executed tests)."
     exit 0
 }
-Write-Host "FAIL: instrumentation suite exited $code."
+if ($code -eq 0 -and $executed -eq 0) {
+    Write-Host 'FAIL: Gradle reported success but zero instrumentation tests ran (no managed-device results found).'
+    exit 1
+}
+Write-Host "FAIL: instrumentation suite exited $code ($executed tests, $failed failed)."
 exit 1

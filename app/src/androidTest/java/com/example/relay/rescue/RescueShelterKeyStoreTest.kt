@@ -33,7 +33,7 @@ class RescueShelterKeyStoreTest {
             validFromEpochMillis = NOW - 1_000,
             validUntilEpochMillis = NOW + 1_000,
         )
-        val store = RescueShelterKeyStore(context) { NOW }
+        val store = RescueShelterKeyStore(context, nowEpochMillis = { NOW })
 
         assertThrows(IllegalArgumentException::class.java) {
             store.saveVerifiedManifest(manifest, "0".repeat(64))
