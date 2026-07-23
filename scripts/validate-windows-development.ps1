@@ -211,6 +211,7 @@ Invoke-Step -Name 'implementation-contract-check' -Category 'script' -Mandatory 
 Invoke-Step -Name 'host-checks' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'host-checks' 'test-lab\run-host-checks.ps1' }
 Invoke-Step -Name 'decoder-regression' -Category 'python' -Mandatory $false -BlockedReason $(if ($hasPython) { '' } else { 'python not found' }) -Check { Invoke-Python 'decoder-regression' @('-m', 'unittest', 'discover', '-s', 'test-lab/fuzz', '-p', 'decoder*_test.py') }
 Invoke-Step -Name 'virtual-ble-test' -Category 'python' -Mandatory $false -BlockedReason $(if ($hasPython) { '' } else { 'python not found' }) -Check { Invoke-Python 'virtual-ble-test' @('tools/ble-sim/run_tests.py') }
+Invoke-Step -Name 'jvm-jazzer-regression' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'jvm-jazzer-regression' @(':fuzz-jvm:test') }
 Invoke-Step -Name 'windows-launcher-test' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'windows-launcher-test' 'scripts\tests\run-pc-gateway-launcher.tests.ps1' }
 Invoke-Step -Name 'windows-autostart-test' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'windows-autostart-test' 'scripts\tests\register-poc-gateway-autostart.tests.ps1' }
 Invoke-Step -Name 'windows-setup-test' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'windows-setup-test' 'scripts\tests\pc-gateway-setup.tests.ps1' }

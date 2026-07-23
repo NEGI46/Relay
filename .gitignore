@@ -42,6 +42,7 @@ artifacts/windows-validation-report.json
 artifacts/windows-validation-logs/
 artifacts/osv.json
 artifacts/osv.json.status.json
+artifacts/jazzer/
 **/__pycache__/
 **/*.pyc
 **/test-results/

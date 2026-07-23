@@ -23,6 +23,8 @@ androidxSqlite = "2.6.2"
 maplibreCompose = "0.13.0"
 zxing = "3.5.4"
 workmanager = "2.10.2"
+jazzer = "0.24.0"
+junitJupiter = "5.11.4"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version = "1.17.0" }
@@ -68,6 +70,8 @@ androidx-sqlite = { module = "androidx.sqlite:sqlite", version.ref = "androidxSq
 maplibre-compose = { module = "org.maplibre.compose:maplibre-compose", version.ref = "maplibreCompose" }
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workmanager" }
+jazzer-junit = { module = "com.code-intelligence:jazzer-junit", version.ref = "jazzer" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junitJupiter" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
