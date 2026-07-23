@@ -29,4 +29,16 @@ $out = [IO.Path]::GetFullPath($OutputPath)
 New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
 [ordered]@{ status = $summaryStatus; evidence = @($items) } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $out
 Write-Output "Security evidence summary: $summaryStatus"
-if (($RequireComplete -or $Mode -eq 'block-high-critical') -and $summaryStatus -ne 'PASS') { throw "Security evidence is $summaryStatus; inspect $OutputPath" }
+# Distinguish incomplete evidence from reported findings:
+#   BLOCKED = a scanner did not run / produced no verdict (evidence is incomplete)
+#   FAIL    = a scanner ran and reported vulnerabilities
+# -RequireComplete enforces only completeness, so report-only CI records findings without
+# failing the build. block-high-critical is the gate that additionally fails on any finding.
+$evidenceIncomplete = $items.status -contains 'BLOCKED'
+$hasFindings = ($items.status -contains 'FAIL' -or $items.status -contains 'FAILED')
+if ($Mode -eq 'block-high-critical' -and ($hasFindings -or $evidenceIncomplete)) {
+    throw "Security evidence is $summaryStatus; inspect $OutputPath"
+}
+if ($RequireComplete -and $evidenceIncomplete) {
+    throw "Security evidence is incomplete (BLOCKED); inspect $OutputPath"
+}
