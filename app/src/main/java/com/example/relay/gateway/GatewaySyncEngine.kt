@@ -28,6 +28,12 @@ class GatewaySyncEngine(
     private val deliveryLedger: GatewayDeliveryLedger,
     private val discovery: GatewayDiscovery? = null,
     private val localBridgeId: String = "",
+    /**
+     * Optional out-of-band trust material (QR/manual enrollment). When present, a discovered beacon
+     * whose advertised identity contradicts an enrolled gateway is refused instead of delivered to,
+     * closing the LAN-spoofing gap that plain discovery cannot. Null preserves anonymous discovery.
+     */
+    private val enrollmentStore: GatewayEnrollmentStore? = null,
 ) {
     private val mutex = Mutex()
     private val lifecycleMutex = Mutex()
@@ -113,6 +119,18 @@ class GatewaySyncEngine(
                         settingsStore.record("gateway_not_found")
                     }
                 settingsStore.recordDiscovery(gateway.host, if (gateway.gatewayId == "manual-fallback") "manual_fallback" else "beacon_received")
+                val trust = if (gateway.gatewayId == "manual-fallback") {
+                    GatewayTrustDecision.UNVERIFIED
+                } else {
+                    enrollmentStore?.decisionFor(gateway) ?: GatewayTrustDecision.UNVERIFIED
+                }
+                if (trust == GatewayTrustDecision.REJECTED) {
+                    return@withLock GatewaySyncResult.Deferred("gateway_trust_rejected").also {
+                        settingsStore.recordDiscovery(gateway.host, "trust_rejected")
+                        settingsStore.recordDelivery("not_sent:gateway_trust_rejected")
+                        settingsStore.record("gateway_trust_rejected")
+                    }
+                }
                 if (localBridgeId.isBlank()) {
                     return@withLock GatewaySyncResult.Deferred("bridge_identity_missing").also {
                         settingsStore.record("bridge_identity_missing")

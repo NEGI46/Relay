@@ -101,6 +101,7 @@ fun main(args: Array<String>) {
     println("Database: ${config.dbPath}")
     println("Anonymous ingress: ${config.anonymousIngressEnabled}")
     println("Rescue shelter: ${config.shelterId}")
+    GatewayEnrollmentAnnouncement.consoleLines(config, rescueKeys.manifest.fingerprint()).forEach(::println)
     if (verifiedBleManifest != null) {
         println("Rescue BLE trust: ready (root-signed shelter manifest verified)")
         println("Rescue maintenance manifest fingerprint: ${verifiedBleManifest.manifest.fingerprint()}")
