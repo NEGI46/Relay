@@ -104,6 +104,11 @@ jobs:
           Copy-Item artifacts/Relay-PC-Gateway-development.ps1 release/Relay-PC-Gateway-development.ps1 -Force
           Copy-Item artifacts/Start-Relay-PC-Gateway-Development.cmd release/Start-Relay-PC-Gateway-Development.cmd -Force
           Copy-Item scripts/register-pc-gateway-autostart.ps1 release/Register-Relay-PC-Gateway-Autostart-development.ps1 -Force
+          Copy-Item artifacts/Start-Relay-Broker-Tunnel-Development.ps1 release/Start-Relay-Broker-Tunnel-Development.ps1 -Force
+          Copy-Item artifacts/Start-Relay-Broker-Tunnel-Development.cmd release/Start-Relay-Broker-Tunnel-Development.cmd -Force
+          Copy-Item artifacts/relay-broker-bundle.zip release/relay-broker-bundle.zip -Force
+          (Get-FileHash -LiteralPath release/relay-broker-bundle.zip -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content -LiteralPath release/relay-broker-bundle.zip.sha256 -Encoding ascii
           @'
           DEVELOPMENT PREVIEW ONLY
 
@@ -114,6 +119,12 @@ jobs:
           To auto-start the gateway after logon or reboot, run
           Register-Relay-PC-Gateway-Autostart-development.ps1 from an elevated PowerShell. It only
           registers a Task Scheduler task and never stores broker credentials or secrets.
+
+          To let a phone on mobile data (no shared Wi-Fi) reach this PC, run
+          Start-Relay-Broker-Tunnel-Development.cmd. It needs Docker Desktop and relay-broker-bundle.zip
+          (ship them together). It runs the Broker from the public eclipse-temurin image, opens a
+          Cloudflare Quick Tunnel, and wires the installed gateway to it. No repository clone is needed.
+          Cloudflare Quick Tunnel has no SLA; development testing only.
           '@ | Set-Content -LiteralPath release/WINDOWS_DEVELOPMENT_PREVIEW_NOTICE.txt -Encoding utf8
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -139,6 +150,9 @@ jobs:
           test -f release/Relay-Android-development-preview-debug.apk
           test -f release/Relay-PC-Gateway-development-preview-unsigned.exe
           test -f release/Register-Relay-PC-Gateway-Autostart-development.ps1
+          test -f release/Start-Relay-Broker-Tunnel-Development.cmd
+          test -f release/Start-Relay-Broker-Tunnel-Development.ps1
+          test -f release/relay-broker-bundle.zip
           test -f release/ANDROID_DEVELOPMENT_PREVIEW_NOTICE.txt
           test -f release/WINDOWS_DEVELOPMENT_PREVIEW_NOTICE.txt
           if find release -type f \( -name 'Relay-Android-release.apk' -o -name 'Relay-PC-Gateway-setup.exe' \) | grep -q .; then

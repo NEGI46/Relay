@@ -326,6 +326,40 @@ docker compose -f compose.quick-tunnel.yml down -v
 
 詳しい手順は[HTTPS Broker deployment](deployment/broker/README.md)と[Quick Tunnel Broker PoC](docs/runbooks/QUICK_TUNNEL_BROKER_POC.md)を参照してください。
 
+### スマホがモバイル通信だけでもPCで受信する（clone不要）
+
+同じWi-Fi/LANが無く、スマホが**モバイル通信のみ**でも、Cloudflare Quick Tunnel越しにBrokerへEnvelopeを預け、PC Gatewayがoutboundで取得できます。**リポジトリ全体のcloneは不要**で、必要なのはDocker Desktopと`Publish Relay development preview`同梱の2ファイルだけです。
+
+必要なもの:
+
+- Docker Desktop（起動済み）
+- インストール済みの`RelayPcGateway.exe`
+- 開発preview同梱の`Start-Relay-Broker-Tunnel-Development.cmd`と`relay-broker-bundle.zip`（同じフォルダに置く）
+
+`Start-Relay-Broker-Tunnel-Development.cmd`をダブルクリックすると、次を自動化します。
+
+1. 公開image`eclipse-temurin:17-jre`でBrokerを起動（同梱classを読み込むだけでDockerfile buildもgradlewも不要、Envelopeは復号しない）
+2. `cloudflare/cloudflared`でQuick Tunnelを開き、`https://<random>.trycloudflare.com`を取得
+3. 短命・shelter限定のBroker credentialを1回だけ発行し、このprocess内にのみ保持
+4. インストール済みEXEをBroker経路へ紐づけて起動し、管理者ユーザー名/passwordを初回だけ確認
+
+起動後に表示されるURLをAndroidアプリのBroker endpointへ設定します（テストAPKのbuildにはリポジトリが必要）:
+
+```powershell
+.\gradlew.bat :app:assembleDebug -Prelay.broker.endpoint=https://<random>.trycloudflare.com
+```
+
+終了時はBrokerとTunnelを停止します。
+
+```powershell
+Start-Relay-Broker-Tunnel-Development.cmd -Down
+```
+
+- 状態・生成鍵: `%LOCALAPPDATA%\Relay\broker-tunnel`へ隔離
+- 既定credential有効期間: 2時間（`-CredentialLifetimeHours`で1〜24）
+- 初回のAndroid鍵登録だけprivate-LANが要る場合は`-EnableLanEnrollment`
+- Cloudflare Quick TunnelはSLA無し。開発・動作確認専用で、pilot/緊急運用には使用しないでください
+
 ---
 
 ## 検証
