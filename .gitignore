@@ -20,6 +20,8 @@ artifacts/pc-gateway-exe/
 artifacts/~relay-pc-gateway.DDF
 # Local WiX 3.14 binaries (download wix314-binaries.zip into tools/wix314)
 tools/wix314/
+# Pinned security/backup tool binaries installed by scripts/install-security-tools.ps1
+tools/security-windows/
 signing/*.jks
 signing/*.pfx
 # Offline regional signing material is never a repository or build artifact input.
