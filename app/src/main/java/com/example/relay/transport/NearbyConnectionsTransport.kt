@@ -19,6 +19,7 @@ class NearbyConnectionsTransport(
     private val platform: NearbyPlatform,
     private val permissionGate: NearbyPermissionGate,
     private val scope: CoroutineScope,
+    private val connectionPolicy: NearbyConnectionPolicy = NearbyConnectionPolicy(),
     private val maxPayloadBytes: Int = 32 * 1024,
     private val transferTimeoutMs: Long = 30_000,
     private val connectionAttemptTimeoutMs: Long = 30_000,
@@ -208,8 +209,9 @@ class NearbyConnectionsTransport(
         _discoveredPeers.value = peerToEndpoint.keys.map(::Peer)
         _transportEvents.emit(TransportEvent.PeerFound(peerId))
         // Disaster mode is intentionally hands-off: use a deterministic initiator
-        // so both devices do not race to request the same connection.
-        if (initiateConnection && isDeterministicInitiator(peerId)) {
+        // so both devices do not race to request the same connection. TRUSTED mode
+        // additionally refuses to reach out to peers that are not on the allow-list.
+        if (initiateConnection && isDeterministicInitiator(peerId) && connectionPolicy.allowsConnection(peerId)) {
             requestPeerConnection(peerId)
         }
     }
@@ -231,6 +233,15 @@ class NearbyConnectionsTransport(
         // Register the endpoint without issuing a second request.
         addPeer(event.endpointId, event.endpointName, initiateConnection = false)
         val peerId = endpointToPeer[event.endpointId] ?: return
+        // TRUSTED mode fails closed: an inbound peer that is not on the allow-list is
+        // rejected outright and is never retried, because the refusal is a policy
+        // decision rather than a transient transport error.
+        if (!connectionPolicy.allowsConnection(peerId)) {
+            runCatching { platform.rejectConnection(event.endpointId) }
+            clearPeerConnection(peerId)
+            _connectionEvents.emit(ConnectionEvent.Failed(peerId, "peer is not trusted"))
+            return
+        }
         connectingPeerIds += peerId
         ensureConnectionAttemptTimeout(peerId)
         reconnectJobs.remove(peerId)?.cancel()
@@ -317,6 +328,7 @@ class NearbyConnectionsTransport(
 
     private fun scheduleReconnect(peerId: String) {
         if (!_state.value.started || !isDeterministicInitiator(peerId) || peerId !in peerToEndpoint) return
+        if (!connectionPolicy.allowsConnection(peerId)) return
         if (peerId in _state.value.connectedPeerIds || reconnectJobs[peerId]?.isActive == true) return
         val attempt = reconnectAttempts[peerId] ?: 0
         reconnectAttempts[peerId] = attempt + 1

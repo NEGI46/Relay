@@ -369,6 +369,81 @@ class NearbyConnectionsTransportTest {
         assertEquals(1, platform.advertisingStarts)
         assertEquals(1, platform.discoveryStarts)
     }
+
+    @Test
+    fun `trusted mode rejects an untrusted inbound peer and never retries`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val policy = NearbyConnectionPolicy(NearbyConnectionMode.TRUSTED)
+        val transport = NearbyConnectionsTransport(
+            "device-B", platform, AllowedNearbyPermissionGate, backgroundScope, connectionPolicy = policy,
+        )
+        val connectionEvents = mutableListOf<ConnectionEvent>()
+        backgroundScope.launch { transport.connectionEvents.collect(connectionEvents::add) }
+        transport.start()
+
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("endpoint-1", "device-A", "1234", true))
+        runCurrent()
+
+        assertEquals(listOf("endpoint-1"), platform.rejected)
+        assertTrue(platform.accepted.isEmpty())
+        assertTrue(
+            connectionEvents.any {
+                it is ConnectionEvent.Failed && it.peerId == "device-A" && it.reason == "peer is not trusted"
+            },
+        )
+
+        // A policy refusal is intentional, not transient: it must never be retried.
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertTrue(platform.requested.isEmpty())
+    }
+
+    @Test
+    fun `trusted mode accepts an inbound peer on the allow-list`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val policy = NearbyConnectionPolicy(NearbyConnectionMode.TRUSTED, trustedPeers = setOf("device-A"))
+        val transport = NearbyConnectionsTransport(
+            "device-B", platform, AllowedNearbyPermissionGate, backgroundScope, connectionPolicy = policy,
+        )
+        transport.start()
+
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("endpoint-1", "device-A", "1234", true))
+        runCurrent()
+
+        assertEquals(listOf("endpoint-1"), platform.accepted)
+        assertTrue(platform.rejected.isEmpty())
+    }
+
+    @Test
+    fun `trusted mode does not initiate outbound to an untrusted discovered peer`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val policy = NearbyConnectionPolicy(NearbyConnectionMode.TRUSTED)
+        // device-A < device-B, so device-A is the deterministic initiator.
+        val transport = NearbyConnectionsTransport(
+            "device-A", platform, AllowedNearbyPermissionGate, backgroundScope, connectionPolicy = policy,
+        )
+        transport.start()
+
+        platform.events.emit(NearbyPlatformEvent.EndpointFound("endpoint-1", "device-B"))
+        runCurrent()
+
+        assertTrue(platform.requested.isEmpty())
+    }
+
+    @Test
+    fun `trusted mode initiates outbound to a trusted discovered peer`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val policy = NearbyConnectionPolicy(NearbyConnectionMode.TRUSTED, trustedPeers = setOf("device-B"))
+        val transport = NearbyConnectionsTransport(
+            "device-A", platform, AllowedNearbyPermissionGate, backgroundScope, connectionPolicy = policy,
+        )
+        transport.start()
+
+        platform.events.emit(NearbyPlatformEvent.EndpointFound("endpoint-1", "device-B"))
+        runCurrent()
+
+        assertEquals(listOf("endpoint-1"), platform.requested)
+    }
 }
 
 private class FakeNearbyPlatform(

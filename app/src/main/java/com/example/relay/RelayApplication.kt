@@ -21,6 +21,8 @@ import com.example.relay.runtime.RelayCommunicationRuntime
 import com.example.relay.sync.SyncCoordinator
 import com.example.relay.sync.SyncPlanner
 import com.example.relay.transport.GoogleNearbyPlatform
+import com.example.relay.transport.NearbyConnectionMode
+import com.example.relay.transport.NearbyConnectionPolicy
 import com.example.relay.transport.NearbyConnectionsTransport
 import com.example.relay.gateway.GatewayBridgeClient
 import com.example.relay.gateway.GatewayCredentialStore
@@ -199,12 +201,31 @@ class RelayApplication : Application() {
     }
 
     val nearbyPermissionGate by lazy { AndroidNearbyPermissionGate(this) }
+    /**
+     * Persisted admission policy for the Nearby transport. Defaults to OPEN so the
+     * disaster mesh forms hands-off; an operator can lock it to TRUSTED and the
+     * choice survives restarts. Mode changes are written back on every transition.
+     */
+    val nearbyConnectionPolicy: NearbyConnectionPolicy by lazy {
+        val preferences = getSharedPreferences("relay_settings", MODE_PRIVATE)
+        val storedMode = runCatching {
+            NearbyConnectionMode.valueOf(preferences.getString("nearby_connection_mode", null) ?: "")
+        }.getOrDefault(NearbyConnectionMode.OPEN)
+        NearbyConnectionPolicy(initialMode = storedMode).also { policy ->
+            applicationScope.launch {
+                policy.mode.collect { mode ->
+                    preferences.edit().putString("nearby_connection_mode", mode.name).apply()
+                }
+            }
+        }
+    }
     val nearbyTransport: NearbyConnectionsTransport by lazy {
         NearbyConnectionsTransport(
             localDeviceId = deviceId,
             platform = GoogleNearbyPlatform(this, packageName),
             permissionGate = nearbyPermissionGate,
             scope = applicationScope,
+            connectionPolicy = nearbyConnectionPolicy,
             maxPayloadBytes = ConnectionsClient.MAX_BYTES_DATA_SIZE,
         )
     }

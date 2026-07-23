@@ -55,7 +55,7 @@ class GatewayEnrollmentTrustTest {
         assertEquals("beacon_received", settings.discoveryResult)
     }
 
-    private fun engineWith(
+    private suspend fun engineWith(
         settings: RecordingSettings,
         client: RecordingClient,
         discovered: DiscoveredGateway,
