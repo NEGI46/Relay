@@ -1,3 +1,4 @@
+import com.android.build.api.dsl.ManagedVirtualDevice
 import java.time.Instant
 import java.net.URI
 import java.util.Collections
@@ -108,6 +109,22 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // Instrumented tests never depend on animation timing; disabling animations keeps
+        // headless emulator runs deterministic.
+        animationsDisabled = true
+        // Reproducible instrumentation environment (see docs/EMULATOR_VALIDATION_DEFAULTS.md).
+        // Gradle provisions and tears down the emulator, so the task runs identically on a
+        // developer workstation and in CI. Run with:
+        //   ./gradlew :app:mediumPhoneApi36DebugAndroidTest
+        managedDevices {
+            devices {
+                maybeCreate<ManagedVirtualDevice>("mediumPhoneApi36").apply {
+                    device = "Medium Phone"
+                    apiLevel = 36
+                    systemImageSource = "google_apis_playstore"
+                }
+            }
+        }
     }
 
     sourceSets {
