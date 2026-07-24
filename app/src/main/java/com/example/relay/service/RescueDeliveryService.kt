@@ -153,9 +153,19 @@ class RescueDeliveryService : Service() {
     private fun startDestinationResolution(app: RelayApplication) {
         if (destinationResolutionJob?.isActive == true) return
         destinationResolutionJob = serviceScope.launch {
+            // Dedup guards so the enrollment loop (every 2s) does not flood the capped 40-event
+            // trail: a breadcrumb is emitted only when the observable state actually changes.
+            var awaitingKeyRecorded = false
+            var lastEnrollment: String? = null
             while (isActive) {
                 val hasPendingDestination = app.activeRescueSessionCoordinator.hasPendingDestination()
                 if (hasPendingDestination && app.rescueShelterKeyStore.load() == null) {
+                    if (!awaitingKeyRecorded) {
+                        // The SOS is stored but has no trusted shelter key yet; without this the
+                        // phone log froze at "rescue_delivery_started" with no explanation.
+                        app.diagnostics.record("rescue_awaiting_shelter_key")
+                        awaitingKeyRecorded = true
+                    }
                     var enrollment = app.developmentShelterManifestBootstrap.tryEnroll()
                     if (enrollment != DevelopmentEnrollmentResult.ENROLLED &&
                         app.rescueShelterKeyStore.load() == null
@@ -163,6 +173,13 @@ class RescueDeliveryService : Service() {
                         // No shared LAN with the Gateway: fetch the recipient manifest the Gateway
                         // published to the Broker so a mobile-only phone can still build an SOS.
                         enrollment = app.brokerShelterManifestBootstrap.tryEnroll()
+                    }
+                    // Surface the enrollment outcome on the MAIN trail (deduped) so a phone log
+                    // shows WHY it is still waiting (e.g. MANIFEST_UNAVAILABLE = Gateway has not
+                    // published / tunnel down; SHELTER_MISMATCH = id mismatch; ENROLLED = success).
+                    if (enrollment.name != lastEnrollment) {
+                        app.diagnostics.record("rescue_enroll_${enrollment.name}")
+                        lastEnrollment = enrollment.name
                     }
                     if (enrollment !in setOf(
                             DevelopmentEnrollmentResult.DISABLED,
@@ -174,13 +191,21 @@ class RescueDeliveryService : Service() {
                             .putLong("last_development_enrollment_at", System.currentTimeMillis())
                             .apply()
                     }
+                } else {
+                    // Key arrived (or nothing pending): reset so a later stall re-announces itself.
+                    awaitingKeyRecorded = false
+                    lastEnrollment = null
                 }
                 val resolved = if (hasPendingDestination) {
                     runCatching { app.activeRescueSessionCoordinator.resolvePendingDestinations() }.getOrDefault(0)
                 } else {
                     0
                 }
-                if (resolved > 0) app.notifyRescueStoreChanged()
+                if (resolved > 0) {
+                    // The no-key SOS was promoted to PENDING; broker delivery can now pick it up.
+                    app.diagnostics.record("rescue_destination_resolved")
+                    app.notifyRescueStoreChanged()
+                }
                 delay(DESTINATION_RESOLUTION_INTERVAL_MILLIS)
             }
         }
@@ -233,7 +258,12 @@ class RescueDeliveryService : Service() {
     private fun startBrokerDelivery(app: RelayApplication) {
         if (brokerDeliveryJob?.isActive == true) return
         val endpoint = app.cloudBrokerEndpoint
-        if (endpoint.isBlank()) return
+        if (endpoint.isBlank()) {
+            // No baked/overridden Broker endpoint: mobile-data delivery is impossible. Make the
+            // dead end visible instead of silently never uploading.
+            app.diagnostics.record("broker_delivery_endpoint_blank")
+            return
+        }
 
         brokerDeliveryJob = serviceScope.launch {
             val delivery = BrokerRescueDelivery(
