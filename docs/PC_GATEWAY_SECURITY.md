@@ -51,6 +51,8 @@ The rescue private-key file is still a Base64-encoded local file; this repositor
 
 Key expiry is surfaced as a safe health warning. Rotation, revocation, disaster recovery re-provisioning, hardware-backed key storage, and key escrow need external policy and infrastructure; see [BLOCKED_BY_EXTERNAL_DECISIONS.md](readiness/BLOCKED_BY_EXTERNAL_DECISIONS.md).
 
+Whether to wrap this file with Windows DPAPI was investigated and deliberately deferred (it would add a native JNA dependency, fork the portable key store to Windows-only, and would not remove the owner-only ACL requirement); see the Phase 6 decision record in [audits/WINDOWS_NEXT_WORK_AUDIT_2026-07.md](audits/WINDOWS_NEXT_WORK_AUDIT_2026-07.md). Operators wanting at-rest protection against offline disk theft should enable BitLocker on the key volume.
+
 ## Residual risk and required controls
 
 - Anonymous ingress, if explicitly enabled for a closed network, remains unverified and rate-limited—not trusted.

@@ -287,6 +287,14 @@ class NearbyConnectionsTransport(
 
     private suspend fun requestPeerConnection(peerId: String) {
         val endpointId = peerToEndpoint[peerId] ?: return fail("connect", "unknown peer")
+        // TRUSTED mode fails closed at the sole outbound chokepoint. The auto-initiate path in
+        // addPeer() already skips untrusted peers, but an explicit connect() (e.g. UI-driven) would
+        // otherwise bypass the allow-list; gate it here so every outbound path honours the policy.
+        // A policy refusal is intentional, not transient, so it is never retried.
+        if (!connectionPolicy.allowsConnection(peerId)) {
+            _connectionEvents.emit(ConnectionEvent.Failed(peerId, "peer is not trusted"))
+            return
+        }
         if (!_state.value.started || peerId in _state.value.connectedPeerIds || !connectingPeerIds.add(peerId)) return
         val timeoutJob = prepareConnectionAttemptTimeout(peerId)
         try {

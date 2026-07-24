@@ -48,6 +48,7 @@ fun Application.brokerModule(
     config: BrokerConfig = BrokerConfig(),
     uploadRateLimiter: SlidingWindowRateLimiter = SlidingWindowRateLimiter(maxRequests = 30, windowMillis = 60_000),
     pullRateLimiter: SlidingWindowRateLimiter = SlidingWindowRateLimiter(maxRequests = 120, windowMillis = 60_000),
+    observability: BrokerObservability = BrokerObservability.None,
 ) {
     install(ContentNegotiation) { json(brokerJson) }
 
@@ -83,10 +84,12 @@ fun Application.brokerModule(
                 return@post
             }
             if (!request.hasValidRegistrationProof(registrationKey)) {
+                observability.record(BrokerSecurityEvent.INVALID_REGISTRATION_PROOF)
                 call.respond(HttpStatusCode.Unauthorized, mapOf("reason" to "invalid_registration_proof"))
                 return@post
             }
             if (!uploadRateLimiter.allow("register:${request.deviceKeyId}")) {
+                observability.record(BrokerSecurityEvent.RATE_LIMITED)
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
                 return@post
             }
@@ -94,6 +97,7 @@ fun Application.brokerModule(
                 store.registerDevice(request.deviceKeyId, request.publicKeyBase64, System.currentTimeMillis())
             } catch (_: DeviceKeyConflictException) {
                 // Never return an existing capability token to a caller presenting another key.
+                observability.record(BrokerSecurityEvent.DEVICE_KEY_CONFLICT)
                 call.respond(HttpStatusCode.Conflict, mapOf("reason" to "device_key_conflict"))
                 return@post
             }
@@ -144,16 +148,19 @@ fun Application.brokerModule(
             }
             // Rate limit per device key
             if (!uploadRateLimiter.allow(request.deviceKeyId)) {
+                observability.record(BrokerSecurityEvent.RATE_LIMITED)
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
                 return@post
             }
             // Verify device is registered
             if (store.devicePublicKey(request.deviceKeyId) == null) {
+                observability.record(BrokerSecurityEvent.DEVICE_NOT_REGISTERED)
                 call.respond(HttpStatusCode.Unauthorized, mapOf("reason" to "device_not_registered"))
                 return@post
             }
             // Verify upload signature against registered public key
             if (!store.verifyUploadSignature(request.deviceKeyId, envelope, request.uploadSignatureBase64)) {
+                observability.record(BrokerSecurityEvent.INVALID_SIGNATURE)
                 call.respond(HttpStatusCode.Unauthorized, mapOf("reason" to "invalid_signature"))
                 return@post
             }
@@ -170,6 +177,7 @@ fun Application.brokerModule(
                     call.respond(HttpStatusCode.OK, result.response)
                 }
                 is BrokerPutResult.Collision -> {
+                    observability.record(BrokerSecurityEvent.CIPHERTEXT_COLLISION)
                     call.respond(HttpStatusCode.Conflict, mapOf(
                         "reason" to "ciphertext_collision",
                         "existing_envelope_id" to result.existingEnvelopeId,
@@ -189,8 +197,9 @@ fun Application.brokerModule(
                 call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_shelter_id"))
                 return@get
             }
-            val principal = authenticateGateway(config, store, shelterId) ?: return@get
+            val principal = authenticateGateway(config, store, shelterId, observability) ?: return@get
             if (!pullRateLimiter.allow("gateway:${principal.gatewayId}")) {
+                observability.record(BrokerSecurityEvent.RATE_LIMITED)
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
                 return@get
             }
@@ -214,8 +223,9 @@ fun Application.brokerModule(
                 call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_shelter_id"))
                 return@post
             }
-            val principal = authenticateGateway(config, store, shelterId) ?: return@post
+            val principal = authenticateGateway(config, store, shelterId, observability) ?: return@post
             if (!pullRateLimiter.allow("receipt:${principal.gatewayId}")) {
+                observability.record(BrokerSecurityEvent.RATE_LIMITED)
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
                 return@post
             }
@@ -274,8 +284,9 @@ fun Application.brokerModule(
                 call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_shelter_id"))
                 return@post
             }
-            val principal = authenticateGateway(config, store, shelterId) ?: return@post
+            val principal = authenticateGateway(config, store, shelterId, observability) ?: return@post
             if (!pullRateLimiter.allow("manifest:${principal.gatewayId}")) {
+                observability.record(BrokerSecurityEvent.RATE_LIMITED)
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
                 return@post
             }
@@ -324,6 +335,7 @@ fun Application.brokerModule(
                 return@get
             }
             if (!pullRateLimiter.allow("manifest-fetch:$shelterId")) {
+                observability.record(BrokerSecurityEvent.RATE_LIMITED)
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
                 return@get
             }
@@ -358,6 +370,7 @@ fun Application.brokerModule(
                 return@get
             }
             if (!pullRateLimiter.allow("receipts:$token")) {
+                observability.record(BrokerSecurityEvent.RATE_LIMITED)
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
                 return@get
             }
@@ -421,9 +434,11 @@ private suspend fun io.ktor.server.routing.RoutingContext.authenticateGateway(
     config: BrokerConfig,
     store: BrokerStore,
     shelterId: String,
+    observability: BrokerObservability = BrokerObservability.None,
 ): BrokerGatewayPrincipal? {
     val gatewayId = call.request.headers["X-Gateway-Id"]?.trim()
     if (gatewayId.isNullOrBlank() || gatewayId.length > 128) {
+        observability.record(BrokerSecurityEvent.AUTH_FAILED)
         call.respond(HttpStatusCode.Unauthorized, mapOf("reason" to "invalid_gateway_credentials"))
         return null
     }
@@ -438,10 +453,12 @@ private suspend fun io.ktor.server.routing.RoutingContext.authenticateGateway(
         store.authenticateGatewayCredential(token)
     }
     if (principal == null) {
+        observability.record(BrokerSecurityEvent.AUTH_FAILED)
         call.respond(HttpStatusCode.Unauthorized, mapOf("reason" to "invalid_gateway_credentials"))
         return null
     }
     if (principal.gatewayId != gatewayId || principal.shelterId != shelterId) {
+        observability.record(BrokerSecurityEvent.GATEWAY_SCOPE_MISMATCH)
         call.respond(HttpStatusCode.Forbidden, mapOf("reason" to "gateway_scope_mismatch"))
         return null
     }

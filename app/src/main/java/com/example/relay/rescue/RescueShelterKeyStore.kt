@@ -17,12 +17,21 @@ fun interface ShelterPublicKeyProvider {
     fun load(): ShelterPublicKeys?
 }
 
+/**
+ * A sink that persists a shelter manifest only after its independently obtained fingerprint is
+ * confirmed, and can reload the verified public material. Abstracting the concrete keystore lets the
+ * enrollment orchestration ([ShelterManifestEnrollment]) be verified without an Android keystore.
+ */
+interface VerifiedManifestStore : ShelterPublicKeyProvider {
+    fun saveVerifiedManifest(manifest: ShelterPublicKeyManifest, expectedFingerprint: String)
+}
+
 /** Stores public material only. A courier/member installation never persists shelter private keys. */
 class RescueShelterKeyStore(
     context: Context,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
     private val allowDevelopmentEnrollment: Boolean = BuildConfig.DEBUG && BuildConfig.ALLOW_HTTP_GATEWAY,
-) : ShelterPublicKeyProvider {
+) : VerifiedManifestStore {
     private val preferences = context.getSharedPreferences("relay_rescue_shelter_keys", Context.MODE_PRIVATE)
 
     override fun load(): ShelterPublicKeys? = runCatching {
@@ -63,7 +72,7 @@ class RescueShelterKeyStore(
     }.getOrNull()
 
     /** Saves only after an independently obtained fingerprint has been confirmed by the operator/user. */
-    fun saveVerifiedManifest(manifest: ShelterPublicKeyManifest, expectedFingerprint: String) {
+    override fun saveVerifiedManifest(manifest: ShelterPublicKeyManifest, expectedFingerprint: String) {
         saveManifest(manifest, expectedFingerprint, PROVISIONED_ENROLLMENT)
     }
 

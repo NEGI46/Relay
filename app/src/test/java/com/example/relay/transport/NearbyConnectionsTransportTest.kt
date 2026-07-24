@@ -444,6 +444,56 @@ class NearbyConnectionsTransportTest {
 
         assertEquals(listOf("endpoint-1"), platform.requested)
     }
+
+    @Test
+    fun `trusted mode refuses an explicit connect to an untrusted peer`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val policy = NearbyConnectionPolicy(NearbyConnectionMode.TRUSTED)
+        // device-Z > device-A, so device-Z is not the deterministic initiator: any outbound
+        // request could only come from the explicit connect() below, never from auto-initiate.
+        val transport = NearbyConnectionsTransport(
+            "device-Z", platform, AllowedNearbyPermissionGate, backgroundScope, connectionPolicy = policy,
+        )
+        val connectionEvents = mutableListOf<ConnectionEvent>()
+        backgroundScope.launch { transport.connectionEvents.collect(connectionEvents::add) }
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.EndpointFound("endpoint-1", "device-A"))
+        runCurrent()
+
+        transport.connect("device-A")
+        runCurrent()
+
+        assertTrue("an untrusted explicit connect must never reach the platform", platform.requested.isEmpty())
+        assertTrue(
+            connectionEvents.any {
+                it is ConnectionEvent.Failed && it.peerId == "device-A" && it.reason == "peer is not trusted"
+            },
+        )
+
+        // A policy refusal is intentional, not transient: it must never be retried.
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertTrue(platform.requested.isEmpty())
+    }
+
+    @Test
+    fun `trusted mode allows an explicit connect to a trusted peer`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val policy = NearbyConnectionPolicy(NearbyConnectionMode.TRUSTED, trustedPeers = setOf("device-A"))
+        // device-Z > device-A, so auto-initiate never fires; the request proves the explicit path.
+        val transport = NearbyConnectionsTransport(
+            "device-Z", platform, AllowedNearbyPermissionGate, backgroundScope, connectionPolicy = policy,
+        )
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.EndpointFound("endpoint-1", "device-A"))
+        runCurrent()
+        assertTrue("auto-initiate must not fire when device-Z is not the initiator", platform.requested.isEmpty())
+
+        transport.connect("device-A")
+        runCurrent()
+
+        assertEquals(listOf("endpoint-1"), platform.requested)
+    }
 }
 
 private class FakeNearbyPlatform(

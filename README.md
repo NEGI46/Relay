@@ -183,7 +183,7 @@ FCM、気象庁情報、署名Activation Manifest、固定BLE Gatewayは設計�
 | 自動災害検知 | ⛔ | FCM、気象庁、署名Activation Manifest、固定BLE triggerは設計のみ |
 | Nearby救助中継 | ✅ | 暗号化Envelopeと署名ReceiptをStore–Carry–Forward。受信端末は再配送も開始 |
 | Nearby接続ポリシー | 🧩 | `OPEN` / `TRUSTED`を実装。信頼peer allow-listの完成した運用者provisioningは未完成 |
-| LAN Gateway信頼登録 | 🧩 | QR・手入力token、checksum、fingerprint照合、spoof拒否のcontractあり。完全な製品フローは未完成 |
+| LAN Gateway信頼登録 | 🧪 | `relay-gw:1:` tokenをSharedPreferencesへ永続登録（fail-closed load・衝突時は明示rotation）し、GatewaySyncEngineへ配線して矛盾beaconをfail-closedで拒否。checksum・fingerprint照合・spoof拒否・ヘッドレスimport・登録shelterIdへのmanifest pinningをJVM unit testで検証済み。カメラQR取込UIと実機検証は未実施 |
 | Broker Manifest enrollment | 🧪 | localDev限定。LAN未接続端末がBroker経由で公開鍵を取得し、暗号化SOSを作れるloop testあり |
 | BLE Gateway信頼 | ⚠️ | Root → signed Directory → signed Manifest → advertised/GATT fingerprint。正式な地域Root/Directory未提供 |
 | Android 6.0互換 | 🧪 | core library desugaringとAPI 23-safe処理を追加。実Android 6端末でのfield確認は未実施 |
@@ -250,11 +250,11 @@ Relayは、単なるHTTP成功やNearby転送完了を「救助拠点に届い�
 
 `OPEN`はゼロ操作でmeshを形成するため、到達可能なpeerを受け入れる既定モードです。これはpeerの本人確認ではありません。payload側ではsize、TTL、hop、hash、version、重複、衝突を検査します。
 
-`TRUSTED`は明示allow-listに含まれるpeerだけを許可しますが、allow-listを安全に配布・更新する完成した運用者フローはありません。
+`TRUSTED`は明示allow-listに含まれるpeerだけを許可します。allow-listは受信・自動発起に加えて明示的な`connect()`発信経路でもfail-closedで強制されます（許可外peerは再試行せず拒否）。ただしallow-listを安全に配布・更新する完成した運用者フローはありません。
 
 ### LAN Gateway discovery
 
-UDP discovery beaconは**発見手段であって認証ではありません**。QR・手入力用の`relay-gw:1:` enrollment token、checksum、manifest fingerprint pinning、矛盾beacon拒否の基盤はありますが、Androidへ永続登録して運用する一連の製品フローは未完成です。
+UDP discovery beaconは**発見手段であって認証ではありません**。QR・手入力用の`relay-gw:1:` enrollment token、checksum、manifest fingerprint pinning、矛盾beacon拒否に加え、Androidでの永続登録（fail-closed load・衝突時の明示rotation）とGatewaySyncEngineへの配線、ヘッドレスimport、登録shelterIdへのmanifest pinningを実装しJVM unit testで検証しました。残るはカメラQR取込UIと実機・現地検証です。
 
 ### Broker Manifest relay
 

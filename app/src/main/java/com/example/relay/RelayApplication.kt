@@ -30,6 +30,8 @@ import com.example.relay.gateway.SharedPreferencesGatewayDeliveryLedger
 import com.example.relay.gateway.GatewaySettingsStore
 import com.example.relay.gateway.GatewaySyncEngine
 import com.example.relay.gateway.HttpGatewayBridgeClient
+import com.example.relay.gateway.PersistentGatewayEnrollmentStore
+import com.example.relay.gateway.SharedPreferencesEnrollmentPayloadStorage
 import com.example.relay.gateway.UdpGatewayDiscovery
 import com.example.relay.cloud.AndroidNetworkOnlineDetector
 import com.example.relay.cloud.InternetPrioritySync
@@ -307,6 +309,17 @@ class RelayApplication : Application() {
             keyStore = rescueShelterKeyStore,
         )
     }
+    /**
+     * Durable out-of-band trust material for LAN gateways. Seeds from persisted canonical enrollment
+     * payloads on startup and is wired into [gatewaySyncEngine] so a discovered beacon whose identity
+     * contradicts an enrolled gateway is refused instead of delivered to.
+     */
+    val gatewayEnrollmentStore: PersistentGatewayEnrollmentStore by lazy {
+        PersistentGatewayEnrollmentStore(
+            SharedPreferencesEnrollmentPayloadStorage(this),
+            onDiagnostic = { diagnostics.record(it) },
+        )
+    }
     val gatewaySyncEngine: GatewaySyncEngine by lazy {
         GatewaySyncEngine(
             messageRepository,
@@ -318,6 +331,7 @@ class RelayApplication : Application() {
             SharedPreferencesGatewayDeliveryLedger(this),
             discovery = gatewayDiscovery,
             localBridgeId = deviceId,
+            enrollmentStore = gatewayEnrollmentStore.enrollmentStore(),
         )
     }
     val communicationSupervisor: CommunicationSupervisor by lazy {
