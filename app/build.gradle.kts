@@ -113,6 +113,13 @@ android {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
 
+    compileOptions {
+        // Core library desugaring backports java.util.concurrent / java.util default methods
+        // (ConcurrentHashMap.newKeySet, Map.computeIfAbsent/remove(k,v), etc.) so the transport,
+        // nearby, and rescue-session code runs on minSdk 23 devices instead of throwing NoSuchMethodError.
+        isCoreLibraryDesugaringEnabled = true
+    }
+
     testOptions {
         unitTests.isReturnDefaultValues = true
         // Instrumented tests never depend on animation timing; disabling animations keeps
@@ -207,6 +214,7 @@ ksp {
 }
 
 dependencies {
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
     implementation(project(":relay-protocol"))
     implementation(project(":shared"))
     implementation(libs.androidx.core.ktx)

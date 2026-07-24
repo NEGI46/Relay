@@ -117,6 +117,10 @@ class RelayCommunicationService : Service() {
         }
     }
 
+    // The manifest <service> declares android:foregroundServiceType="connectedDevice" and the
+    // matching type is passed on API 29+, so lint's ForegroundServiceType check is a false positive
+    // it cannot correlate across the merged variant manifest.
+    @android.annotation.SuppressLint("ForegroundServiceType")
     private fun startForegroundSafely(notification: Notification) {
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)

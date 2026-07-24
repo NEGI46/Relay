@@ -37,7 +37,10 @@ class NearbyConnectionsTransport(
     private val peerToEndpoint = linkedMapOf<String, String>()
     private val endpointToPeer = linkedMapOf<String, String>()
     private val pendingTransfers = ConcurrentHashMap<Long, PendingTransfer>()
-    private val connectingPeerIds = ConcurrentHashMap.newKeySet<String>()
+    // Typed as MutableSet so member calls resolve through java.util.Set (API 1) rather than
+    // ConcurrentHashMap.KeySetView (API 24); the backing set is still the concurrent key-set,
+    // and newKeySet() itself is safe on minSdk 23 via core library desugaring.
+    private val connectingPeerIds: MutableSet<String> = ConcurrentHashMap.newKeySet<String>()
     private val connectionAttemptTimeoutJobs = ConcurrentHashMap<String, Job>()
     private val reconnectAttempts = ConcurrentHashMap<String, Int>()
     private val reconnectJobs = ConcurrentHashMap<String, Job>()

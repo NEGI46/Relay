@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.Looper
+import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
@@ -84,6 +85,7 @@ class AndroidLocationProvider(
         }
     }
 
+    @RequiresApi(30)
     @SuppressLint("MissingPermission")
     private suspend fun getCurrentLocationApi30(manager: LocationManager, provider: String): GeoFix? =
         suspendCancellableCoroutine { cont ->

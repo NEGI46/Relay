@@ -31,7 +31,9 @@ class HttpBrokerShelterManifestClient(
         }
         return try {
             require(connection.responseCode == HttpURLConnection.HTTP_OK) { "manifest unavailable" }
-            val declaredSize = connection.contentLengthLong
+            // Read Content-Length via the header (API 1) rather than getContentLengthLong (API 24),
+            // so mobile enrollment does not crash on Android 6.0 (minSdk 23) devices.
+            val declaredSize = connection.getHeaderField("Content-Length")?.trim()?.toLongOrNull() ?: -1L
             require(declaredSize == -1L || declaredSize in 1..MAX_MANIFEST_BYTES.toLong()) { "manifest too large" }
             val output = ByteArrayOutputStream()
             connection.inputStream.use { input ->

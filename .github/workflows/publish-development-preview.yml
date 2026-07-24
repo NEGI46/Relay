@@ -130,9 +130,11 @@ jobs:
 
           To let a phone on mobile data (no shared Wi-Fi) reach this PC, run
           Start-Relay-Broker-Tunnel-Development.cmd. It needs Docker Desktop and relay-broker-bundle.zip
-          (ship them together). It runs the Broker from the public eclipse-temurin image, opens a
-          Cloudflare Quick Tunnel, and wires the installed gateway to it. No repository clone is needed.
-          Cloudflare Quick Tunnel has no SLA; development testing only.
+          (ship them together). It runs the Broker from the public eclipse-temurin image, opens an
+          ngrok tunnel bound to your reserved free static domain, and wires the installed gateway to
+          it. No repository clone is needed. Because the ngrok domain is stable across restarts, the
+          preview APK bakes it once, so the phone never needs another rebuild. A free ngrok tunnel
+          has no SLA; development testing only.
           '@ | Set-Content -LiteralPath release/WINDOWS_DEVELOPMENT_PREVIEW_NOTICE.txt -Encoding utf8
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

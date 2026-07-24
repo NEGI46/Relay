@@ -47,6 +47,10 @@ class RescueDeliveryService : Service() {
     private var brokerReceiptPollJob: Job? = null
     private var destinationResolutionJob: Job? = null
 
+    // The manifest <service> declares android:foregroundServiceType="connectedDevice" and the
+    // matching type is passed on API 29+, so lint's ForegroundServiceType check is a false positive
+    // it cannot correlate across the merged variant manifest.
+    @android.annotation.SuppressLint("ForegroundServiceType")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!SharedPreferencesRescueAutomationStore(this).isEnabled()) {
             stopSelf(startId)

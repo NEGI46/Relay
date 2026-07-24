@@ -69,6 +69,10 @@ class AndroidShelterBleClient(context: Context) : ShelterBleClient {
     }
 }
 
+// GATT reads/writes require BLUETOOTH_CONNECT. A session is only ever constructed by
+// AndroidShelterBleClient.connect(), which the caller invokes behind the app's Bluetooth
+// permission gate, so every call site here is already permission-checked.
+@SuppressLint("MissingPermission")
 private class AndroidGattShelterBleSession private constructor(
     private val gatt: BluetoothGatt,
     private val expectedIdentity: ShelterBleIdentity,
@@ -167,6 +171,7 @@ private class AndroidGattShelterBleSession private constructor(
         }
     }
 
+    @SuppressLint("MissingPermission")
     private class Callback(private val expectedIdentity: ShelterBleIdentity) : BluetoothGattCallback() {
         val connected = CompletableDeferred<BluetoothGatt>()
         val services = CompletableDeferred<Unit>()
