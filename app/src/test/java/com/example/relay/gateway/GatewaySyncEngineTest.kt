@@ -293,6 +293,76 @@ class GatewaySyncEngineTest {
 
         assertTrue(client.requestCleanedUp.isCompleted)
     }
+
+    @Test fun `a discovered beacon contradicting an enrolled gateway is refused and never delivered to`() = runTest {
+        val repository = InMemoryMessageRepository().also { it.insert(com.example.relay.message()) }
+        val client = FakeClient()
+        val enrolled = GatewayEnrollmentToken(
+            gatewayId = "pc-gateway-1",
+            shelterId = "shelter-1",
+            host = "10.0.0.5",
+            port = 8080,
+            scheme = "https",
+            manifestFingerprint = "fingerprint-1",
+        )
+        val engine = GatewaySyncEngine(
+            repository,
+            FakeSettings(GatewaySettings()),
+            FakeCredentials(null),
+            client,
+            MessagePolicy(MutableClock(NOW)),
+            backgroundScope,
+            FakePending(),
+            // Same gatewayId as the enrolled identity but a contradicting port: a spoofing attempt.
+            discovery = object : GatewayDiscovery {
+                override suspend fun discover(timeoutMs: Int) =
+                    DiscoveredGateway("10.0.0.9", 9999, "pc-gateway-1", "https", "shelter-1")
+            },
+            localBridgeId = "bridge-local",
+            enrollmentStore = GatewayEnrollmentStore(listOf(enrolled)),
+        )
+
+        assertEquals(GatewaySyncResult.Deferred("gateway_trust_rejected"), engine.syncOnce())
+        // A trust refusal is a policy decision: it must never fall through to delivery, and repeating
+        // the loop must keep refusing rather than eventually leaking the report to the spoofed host.
+        assertEquals(GatewaySyncResult.Deferred("gateway_trust_rejected"), engine.syncOnce())
+        assertEquals(0, client.publicPushes)
+        assertTrue(repository.allReceipts().isEmpty())
+    }
+
+    @Test fun `a discovered beacon matching an enrolled gateway is trusted and delivered to`() = runTest {
+        val repository = InMemoryMessageRepository().also { it.insert(com.example.relay.message()) }
+        val client = FakeClient(publicReceipts = listOf(
+            GatewayReceipt("r-verified", "message-1", "GATEWAY_RECEIVED_UNVERIFIED", "pc-gateway", NOW),
+        ))
+        val enrolled = GatewayEnrollmentToken(
+            gatewayId = "pc-gateway-1",
+            shelterId = "shelter-1",
+            host = "10.0.0.5",
+            port = 8080,
+            scheme = "https",
+            manifestFingerprint = "fingerprint-1",
+        )
+        val engine = GatewaySyncEngine(
+            repository,
+            FakeSettings(GatewaySettings()),
+            FakeCredentials(null),
+            client,
+            MessagePolicy(MutableClock(NOW)),
+            backgroundScope,
+            FakePending(),
+            // Host may differ (DHCP) but gatewayId/port/scheme/shelter all match the enrolled identity.
+            discovery = object : GatewayDiscovery {
+                override suspend fun discover(timeoutMs: Int) =
+                    DiscoveredGateway("10.0.0.42", 8080, "pc-gateway-1", "https", "shelter-1")
+            },
+            localBridgeId = "bridge-local",
+            enrollmentStore = GatewayEnrollmentStore(listOf(enrolled)),
+        )
+
+        assertEquals(GatewaySyncResult.Completed(1, 1), engine.syncOnce())
+        assertEquals(1, client.publicPushes)
+    }
 }
 
 private class FakeSettings(private var value: GatewaySettings) : GatewaySettingsStoreContract {
