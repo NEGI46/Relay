@@ -155,3 +155,29 @@ Genuinely BLOCKED (not achievable on this workstation; must remain BLOCKED, neve
   the enrollment path.
 - Municipal / shelter production keys, certificates, and any 119/official-channel integration.
 - Security scanners (Syft / OSV / Grype / MobSF) and signed-distribution verification.
+
+## 7. Final self-audit and verification
+
+Three self-audit passes were run against the branch HEAD before sign-off; all evidence is the
+current worktree, not memory of earlier work.
+
+1. **Regression (do the tests pass?).** `:shared:jvmTest :app:testDebugUnitTest :broker:test
+   :pc-gateway:test` → **BUILD SUCCESSFUL**. JUnit XML aggregate: **tests=444, failures=0,
+   errors=0, skipped=1**. The single skip is `RemoteBrokerTunnelE2ETest` — an external-remote-broker
+   E2E gated on infrastructure not present on this workstation; it is an environment gate, not a
+   disabled test, and predates this branch.
+2. **No weakening (were boundaries or tests degraded?).** Branch diff vs base `3d1a44b`: 16 files,
+   +959 / -10. No test file deleted (`--diff-filter=D` empty); no `@Ignore`/`@Disabled` added and no
+   `@Test` removed. Every removed main-source line is a signature/interface refactor that *tightens*
+   the boundary: `VerifiedManifestStore` seam, the added `expectedShelterId` fail-closed pin, and
+   threading `observability` through `authenticateGateway` while its `?: return` fail-closed logic is
+   unchanged. Test changes are purely additive.
+3. **No secret leakage / honest claims.** A secret-pattern scan over all added lines returns only
+   KDoc/comment/test text that *describes* the no-secret guarantee — no key, token, password, or
+   ciphertext literal is introduced. Documentation status symbols were reconciled to the
+   AUTOMATED_TESTED (JVM-unit-only) reality, with camera-scan UI and device/field runs kept explicitly
+   unverified.
+
+Standing scope reminder: everything shipped here is **AUTOMATED_TESTED (JVM unit)** at most. No
+EMULATOR_TESTED / DEVICE_TESTED / FIELD_TESTED / PILOT_READY / PRODUCTION_READY claim is made, and
+Relay remains not an official 119 / fire / police / municipal emergency channel.
