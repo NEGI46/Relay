@@ -13,7 +13,13 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.relay.MainActivity
 import com.example.relay.RelayApplication
+import com.example.relay.background.ActivationSource
+import com.example.relay.background.CommunicationOwner
+import com.example.relay.background.DegradeReason
 import com.example.relay.domain.OperatingMode
+import com.example.relay.domain.RelayRuntimeSettings
+import com.example.relay.permissions.NearbyPrerequisite
+import com.example.relay.permissions.NearbyPrerequisiteChecker
 import com.example.relay.rescue.DevelopmentEnrollmentResult
 import com.example.relay.rescue.RescueSubmissionStatus
 import com.example.relay.rescue.SharedPreferencesRescueAutomationStore
@@ -42,6 +48,7 @@ import kotlinx.coroutines.launch
 class RescueDeliveryService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var statusMonitorJob: Job? = null
+    private var foregroundNotificationJob: Job? = null
     private var localGatewayDeliveryJob: Job? = null
     private var brokerDeliveryJob: Job? = null
     private var brokerReceiptPollJob: Job? = null
@@ -52,10 +59,28 @@ class RescueDeliveryService : Service() {
     // it cannot correlate across the merged variant manifest.
     @android.annotation.SuppressLint("ForegroundServiceType")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val app = application as? RelayApplication
+        // Explicit in-app user stop: disarm standby + emergency and drop the shared lease so the
+        // restart receiver/worker does not immediately re-arm this device.
+        if (intent?.action == ACTION_STOP) {
+            app?.let {
+                it.diagnostics.record("rescue_delivery_user_stop")
+                it.backgroundRelayManager.userStop()
+                SharedPreferencesRescueAutomationStore(this).disable()
+                it.releaseAllCommunicationLeases()
+            }
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        // A null Intent means the OS recreated the service; the automation opt-in (persisted) is the
+        // gate. START_STICKY is only returned below when emergency/undelivered rescue truly needs it.
         if (!SharedPreferencesRescueAutomationStore(this).isEnabled()) {
             stopSelf(startId)
             return START_NOT_STICKY
         }
+        val source = intent?.getStringExtra(EXTRA_ACTIVATION_SOURCE)
+            ?.let { runCatching { ActivationSource.valueOf(it) }.getOrNull() }
+            ?: if (intent == null) ActivationSource.BOOT_RESTORE else ActivationSource.RESCUE_RECEIVED
         createChannel()
         try {
             if (Build.VERSION.SDK_INT >= 29) {
@@ -64,26 +89,36 @@ class RescueDeliveryService : Service() {
                 startForeground(NOTIFICATION_ID, notification())
             }
         } catch (_: SecurityException) {
-            (application as? RelayApplication)?.diagnostics?.record("rescue_foreground_security_exception")
+            app?.diagnostics?.record("rescue_foreground_security_exception")
+            app?.backgroundRelayManager?.markStartFailure("foreground_security_exception")
             stopSelf(startId)
             return START_NOT_STICKY
         }
-        (application as? RelayApplication)?.let { app ->
-            app.diagnostics.record("rescue_delivery_started")
-            startNearbyRelayForRescue(app)
-            app.rescueDeliveryCoordinator.start(serviceScope)
-            startDestinationResolution(app)
-            startLocalGatewayDelivery(app)
-            startBrokerDelivery(app)
-            startBrokerReceiptPolling(app)
-            monitorOwnRequestStatus(app)
+        app?.let {
+            it.diagnostics.record("rescue_delivery_started")
+            it.backgroundRelayManager.markEmergencyRequested(source, it.deviceRoleStore.load().name, OperatingMode.RELAY.name)
+            startNearbyRelayForRescue(it)
+            it.rescueDeliveryCoordinator.start(serviceScope)
+            startDestinationResolution(it)
+            startLocalGatewayDelivery(it)
+            startBrokerDelivery(it)
+            startBrokerReceiptPolling(it)
+            monitorOwnRequestStatus(it)
+            refreshForegroundNotification(it)
         }
+        // Emergency delivery is exactly the case the spec allows START_STICKY for: an undelivered
+        // rescue must survive OS-recreation. The user-stop path above returns START_NOT_STICKY.
         return START_STICKY
     }
 
     override fun onDestroy() {
-        (application as? RelayApplication)?.diagnostics?.record("rescue_delivery_destroyed")
-        (application as? RelayApplication)?.rescueDeliveryCoordinator?.stop()
+        (application as? RelayApplication)?.let {
+            it.diagnostics.record("rescue_delivery_destroyed")
+            it.rescueDeliveryCoordinator.stop()
+            // Release only THIS owner's lease; USER_COMMUNICATION (if held) keeps the runtime alive.
+            it.releaseCommunicationLease(CommunicationOwner.EMERGENCY_MODE)
+        }
+        foregroundNotificationJob?.cancel()
         localGatewayDeliveryJob?.cancel()
         brokerDeliveryJob?.cancel()
         brokerReceiptPollJob?.cancel()
@@ -94,13 +129,43 @@ class RescueDeliveryService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun notification() = NotificationCompat.Builder(this, CHANNEL_ID)
-        .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-        .setContentTitle("Relay が救助要請を中継中")
-        .setContentText("地域の救助拠点が見つかると中継します")
-        .setOngoing(true)
-        .setOnlyAlertOnce(true)
-        .build()
+    /** Keeps the ongoing notification's connected-peer count and last-transfer time current. */
+    private fun refreshForegroundNotification(app: RelayApplication) {
+        if (foregroundNotificationJob?.isActive == true) return
+        foregroundNotificationJob = serviceScope.launch {
+            app.communicationSupervisor.state.collect { state ->
+                val peers = state.transport.connectedPeerIds.size
+                if (peers > 0) app.backgroundRelayManager.markTransfer()
+                getSystemService(NotificationManager::class.java)
+                    .notify(NOTIFICATION_ID, notification(peers))
+            }
+        }
+    }
+
+    private fun notification(connectedPeers: Int = 0): android.app.Notification {
+        val openApp = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val stopIntent = PendingIntent.getService(
+            this,
+            4,
+            Intent(this, RescueDeliveryService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+            .setContentTitle("Relay 災害通信中")
+            .setContentText("接続中の端末: ${connectedPeers}台")
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(openApp)
+            .addAction(0, "アプリを開く", openApp)
+            .addAction(0, "災害通信を終了", stopIntent)
+            .build()
+    }
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= 26) getSystemService(NotificationManager::class.java).apply {
@@ -132,16 +197,43 @@ class RescueDeliveryService : Service() {
     }
 
     /**
-     * A rescue request owns the same Nearby transport as ordinary relay mode. This works without
-     * Wi-Fi or mobile data; Android permission/Bluetooth prerequisites still remain explicit OS
-     * requirements and are reported by [RelayCommunicationService].
+     * Emergency mode reuses the single shared Nearby transport via the [CommunicationLeaseManager]
+     * rather than starting a second foreground service. This is the double-FGS fix: the rescue
+     * delivery service is already a connectedDevice foreground service, so it acquires an
+     * EMERGENCY_MODE lease on the shared runtime instead of launching RelayCommunicationService.
+     * Bluetooth/permission/Play-services prerequisites are checked here and reported as DEGRADED
+     * (not a crash) when unmet; the lease is not acquired until they are ready.
      */
     private fun startNearbyRelayForRescue(app: RelayApplication) {
-        RelayCommunicationService.start(this, OperatingMode.RELAY, app.deviceRoleStore.load())?.let {
+        val prerequisite = NearbyPrerequisiteChecker(this, app.nearbyPermissionGate).check()
+        if (prerequisite !is NearbyPrerequisite.Ready) {
+            app.backgroundRelayManager.markDegraded(prerequisite.toDegradeReason())
             getSharedPreferences("relay_rescue_diagnostics", MODE_PRIVATE).edit()
-                .putString("last_nearby_start_result", "failed")
+                .putString("last_nearby_start_result", "degraded")
                 .putLong("last_nearby_start_at", System.currentTimeMillis())
                 .apply()
+            return
+        }
+        serviceScope.launch {
+            val role = app.deviceRoleStore.load()
+            when (app.communicationLeaseManager.acquire(
+                CommunicationOwner.EMERGENCY_MODE,
+                RelayRuntimeSettings(OperatingMode.RELAY, role),
+            )) {
+                com.example.relay.background.LeaseResult.STARTED,
+                com.example.relay.background.LeaseResult.ALREADY_ACTIVE -> {
+                    app.backgroundRelayManager.recoverFromDegrade()
+                    app.backgroundRelayManager.markHealthyStart()
+                }
+                com.example.relay.background.LeaseResult.START_FAILED -> {
+                    app.backgroundRelayManager.markStartFailure("emergency_lease_start_failed")
+                    getSharedPreferences("relay_rescue_diagnostics", MODE_PRIVATE).edit()
+                        .putString("last_nearby_start_result", "failed")
+                        .putLong("last_nearby_start_at", System.currentTimeMillis())
+                        .apply()
+                }
+                else -> Unit
+            }
         }
     }
 
@@ -389,17 +481,39 @@ class RescueDeliveryService : Service() {
         private const val NOTIFICATION_ID = 1002
         private const val STATUS_NOTIFICATION_ID = 1003
         private const val DESTINATION_RESOLUTION_INTERVAL_MILLIS = 2_000L
+        const val ACTION_STOP = "com.example.relay.action.STOP_EMERGENCY"
+        const val EXTRA_ACTIVATION_SOURCE = "activation_source"
 
-        fun startIfEnabled(context: Context) {
+        fun startIfEnabled(context: Context, source: ActivationSource = ActivationSource.BOOT_RESTORE) {
             if (!SharedPreferencesRescueAutomationStore(context).isEnabled()) return
-            runCatching { ContextCompat.startForegroundService(context, Intent(context, RescueDeliveryService::class.java)) }
+            val intent = Intent(context, RescueDeliveryService::class.java)
+                .putExtra(EXTRA_ACTIVATION_SOURCE, source.name)
+            runCatching { ContextCompat.startForegroundService(context, intent) }
         }
 
-        fun enableAndStart(context: Context) {
+        fun enableAndStart(context: Context, source: ActivationSource = ActivationSource.RESCUE_RECEIVED) {
             SharedPreferencesRescueAutomationStore(context).enable()
-            startIfEnabled(context)
+            startIfEnabled(context, source)
+        }
+
+        /** Explicit in-app user stop of disaster communication. Prevents immediate auto-restart. */
+        fun stop(context: Context) {
+            runCatching {
+                context.startService(
+                    Intent(context, RescueDeliveryService::class.java).setAction(ACTION_STOP),
+                )
+            }
         }
     }
+}
+
+private fun NearbyPrerequisite.toDegradeReason(): DegradeReason = when (this) {
+    NearbyPrerequisite.Ready -> DegradeReason.NONE
+    is NearbyPrerequisite.MissingPermissions -> DegradeReason.MISSING_NEARBY_PERMISSION
+    NearbyPrerequisite.BluetoothUnavailable -> DegradeReason.MISSING_BLUETOOTH_PERMISSION
+    NearbyPrerequisite.BluetoothDisabled -> DegradeReason.BLUETOOTH_DISABLED
+    NearbyPrerequisite.LocationServicesDisabled -> DegradeReason.OS_BACKGROUND_RESTRICTED
+    is NearbyPrerequisite.PlayServicesUnavailable -> DegradeReason.PLAY_SERVICES_UNAVAILABLE
 }
 
 internal fun selectLocalGatewayCandidate(

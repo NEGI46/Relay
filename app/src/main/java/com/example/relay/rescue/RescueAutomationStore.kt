@@ -4,13 +4,18 @@ import android.content.Context
 
 /** Persistent opt-in set when this device creates or receives a rescue envelope.
  *
- * It deliberately has no user-facing toggle: stopping automatic delivery would
- * strand already accepted emergency data.  The delivery service still fails
- * closed when Android has not granted Bluetooth/foreground-service permission.
+ * Automatic delivery normally has no casual toggle, because stopping it would strand already
+ * accepted emergency data. [disable] exists only for the explicit in-app user stop: pressing the
+ * emergency-stop action must prevent the restart receiver/worker from immediately re-arming the
+ * service. The delivery service still fails closed when Android has not granted
+ * Bluetooth/foreground-service permission.
  */
 interface RescueAutomationStore {
     fun isEnabled(): Boolean
     fun enable()
+
+    /** Explicit user stop only. Clears the opt-in so receivers do not immediately restart delivery. */
+    fun disable()
 }
 
 class SharedPreferencesRescueAutomationStore(context: Context) : RescueAutomationStore {
@@ -20,6 +25,10 @@ class SharedPreferencesRescueAutomationStore(context: Context) : RescueAutomatio
 
     override fun enable() {
         preferences.edit().putBoolean(KEY_ENABLED, true).apply()
+    }
+
+    override fun disable() {
+        preferences.edit().putBoolean(KEY_ENABLED, false).apply()
     }
 
     private companion object {

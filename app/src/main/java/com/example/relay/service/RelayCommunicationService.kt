@@ -14,6 +14,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.example.relay.RelayApplication
+import com.example.relay.background.CommunicationOwner
+import com.example.relay.background.LeaseResult
 import com.example.relay.domain.DeviceRole
 import com.example.relay.domain.DeviceRoleCodec
 import com.example.relay.domain.OperatingMode
@@ -35,7 +37,9 @@ class RelayCommunicationService : Service() {
     private val shutdownCoordinator by lazy(LazyThreadSafetyMode.NONE) {
         CommunicationShutdownCoordinator(
             scope = scope,
-            stopGateway = { app.communicationSupervisor.stop() },
+            // Release only THIS owner's lease. If EMERGENCY_MODE still holds the runtime, stopping
+            // user communication must NOT tear down the shared Nearby/Gateway session.
+            stopGateway = { app.communicationLeaseManager.release(CommunicationOwner.USER_COMMUNICATION) },
             stopCommunication = {},
             onFailure = { reason -> app.communicationSupervisor.reportStartFailure(reason) },
         )
@@ -74,7 +78,11 @@ class RelayCommunicationService : Service() {
         }
         scope.launch {
             try {
-                if (!app.communicationSupervisor.start(RelayRuntimeSettings(mode, role))) {
+                val leaseResult = app.communicationLeaseManager.acquire(
+                    CommunicationOwner.USER_COMMUNICATION,
+                    RelayRuntimeSettings(mode, role),
+                )
+                if (leaseResult == LeaseResult.START_FAILED) {
                     app.diagnostics.record("communication_start_rejected")
                     stopForegroundCompat()
                     stopSelf()

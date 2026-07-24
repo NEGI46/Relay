@@ -39,6 +39,13 @@ import com.example.relay.cloud.SharedPreferencesPriorityFeedConfigStore
 import com.example.relay.cloud.ServerSyncGateway
 import com.example.relay.location.AndroidLocationProvider
 import com.example.relay.location.LocationProvider
+import com.example.relay.background.BackgroundRelayManager
+import com.example.relay.background.CommunicationOwner
+import com.example.relay.background.BackgroundRelayStateStore
+import com.example.relay.background.CommunicationLeaseManager
+import com.example.relay.background.ProcessExitRecord
+import com.example.relay.background.SharedPreferencesBackgroundRelayStateStore
+import com.example.relay.domain.RelayRuntimeSettings
 import com.example.relay.service.CommunicationSupervisor
 import com.example.relay.service.RescueDeliveryService
 import com.example.relay.rescue.RescueShelterKeyStore
@@ -317,6 +324,31 @@ class RelayApplication : Application() {
         CommunicationSupervisor(communicationRuntime, gatewaySyncEngine, internetPrioritySyncScheduler)
     }
 
+    /**
+     * Durable state for the opt-in background relay feature. Uses its own preferences file and does
+     * NOT migrate the encrypted DB/Keystore/legacy prefs.
+     */
+    val backgroundRelayStateStore: BackgroundRelayStateStore by lazy {
+        SharedPreferencesBackgroundRelayStateStore(this)
+    }
+    val backgroundRelayManager: BackgroundRelayManager by lazy {
+        BackgroundRelayManager(backgroundRelayStateStore, diagnostics)
+    }
+
+    /**
+     * The single owner/lease over the shared communication runtime (Nearby transport + Gateway sync).
+     * Both [RelayCommunicationService] (USER_COMMUNICATION) and [RescueDeliveryService]
+     * (EMERGENCY_MODE) acquire a lease here instead of each starting its own Nearby stack, so there
+     * is exactly one transport / one Advertising / one Discovery / one Gateway sync regardless of how
+     * many owners are active, and releasing one owner never stops another owner's communication.
+     */
+    val communicationLeaseManager: CommunicationLeaseManager by lazy {
+        CommunicationLeaseManager(
+            start = { settings: RelayRuntimeSettings -> communicationSupervisor.start(settings) },
+            stop = { communicationSupervisor.stop() },
+        )
+    }
+
     val locationProvider: LocationProvider by lazy { AndroidLocationProvider(this) }
 
     /** When online, merge priority remote messages into local Room store. */
@@ -339,6 +371,20 @@ class RelayApplication : Application() {
         applicationScope.launch { rescueNearbyCoordinator?.onLocalStoreChanged() }
     }
 
+    /**
+     * Releases a communication-runtime lease from the application scope. Used by services in
+     * onDestroy, when their own scope is already being cancelled, so a single owner releasing never
+     * leaves the shared runtime half-stopped for the others.
+     */
+    fun releaseCommunicationLease(owner: CommunicationOwner) {
+        applicationScope.launch { communicationLeaseManager.release(owner) }
+    }
+
+    /** Hard stop for an explicit user stop: drops every lease owner and stops the shared runtime. */
+    fun releaseAllCommunicationLeases() {
+        applicationScope.launch { communicationLeaseManager.releaseAll() }
+    }
+
     override fun onCreate() {
         super.onCreate()
         val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
@@ -348,6 +394,11 @@ class RelayApplication : Application() {
             previousHandler?.uncaughtException(thread, error)
         }
         diagnostics.record("application_started")
+        // Task Manager / force-stop on Android 13+ delivers no onDestroy callback, so on the next
+        // launch we inspect ApplicationExitInfo. The reason is recorded for diagnostics only; the
+        // persisted explicit-stop flag (set by the in-app stop action) is the authority on whether
+        // we treat ourselves as user-stopped — REASON_USER_REQUESTED alone is deliberately NOT.
+        backgroundRelayManager.onProcessStart(newestProcessExitRecord())
         // Root asset parsing is safe on the main thread. Persisted-directory revalidation performs
         // Room I/O below; until that finishes BLE remains fail-closed with an empty resolver.
         regionalTrustRuntime
@@ -366,6 +417,16 @@ class RelayApplication : Application() {
             }
             if (hasLiveSession) RescueDeliveryService.enableAndStart(this@RelayApplication)
         }
+    }
+
+    private fun newestProcessExitRecord(): ProcessExitRecord? {
+        if (android.os.Build.VERSION.SDK_INT < 30) return null
+        return runCatching {
+            val am = getSystemService(android.app.ActivityManager::class.java) ?: return null
+            am.getHistoricalProcessExitReasons(packageName, 0, 1)
+                .firstOrNull()
+                ?.let { ProcessExitRecord(reason = it.reason, timestampMillis = it.timestamp) }
+        }.getOrNull()
     }
 
     private companion object {
