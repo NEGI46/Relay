@@ -93,15 +93,61 @@ Post-change verification: `:app:testDebugUnitTest` filtered to
 SUCCESSFUL**, `tests=10 failures=0 errors=0` for the new suite (JUnit XML in
 `app/build/test-results/testDebugUnitTest/`).
 
-## 5. Remaining work and honest blockers
+## 5. Phase 6 — Windows DPAPI at-rest protection (conditional investigation)
 
-Windows-implementable next (planned on this branch):
-- Phase 2.3: connect a persisted enrollment token to `ShelterManifestEnrollment` so the pinned
-  `manifestFingerprint` verifies the shelter public-key manifest during enrollment.
-- Phase 3: audit the Nearby TRUSTED-mode trust boundary for parity with the gateway fail-closed rule.
-- Phase 4: add automated failure/recovery tests (process death, corrupted store, conflicting re-enroll).
-- Phase 5: Broker observability audit (liveness/readiness/metrics gaps).
-- Phase 8: reconcile README / docs with the now-wired enrollment path.
+The brief asks whether Windows DPAPI (`CryptProtectData` / `CryptUnprotectData`) should wrap the
+PC gateway's rescue private-key file. This was investigated against the current source and the
+repository's honesty rules; the decision is to **not** implement it in this branch and to record it
+as a deferred, externally-gated item rather than ship it silently.
+
+Current at-rest posture (verified at HEAD): `RescueKeyStore` persists Base64 private-key material
+in a local JSON file guarded by an **owner-only** boundary — a POSIX `600` permission set or an
+owner-only Windows ACL — and **fails closed** if that boundary cannot be verified or enforced
+(`pc-gateway/.../rescue/RescueKeyStore.kt`, `verifyOwnerOnly` / `restrictOwnerOnly`). The code and
+`docs/PC_GATEWAY_SECURITY.md` already state plainly that it does **not** claim DPAPI, HSM, KMS, or
+Credential-Manager protection.
+
+Why DPAPI is deferred, not implemented:
+
+1. **Dependency expansion / portability regression.** The JVM has no standard DPAPI API.
+   `CryptProtectData` lives in `crypt32.dll` and would require a new JNA/JNI native binding. The
+   project currently has **no** native dependency (verified: no `jna`/`jni`/`crypt32` reference in
+   any `*.gradle*`/`*.toml`). Adding one would fork the presently portable `RescueKeyStore` into a
+   Windows-only code path and contradicts the minimal-toolchain posture (JDK 17 + Android SDK only).
+2. **Threat-model reality.** DPAPI user-scope only guarantees that the *same Windows user account*
+   can decrypt the blob. The gateway process already runs as that user, so any code executing in
+   that user's session can call `CryptUnprotectData` on the file. DPAPI therefore does **not** remove
+   the owner-only ACL requirement; it is defense-in-depth against *offline disk theft or other-user
+   reads* — a threat that BitLocker full-disk encryption plus the existing owner-only ACL already
+   cover substantially.
+3. **False-completion risk.** Shipping a DPAPI wrapper could be misread as hardware-backed / HSM-grade
+   protection, which it is not. The honesty rule forbids implying a stronger guarantee than is real.
+
+Windows-implementable mitigation available **today with zero code change** (recommended to operators):
+enable **BitLocker** on the volume holding the key file and keep the file under the operator's own
+profile so the already-enforced owner-only ACL applies. This closes the offline-theft gap DPAPI would
+target, without a native dependency or a false HSM claim.
+
+Status: **BLOCKED_ON_EXTERNAL_DECISION** — adopting DPAPI is an architecture/maintainer decision
+(accept a JNA native dependency + a Windows-only key-store fork). It is intentionally *not* silently
+implemented. The honest owner-only-ACL + fail-closed posture stands and is unchanged by this audit.
+
+## 6. Remaining work and honest blockers
+
+Windows-implementable work completed on this branch (each a logical commit, JVM-unit-tested only):
+- Phase 2.3 (`3a6ce9f`): a persisted enrollment token now pins `ShelterManifestEnrollment` — the
+  verified gateway identity's `shelterId` is matched fail-closed before a manifest is saved.
+- Phase 3 (`a4b0bd6`): the Nearby TRUSTED-mode allow-list is now enforced on the explicit
+  `connect()` outbound path (previously only inbound/auto-initiate were gated), fail-closed, no retry.
+- Phase 4 (`5caecb2`): engine-level trust-decision tests — a beacon contradicting an enrolled gateway
+  is refused (`gateway_trust_rejected`) and never delivered to; a DHCP-shifted matching beacon is trusted.
+- Phase 5 (`aca93c9`): a secret-free `BrokerObservability` seam records coarse security-rejection
+  categories (never tokens/keys/ciphertext), giving operators rejection visibility with no log-leak.
+- Phase 6 (this doc, Section 5): DPAPI investigated and deferred as `BLOCKED_ON_EXTERNAL_DECISION`.
+
+Still open (planned):
+- Phase 8: reconcile README / docs with the now-wired enrollment path and this audit.
+- Enrollment camera-scan UI (headless import flow exists; on-device QR capture is future, device-gated).
 
 Genuinely BLOCKED (not achievable on this workstation; must remain BLOCKED, never faked):
 - `gateway-backup-restore` end-to-end (litestream + age; no Windows litestream binary).
