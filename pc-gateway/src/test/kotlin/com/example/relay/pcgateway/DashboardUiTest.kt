@@ -218,6 +218,35 @@ class DashboardUiTest {
     }
 
     @Test
+    fun `messages csv neutralizes tab-prefixed formula injection`() = testApplication {
+        val config = GatewayConfig(
+            profile = GatewayProfile.DEVELOPMENT,
+            dbPath = Files.createTempFile("relay-ui-tabinj", ".db").toString(),
+            adminKey = "admin-secret",
+        )
+        GatewayStore(config).use { store ->
+            // A tab character before a formula trigger can bypass naive sanitizers.
+            val hostile = message("\t=HYPERLINK(\"http://evil\")")
+            store.ingestUnregistered(listOf(hostile), 2_000)
+            application { gatewayModule(config, store) }
+
+            val csv = client.get("/api/messages/export.csv") {
+                header("X-Admin-Key", "admin-secret")
+            }
+            assertEquals(HttpStatusCode.OK, csv.status)
+            val body = csv.bodyAsText()
+            // Tab-prefixed formula cells must also be neutralised with a leading quote.
+            assertTrue(body.contains("'\t=HYPERLINK"))
+            // Must not appear as a raw cell without the quote prefix.
+            assertFalse(
+                body.lines().any { line ->
+                    line.split(",").any { it.startsWith("\t=") }
+                },
+            )
+        }
+    }
+
+    @Test
     fun `filtered messages endpoint accepts trust query`() = testApplication {
         val config = GatewayConfig(
             profile = GatewayProfile.DEVELOPMENT,
