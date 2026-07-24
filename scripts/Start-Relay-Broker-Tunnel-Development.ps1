@@ -29,7 +29,7 @@ param(
     [ValidateRange(1, 65535)]
     [int]$Port = 8080,
     [string]$NgrokDomain,
-    [securestring]$NgrokAuthToken,
+    [string]$NgrokAuthToken,
     [string]$Username,
     [securestring]$Password,
     [switch]$ResetAdmin,
@@ -142,7 +142,7 @@ services:
     restart: unless-stopped
   ngrok:
     image: ngrok/ngrok:latest
-    command: ["http", "--domain=$NgrokDomain", "broker:8443"]
+    command: ["http", "--domain=$NgrokDomain", "--log=stdout", "--log-format=logfmt", "broker:8443"]
     environment:
       - NGROK_AUTHTOKEN
     depends_on:
@@ -173,14 +173,12 @@ function Resolve-NgrokDomain {
 }
 
 function Resolve-NgrokAuthToken {
-    param([securestring]$Requested)
-    if ($null -eq $Requested -and -not [string]::IsNullOrWhiteSpace($env:NGROK_AUTHTOKEN)) {
-        return $env:NGROK_AUTHTOKEN
-    }
-    $secure = $Requested
-    if ($null -eq $secure) {
-        $secure = Read-Host 'ngrok authtoken (https://dashboard.ngrok.com/get-started/your-authtoken)' -AsSecureString
-    }
+    # Accept a plaintext token as an argument for quick verification. Note: an authtoken passed on
+    # the command line is visible in PowerShell history; omit -NgrokAuthToken to be prompted securely.
+    param([string]$Requested)
+    if (-not [string]::IsNullOrWhiteSpace($Requested)) { return $Requested }
+    if (-not [string]::IsNullOrWhiteSpace($env:NGROK_AUTHTOKEN)) { return $env:NGROK_AUTHTOKEN }
+    $secure = Read-Host 'ngrok authtoken (https://dashboard.ngrok.com/get-started/your-authtoken)' -AsSecureString
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
     try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
@@ -188,17 +186,33 @@ function Resolve-NgrokAuthToken {
 
 function Wait-NgrokReady {
     param([string]$Domain)
-    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    $publicUrl = "https://$Domain"
+    $deadline = [DateTime]::UtcNow.AddSeconds(90)
     do {
         Start-Sleep -Seconds 2
         $log = & docker compose -f $composeFile logs --no-log-prefix ngrok 2>&1
         $text = ($log -join "`n")
-        if ($text -match [regex]::Escape($Domain)) { return }
-        if ($text -match 'ERR_NGROK_|authentication failed|failed to start tunnel') {
+        # Hard failures: a bad authtoken or a domain not reserved to this account. Bail out early.
+        if ($text -match 'authentication failed|ERR_NGROK_105|ERR_NGROK_108|ERR_NGROK_324|failed to start tunnel') {
             throw "ngrok failed to start. Verify the authtoken and that the domain is reserved to your account.`n$text"
         }
+        # Ready signal 1: the agent logged the tunnel URL (requires --log=stdout on the container).
+        if ($text -match [regex]::Escape($Domain)) { return }
+        # Ready signal 2: some ngrok images do not log the URL to stdout. Probe the public endpoint;
+        # any HTTP response other than "endpoint offline" (ERR_NGROK_3200) proves an agent is connected.
+        try {
+            Invoke-WebRequest -Uri $publicUrl -Headers @{ 'ngrok-skip-browser-warning' = 'true' } -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop | Out-Null
+            return
+        } catch {
+            $resp = $_.Exception.Response
+            if ($null -ne $resp) {
+                $code = $null
+                try { $code = [string]$resp.Headers['Ngrok-Error-Code'] } catch { $code = $null }
+                if ($code -ne 'ERR_NGROK_3200') { return }
+            }
+        }
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw 'ngrok did not report the tunnel within 60 seconds. Run "docker compose logs ngrok" to inspect.'
+    throw 'ngrok did not report the tunnel within 90 seconds. Run "docker compose logs ngrok" to inspect.'
 }
 
 function Test-GatewayHealth {
@@ -210,6 +224,43 @@ function Test-GatewayHealth {
         return $null
     }
     return $null
+}
+
+function Test-BrokerPullReachable {
+    # Confirms the mobile-reachable cloud path is healthy BEFORE we start the gateway: the ngrok
+    # tunnel reaches the broker AND the freshly issued gateway credential authenticates. This turns an
+    # opaque "the SOS never arrived" into a precise, early diagnosis. The skip header opts out of the
+    # free-ngrok browser interstitial exactly as the phone and the gateway pull agent do.
+    param([string]$BrokerUrl, [string]$ShelterId, [string]$GatewayId, [string]$Credential)
+    $url = "$BrokerUrl/v1/gateways/$ShelterId/pull?limit=1"
+    $headers = @{
+        'Authorization'              = "Bearer $Credential"
+        'X-Gateway-Id'               = $GatewayId
+        'ngrok-skip-browser-warning' = 'true'
+    }
+    try {
+        $response = Invoke-WebRequest -Uri $url -Headers $headers -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
+        $ngrokError = [string]$response.Headers['Ngrok-Error-Code']
+        if (-not [string]::IsNullOrWhiteSpace($ngrokError)) {
+            throw "The tunnel returned an ngrok error ($ngrokError) instead of the broker. Inspect 'docker compose logs ngrok'."
+        }
+        return
+    } catch {
+        $resp = $_.Exception.Response
+        if ($null -eq $resp) {
+            throw "Could not reach the broker through the tunnel at $BrokerUrl. Check the network and 'docker compose logs ngrok'.`n$($_.Exception.Message)"
+        }
+        $ngrokError = $null
+        try { $ngrokError = [string]$resp.Headers['Ngrok-Error-Code'] } catch { $ngrokError = $null }
+        if (-not [string]::IsNullOrWhiteSpace($ngrokError)) {
+            throw "The tunnel returned an ngrok error ($ngrokError) instead of the broker. Inspect 'docker compose logs ngrok'."
+        }
+        $status = [int]$resp.StatusCode
+        if ($status -eq 401 -or $status -eq 403) {
+            throw "The broker rejected the freshly issued gateway credential (HTTP $status). This is a broker/credential fault, not a network problem."
+        }
+        throw "The broker pull self-test failed with HTTP $status through $BrokerUrl."
+    }
 }
 
 function Read-DevelopmentAdministrator {
@@ -251,7 +302,7 @@ $gateway = Find-RelayPcGatewayExecutable -RequestedPath $Executable
 # and is cleared in the finally block below.
 $env:NGROK_AUTHTOKEN = $ngrokAuthToken
 $ngrokAuthToken = $null
-& docker compose -f $composeFile up -d
+& docker compose -f $composeFile up -d --remove-orphans
 if ($LASTEXITCODE -ne 0) { throw 'Failed to start the broker/tunnel containers.' }
 
 Wait-NgrokReady -Domain $ngrokDomain
@@ -265,6 +316,11 @@ if ($LASTEXITCODE -ne 0) { throw "Broker credential issuance failed:`n$($issued 
 $credentialLine = $issued | Where-Object { $_ -match '^RELAY_BROKER_CREDENTIAL=' } | Select-Object -First 1
 if ([string]::IsNullOrWhiteSpace($credentialLine)) { throw 'Broker returned no credential.' }
 $credential = $credentialLine.Substring('RELAY_BROKER_CREDENTIAL='.Length)
+
+# Fail fast with a precise reason if the mobile-reachable cloud path is unhealthy, before committing
+# to gateway startup. A pass here means phone -> ngrok -> broker -> gateway pull is fully wired.
+Test-BrokerPullReachable -BrokerUrl $brokerUrl -ShelterId $shelterId -GatewayId $GatewayId -Credential $credential
+Write-Host 'Cloud path self-test passed: the tunnel reaches the broker and the gateway credential authenticates.' -ForegroundColor Green
 
 $consoleUrl = "http://127.0.0.1:$Port/"
 $healthUrl = "http://127.0.0.1:$Port/api/health"
