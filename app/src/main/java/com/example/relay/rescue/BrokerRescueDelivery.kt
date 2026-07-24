@@ -233,6 +233,10 @@ class BrokerRescueDelivery(
         connection.connectTimeout = 10_000
         connection.readTimeout = 15_000
         connection.setRequestProperty("Content-Type", "application/json")
+        // Free ngrok domains can serve a browser interstitial to requests they classify as browser
+        // traffic; this header opts out so a programmatic Broker upload always reaches the tunnel.
+        // Harmless for non-ngrok endpoints, which ignore the unknown header.
+        connection.setRequestProperty("ngrok-skip-browser-warning", "true")
         return connection
     }
 

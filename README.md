@@ -328,25 +328,37 @@ docker compose -f compose.quick-tunnel.yml down -v
 
 ### スマホがモバイル通信だけでもPCで受信する（clone不要）
 
-同じWi-Fi/LANが無く、スマホが**モバイル通信のみ**でも、Cloudflare Quick Tunnel越しにBrokerへEnvelopeを預け、PC Gatewayがoutboundで取得できます。**リポジトリ全体のcloneは不要**で、必要なのはDocker Desktopと`Publish Relay development preview`同梱の2ファイルだけです。
+同じWi-Fi/LANが無く、スマホが**モバイル通信のみ**でも、ngrokの固定ドメイン越しにBrokerへEnvelopeを預け、PC Gatewayがoutboundで取得できます。ngrokの無料ドメインは**再起動してもURLが変わらない**ため、preview APKへ一度だけ焼き込めば以後はスマホの再buildが不要です。**リポジトリ全体のcloneは不要**で、必要なのはDocker Desktopと`Publish Relay development preview`同梱の2ファイルだけです。
 
 必要なもの:
 
 - Docker Desktop（起動済み）
 - インストール済みの`RelayPcGateway.exe`
 - 開発preview同梱の`Start-Relay-Broker-Tunnel-Development.cmd`と`relay-broker-bundle.zip`（同じフォルダに置く）
+- 無料のngrokアカウント: authtoken（[取得先](https://dashboard.ngrok.com/get-started/your-authtoken)）。固定ドメインは本リポジトリで`buffed-unlawful-detached.ngrok-free.dev`を既定設定済みです（別ドメインを使う場合のみ[予約](https://dashboard.ngrok.com/domains)して`-NgrokDomain`で上書き）。
 
-`Start-Relay-Broker-Tunnel-Development.cmd`をダブルクリックすると、次を自動化します。
+authtokenを渡して起動します（authtokenはconsole・file・履歴へ残さず、ngrok containerへのみ渡ります）。ドメインは既定値が使われるため`-NgrokDomain`は不要です。
+
+```powershell
+Start-Relay-Broker-Tunnel-Development.cmd
+```
+
+ダブルクリック起動でも動作します。authtokenは`NGROK_AUTHTOKEN`環境変数か対話入力から取得します。別のドメインを使う場合は`-NgrokDomain your-name.ngrok-free.dev`または`RELAY_NGROK_DOMAIN`で上書きできます。起動後は次を自動化します。
 
 1. 公開image`eclipse-temurin:17-jre`でBrokerを起動（同梱classを読み込むだけでDockerfile buildもgradlewも不要、Envelopeは復号しない）
-2. `cloudflare/cloudflared`でQuick Tunnelを開き、`https://<random>.trycloudflare.com`を取得
+2. `ngrok/ngrok`で固定ドメイン`https://buffed-unlawful-detached.ngrok-free.dev`にトンネルを開く
 3. 短命・shelter限定のBroker credentialを1回だけ発行し、このprocess内にのみ保持
 4. インストール済みEXEをBroker経路へ紐づけて起動し、管理者ユーザー名/passwordを初回だけ確認
 
-起動後に表示されるURLをAndroidアプリのBroker endpointへ設定します（テストAPKのbuildにはリポジトリが必要）:
+ドメインは固定なので、preview APKへ一度だけ焼き込めば以後は再build不要です。本リポジトリでは既に次を設定済みです:
+
+- GitHub ActionsのリポジトリVariable`RELAY_BROKER_ENDPOINT`=`https://buffed-unlawful-detached.ngrok-free.dev`（公開URLなのでsecretではなくVariable）
+- `Publish Relay development preview`ワークフローを実行すれば、このURLを焼き込んだAPKが生成されます
+
+リポジトリを持っていればローカルbuildでも焼き込めます:
 
 ```powershell
-.\gradlew.bat :app:assembleDebug -Prelay.broker.endpoint=https://<random>.trycloudflare.com
+.\gradlew.bat :app:assembleLocalDev -Prelay.broker.endpoint=https://buffed-unlawful-detached.ngrok-free.dev
 ```
 
 終了時はBrokerとTunnelを停止します。
@@ -359,7 +371,7 @@ Start-Relay-Broker-Tunnel-Development.cmd -Down
 - 既定credential有効期間: 2時間（`-CredentialLifetimeHours`で1〜24）
 - 管理者は**初回のみ**作成されます。2回目以降に別の名前/passwordを入力しても登録されないため、既存の資格情報でサインインしてください。別の資格情報にしたい場合は`-ResetAdmin`付きで再実行するとこのプロファイルのGateway DBを初期化して作り直せます
 - 初回のAndroid鍵登録だけprivate-LANが要る場合は`-EnableLanEnrollment`
-- Cloudflare Quick TunnelはSLA無し。開発・動作確認専用で、pilot/緊急運用には使用しないでください
+- ngrokの無料枠はSLA無し。開発・動作確認専用で、pilot/緊急運用には使用しないでください
 
 ---
 

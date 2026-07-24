@@ -59,10 +59,18 @@ jobs:
           cache: gradle
       - name: Build debug-compatible localDev APK
         shell: bash
+        env:
+          RELAY_BROKER_ENDPOINT: ${{ vars.RELAY_BROKER_ENDPOINT }}
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew :app:assembleLocalDev --no-daemon
+          # Bake the operator's stable ngrok broker URL so mobile-data delivery works with no
+          # per-run rebuild. Unset variable keeps the endpoint empty (mobile delivery disabled).
+          BROKER_ARG=()
+          if [ -n "${RELAY_BROKER_ENDPOINT:-}" ]; then
+            BROKER_ARG=("-Prelay.broker.endpoint=${RELAY_BROKER_ENDPOINT}")
+          fi
+          ./gradlew :app:assembleLocalDev --no-daemon "${BROKER_ARG[@]}"
           mkdir -p release
           cp app/build/outputs/apk/localDev/app-localDev.apk release/Relay-Android-development-preview-debug.apk
           sha256sum release/Relay-Android-development-preview-debug.apk > release/Relay-Android-development-preview-debug.apk.sha256
