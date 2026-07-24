@@ -13,7 +13,7 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-JDK%2017-7F52FF?logo=kotlin&logoColor=white)](#開発環境)
 [![Status](https://img.shields.io/badge/status-device%20testing%20required-F59E0B)](#現在の状態)
 
-[概要](#概要) ・ [仕組み](#仕組み) ・ [現在の状態](#現在の状態) ・ [開発版を試す](#開発版を試す) ・ [検証](#検証) ・ [主要ドキュメント](#主要ドキュメント) ・ [English](#english-overview)
+[概要](#30秒でわかるrelay) ・ [仕組み](#仕組み) ・ [背景中継](#常時待機armedと災害通信) ・ [現在の状態](#現在の状態) ・ [開発版](#開発版を試す) ・ [検証](#検証) ・ [ドキュメント](#主要ドキュメント) ・ [English](#english-overview)
 
 </div>
 
@@ -23,15 +23,17 @@
 
 ---
 
-## 概要
+## 30秒でわかるRelay
 
 Relayは、携帯回線やインターネットが不安定な状況でも、救助要請を**暗号化したまま複数の経路で運ぶ**ことを目指しています。
 
-- 利用者はAndroidでSOSまたは通常の救助依頼を作成します。
-- 救助内容は転送前に暗号化され、端末内の暗号化DBへ保存されます。
-- 近くのRelay端末、承認済みGateway経路、任意のHTTPS Brokerが独立して配送を試みます。
-- PC Gatewayだけが、正しくprovisionされた救助拠点秘密鍵で内容を復号します。
-- 救助拠点は署名Receiptを返し、利用者側はその署名を検証して状態を更新します。
+| 誰が使うか | できること |
+|---|---|
+| **Android利用者** | SOS・通常依頼の作成、更新、取消、位置共有への明示同意、署名済み対応状況の確認 |
+| **中継端末** | 救助本文を復号せず、暗号化Envelopeと署名ReceiptをStore–Carry–Forward |
+| **PCスタッフ** | 個人アカウントでログインし、受信・担当・対応・完了を管理 |
+| **HTTPS Broker** | 暗号文を一時保管し、Gatewayへの配送とReceipt返送を補助。本文は復号しない |
+| **開発者** | Android、PC Gateway、Broker、背景中継、エミュレータ、E2E、fuzz、Windows検証を実行 |
 
 ### Relayが解決しようとしていること
 
@@ -67,7 +69,7 @@ flowchart LR
    AndroidでSOSを2秒長押しするか、人数・負傷・移動困難・必要な支援などを入力します。
 
 2. **暗号化して保存**  
-   本文、人数、状態、位置情報は、転送前に救助拠点公開鍵で暗号化されます。送信者が更新・取消を続けるための復元情報も、別のAndroid Keystore鍵で暗号化されます。
+   本文、人数、状態、位置情報は、転送前に救助拠点公開鍵で暗号化されます。更新・取消に必要な復元情報も、別のAndroid Keystore鍵で暗号化されます。
 
 3. **複数経路で再試行**  
    Nearby、Gateway、Brokerは独立した経路です。ある経路が停止しても、保存済みEnvelopeは他の利用可能な経路で再試行されます。
@@ -80,33 +82,93 @@ flowchart LR
 
 ### 受信先鍵がまだ見つからない場合
 
-信頼済みの救助拠点公開鍵を取得できない場合でも、SOSは端末内へ安全に保留されます。
+信頼済みの救助拠点公開鍵を取得できない場合、SOSは送信者だけが復元できるAES-GCM暗号化領域へ`PENDING_DESTINATION`として保存されます。
 
-- 送信者だけが復元できるAES-GCM暗号化領域へ`PENDING_DESTINATION`として保存します。
 - 平文のSOSや未検証鍵で作ったEnvelopeを周囲へ配布しません。
 - 信頼済み公開鍵が後から解決された時点で、転送可能な暗号化Envelopeへ変換します。
 - Envelopeが一度も外へ出ていない段階なら、利用者は端末内の保留依頼だけを削除できます。
 
-### 常時待機（ARMED）と災害通信
+### モバイル通信だけで受信先鍵を取得する開発経路
 
-任意でオプトインできる「常時待機（ARMED）」を追加しました。ARMEDはプロセスやNearbyを常時稼働させるモードではなく、永続化された待機設定とOSの起動経路だけを利用します。それだけでは災害を自動検知できません。
+`debug` / `localDev`では、PC Gatewayが**公開鍵だけを含むShelter Manifest**をBrokerへ公開し、LANへ一度も接続していないAndroidがBrokerから取得してdevelopment用に自己登録できます。
 
-- **ARMED**: Nearbyは停止。ユーザー操作・通知Action・救助情報の作成/受信・再起動復元・Bluetooth再有効化でのみ災害通信へ移行します。
-- **EMERGENCY_ACTIVE**: `connectedDevice` 型 Foreground Service で Nearby Advertising/Discovery/接続/送受信を継続します。既存の SyncCoordinator / ACK / Receipt / Store–Carry–Forward / Gateway・Broker・BLE配送をそのまま利用します。
-- 通常通信と救助配送は `CommunicationLeaseManager` のowner/leaseで単一の共有Runtimeを共有し、Foreground ServiceやNearbyの二重起動を防ぎます。
-- Android・メーカー・ユーザーの強制停止を回避して永続動作することはできません。詳細は [Background relay mode](docs/BACKGROUND_RELAY_MODE.md) を参照。
+```text
+PC Gateway
+  └─ 公開Shelter ManifestをBrokerへpublish
+          ↓ HTTPS
+Android localDev
+  └─ Manifestをfetch・validate・development用にpin
+          ↓
+救助拠点公開鍵でSOSを暗号化してBrokerへupload
+```
+
+この経路はモバイル通信のみの開発previewを成立させるためのものです。
+
+- Gatewayの秘密鍵はBrokerへ送信しません。
+- Manifest publishはGateway credentialで認証されます。
+- Android側はHTTPS、size上限、shelter ID、Manifest構造と有効期間を検査します。
+- **release / pilotReleaseでは無効**です。正式運用のRegional Root・署名Directory・承認済みprovisioningの代わりにはなりません。
+
+---
+
+## 常時待機（ARMED）と災害通信
+
+Relayには、利用者が任意で有効化する背景中継の状態モデルがあります。
+
+> [!IMPORTANT]
+> **ARMEDはアプリやNearbyを常時起動するモードではありません。**
+> 待機設定を永続化し、限られたOS起動経路を準備するだけです。ARMED単独では災害を自動検知できません。
+
+| 状態 | 意味 |
+|---|---|
+| `DISABLED` | オプトインしていない。自動復元経路を無視 |
+| `ARMED` | 待機設定のみ。process、Foreground Service、Nearby advertising/discoveryは動かさない |
+| `EMERGENCY_ACTIVE` | `connectedDevice` Foreground Serviceで災害通信を実行 |
+| `DEGRADED` | Bluetooth、権限、Play servicesなどの前提不足。災害通信の希望状態は保持 |
+| `SUSPENDED_BY_USER` | 利用者が明示的に停止。非ユーザー経路から勝手に再開しない |
+
+### 現在の起動経路
+
+- アプリ内または通知からのユーザー操作
+- 救助情報の作成・受信
+- 未配送救助情報または実行中状態の再起動復元
+- Bluetooth再有効化
+- package replacement
+- debug simulation
+
+`ARMED`だけの状態は、再起動後にNearbyを自動開始しません。利用者が「すべて停止」を選んだ場合、`BOOT_RESTORE`、Bluetooth復元、救助情報などの非ユーザー経路は再開できません。
+
+### 二重起動を防ぐ通信lease
+
+通常通信、救助配送、災害通信は`CommunicationLeaseManager`で1つの共有runtimeを利用します。
+
+- Nearby transport、Advertising、Discovery、Gateway syncを1組だけ起動
+- 複数ownerが同時利用しても2つ目を起動しない
+- 1つのownerが停止しても、他のownerが残っていれば通信を継続
+- 最後のownerが解放された時だけruntimeを停止
+- 明示的な「すべて停止」では全leaseを解放
+
+### できないこと
+
+- Androidやメーカーの省電力制御、force-stop、Task Manager killを回避して永久動作すること
+- FCM、気象庁XML、固定BLE beaconなどから災害を自動検知すること
+- Direct Boot中に暗号化DBを読み、`LOCKED_BOOT_COMPLETED`から再開すること
+- バッテリー消費量を保証すること
+
+FCM、気象庁情報、署名Activation Manifest、固定BLE Gatewayは設計文書のみで、実働infra・鍵・Firebase設定はありません。
 
 ---
 
 ## 現在の状態
 
-**確認基準: 2026-07-24 / source HEAD `97075bc`**
+**実装確認基準: 2026-07-24 / source baseline `897ee4b`**  
+このREADME更新コミットは文書のみを変更します。
 
 | 状態 | 意味 |
 |---|---|
 | ✅ | 実装済み |
-| 🧪 | 自動試験・エミュレータ・シミュレータで検証あり |
-| 🧩 | 基盤はあるが、運用者向け統合やprovisioningが未完了 |
+| 🧪 | 自動試験・エミュレータ・シミュレータの検証あり |
+| 🧩 | 基盤はあるが、製品統合または運用provisioningが未完了 |
 | ⚠️ | 外部準備または実機検証が必要 |
 | ⛔ | 正式運用を主張できない |
 
@@ -114,22 +176,24 @@ flowchart LR
 |---|---:|---|
 | Android救助フロー | ✅ | SOS、通常依頼、更新、取消、状態表示、日英UI |
 | 暗号化セッション復元 | ✅ | Room + SQLCipher、別Keystore AES-GCM鍵、version CAS、process restart後の復元 |
-| 明示同意型の位置更新 | ✅ | 利用者がSwitchで同意した場合だけ、新しい位置を取得して暗号化した次versionを作成 |
+| 明示同意型の位置更新 | ✅ | Switchで同意した場合だけ、新しい位置を取得して暗号化した次versionを作成 |
 | 継続バックグラウンドGPS | ⛔ | location FGS、background location permission、WorkManager周期追跡は未実装 |
-| Nearby救助中継 | ✅ | 暗号化Envelopeと署名ReceiptをStore–Carry–Forward。受信端末はLAN/Broker/BLEの再配送も開始 |
-| Nearby接続ポリシー | 🧩 | `OPEN` / `TRUSTED`を実装。既定はOPEN。信頼peer allow-listの運用者向けprovisioningは未完成 |
-| LAN Gateway信頼登録 | 🧩 | QR・手入力token、checksum、fingerprint照合、spoof拒否のcontract/testを実装。Android runtimeへの永続登録・完全統合は未完了 |
-| BLE Gateway信頼 | ⚠️ | Root → signed Directory → signed Manifest → advertised/GATT fingerprintを実装。正式な地域Root/Directoryが未提供 |
+| ARMED / EMERGENCY状態モデル | 🧪 | 永続状態、明示停止、degrade/recovery、復元判断を実装しJVM unit testを追加 |
+| 単一通信lease | 🧪 | 通常通信・救助配送・災害通信の二重Foreground Service / Nearby起動を防止 |
+| 自動災害検知 | ⛔ | FCM、気象庁、署名Activation Manifest、固定BLE triggerは設計のみ |
+| Nearby救助中継 | ✅ | 暗号化Envelopeと署名ReceiptをStore–Carry–Forward。受信端末は再配送も開始 |
+| Nearby接続ポリシー | 🧩 | `OPEN` / `TRUSTED`を実装。信頼peer allow-listの完成した運用者provisioningは未完成 |
+| LAN Gateway信頼登録 | 🧩 | QR・手入力token、checksum、fingerprint照合、spoof拒否のcontractあり。完全な製品フローは未完成 |
+| Broker Manifest enrollment | 🧪 | localDev限定。LAN未接続端末がBroker経由で公開鍵を取得し、暗号化SOSを作れるloop testあり |
+| BLE Gateway信頼 | ⚠️ | Root → signed Directory → signed Manifest → advertised/GATT fingerprint。正式な地域Root/Directory未提供 |
+| Android 6.0互換 | 🧪 | core library desugaringとAPI 23-safe処理を追加。実Android 6端末でのfield確認は未実施 |
 | PC Gateway | ✅ | 個人staffアカウント、役割、監査、地図、公式情報、救助状態管理、署名Receipt |
-| PC Gateway SQLite競合対策 | ✅ | DB単位のwrite coordinatorとlock fileで複数connection/processのwriter競合を抑制 |
-| CSV export | ✅ | messages/auditで共通encoderを使用し、表計算ソフトのformula injectionを防止 |
-| HTTPS Broker | ✅ | 暗号文保存、重複排除、TTL、scoped Gateway credential、Receipt中継 |
-| モバイル通信専用の開発preview | ✅ | 固定ngrokドメインをlocalDev APKへ組み込み、clone不要launcherからBroker・Tunnel・Gatewayを起動可能 |
+| PC Gateway SQLite競合対策 | ✅ | DB単位のwrite coordinatorとlock fileでwriter競合を抑制 |
+| CSV export | ✅ | messages/audit共通encoderで表計算ソフトのformula injectionを防止 |
+| HTTPS Broker | ✅ | 暗号文保存、重複排除、TTL、scoped Gateway credential、Manifest・Receipt中継 |
+| 固定ngrok開発preview | 🧪 | localDev APKへ固定endpointを組み込み、clone不要launcherと任意のlive E2E harnessを提供 |
 | Broker高可用性 | ⛔ | 単一SQLite instance。HA、監視、災害復旧、RTO/RPOは未設計 |
-| Androidエミュレータ | 🧪 | API 36 Gradle Managed Deviceでinstrumentation 20/20成功の記録あり |
-| PCスタッフ画面 | 🧪 | 実Gateway consoleを使うPlaywright Chromium E2E 4/4成功の記録あり |
-| Broker→Gateway→Receipt | 🧪 | 実HTTP・SQLite・RSA/ECDSAを使う往復E2E testを追加 |
-| 負荷・一時障害 | 🧪 | 60端末相当の並行upload、pagination、pull/Receipt送信失敗とretryのtestを追加 |
+| バッテリー・熱 | ⚠️ | ARMED / EMERGENCY_ACTIVEの実機測定は未実施。数値保証なし |
 | 物理端末・現地RF | ⚠️ | Nearby/BLE多段、OEM省電力、実SIM、閉域LAN、停電復旧はField acceptance未完了 |
 | 正式Release | ⛔ | 組織署名、Authenticode、正式TLS、地域trust artifact、法務・運用承認が必要 |
 
@@ -165,30 +229,13 @@ Relayは、単なるHTTP成功やNearby転送完了を「救助拠点に届い�
 
 ---
 
-## コンポーネント
-
-| コンポーネント | 役割 |
-|---|---|
-| **Android app** | 救助依頼、暗号化保存、Nearby中継、Gateway/Broker/BLE配送、署名Receipt表示 |
-| **PC Gateway** | 救助内容の復号、staff認証、担当・対応管理、監査、地図、公式情報、Receipt発行 |
-| **HTTPS Broker** | 暗号化Envelopeの一時保管とGatewayへのqueue提供。本文は復号しない |
-| **shared** | 救助model、暗号、署名、地域trust、Gateway enrollment contract |
-| **relay-protocol** | Android・Gateway間のwire contract |
-| **Compose Multiplatform** | 安否・物資・地域情報の開発preview。現在はSOSと自動中継を提供しない |
-| **pc-ble-bridge** | Windows側BLE GATT sidecar |
-| **Meshtastic / BPv7 adapters** | 本体から分離した追加transport境界 |
-| **test-lab / fuzz-jvm** | BLE simulator、host contract、decoder regression、実Jazzer target |
-| **staff-console-e2e** | 実PC Gateway consoleを操作するPlaywright browser E2E |
-
----
-
 ## セキュリティと信頼境界
 
 ### 暗号化と保存
 
 - 救助本文は救助拠点公開鍵で暗号化してから保存・転送します。
 - AndroidのRoom DBはSQLCipherを使用します。
-- 送信者の更新・取消用復元payloadは、SQLCipher passphraseとは別のAndroid Keystore AES-GCM鍵で保護します。
+- 更新・取消用の復元payloadは、SQLCipher passphraseとは別のAndroid Keystore AES-GCM鍵で保護します。
 - sessionとEnvelopeは同じRoom transactionで更新し、version CASで競合を検出します。
 - 復号に失敗した復元dataを黙って削除したり、新規依頼へ置き換えたりしません。
 
@@ -197,17 +244,21 @@ Relayは、単なるHTTP成功やNearby転送完了を「救助拠点に届い�
 - 依頼作成時に位置を取得します。
 - 利用者が明示的に同意すると、同意状態を暗号化して永続化し、新しい位置を取得した更新versionを送れます。
 - 同意前に位置hardwareへアクセスしません。
-- 現在の実装は、常時・無期限・バックグラウンドのGPS追跡ではありません。
+- 常時・無期限・バックグラウンドのGPS追跡ではありません。
 
 ### Nearby
 
-`OPEN`は災害時のゼロ操作形成を優先し、到達可能なpeerを受け入れる既定モードです。これはpeerの本人確認ではありません。payload側ではsize、TTL、hop、hash、version、重複、衝突を検査します。
+`OPEN`はゼロ操作でmeshを形成するため、到達可能なpeerを受け入れる既定モードです。これはpeerの本人確認ではありません。payload側ではsize、TTL、hop、hash、version、重複、衝突を検査します。
 
-`TRUSTED`は明示allow-listに含まれるpeerだけを許可するtransport policyです。ただし、現在のアプリにはallow-listを安全に配布・更新する完成した運用者フローがありません。
+`TRUSTED`は明示allow-listに含まれるpeerだけを許可しますが、allow-listを安全に配布・更新する完成した運用者フローはありません。
 
 ### LAN Gateway discovery
 
-UDP discovery beaconは**発見手段であって認証ではありません**。QR・手入力用の`relay-gw:1:` enrollment token、checksum、manifest fingerprint pinning、矛盾beacon拒否の基盤はありますが、現在のAndroid runtimeへ永続的に登録して利用する一連の製品フローはまだ完成していません。
+UDP discovery beaconは**発見手段であって認証ではありません**。QR・手入力用の`relay-gw:1:` enrollment token、checksum、manifest fingerprint pinning、矛盾beacon拒否の基盤はありますが、Androidへ永続登録して運用する一連の製品フローは未完成です。
+
+### Broker Manifest relay
+
+Brokerが返すShelter Manifestは公開鍵materialですが、Brokerから取得できたこと自体は正式な地域trustを証明しません。そのため自動self-pinは`debug` / `localDev`だけに限定され、release / pilotReleaseでは無効です。
 
 ### BLE Gateway trust
 
@@ -246,7 +297,12 @@ Gatewayの救助秘密鍵は現在、owner-only local fileです。DPAPI、HSM�
 - production/lab Brokerはloopbackへbindし、外部TLS reverse proxyの背後で運用します。
 - 単一BrokerはHAではありません。
 
-開発previewのngrok launcherは、短命credentialとauthtokenをファイルへ保存せず、Docker containerと起動processへだけ渡します。ただし、無料ngrok tunnelはSLA、可用性保証、自治体承認済みnetwork boundaryを提供するものではありません。
+### Background relay
+
+- ARMEDではprocess、Nearby、Foreground Service、短周期WorkManager、無期限WakeLockを維持しません。
+- `POST_NOTIFICATIONS`拒否は通信の即時停止ではなく、通知可視性のdegraded状態として扱います。
+- OS exit reasonだけで「利用者が永久停止した」と判断せず、アプリ内で保存した明示停止flagを優先します。
+- force-stopやメーカー独自の深い省電力を回避する仕組みではありません。
 
 ---
 
@@ -257,9 +313,17 @@ Gatewayの救助秘密鍵は現在、owner-only local fileです。DPAPI、HSM�
 
 ### 最短: 配布物だけでモバイル通信経路を試す
 
-同じWi-Fiがなく、Androidが**モバイル通信だけ**でも、固定ngrokドメインを経由してBrokerへ暗号化Envelopeを送り、PC Gatewayがoutboundで取得できます。リポジトリのcloneや毎回のAPK buildは不要です。
+同じWi-Fiがなく、Androidが**モバイル通信だけ**でも、固定ngrokドメインを経由して次の流れを試せます。
 
-必要なもの:
+```text
+PC Gateway → 公開ManifestをBrokerへpublish
+Android → BrokerからManifest取得 → SOSを暗号化してupload
+PC Gateway → Brokerからpull・復号 → 署名Receiptを返送
+```
+
+リポジトリのclone、毎回のAPK build、事前のLAN enrollmentはdevelopment previewの通常経路では不要です。
+
+#### 必要なもの
 
 - Docker Desktop（起動済み）
 - 無料ngrokアカウントとauthtoken
@@ -270,27 +334,22 @@ Gatewayの救助秘密鍵は現在、owner-only local fileです。DPAPI、HSM�
   - `Start-Relay-Broker-Tunnel-Development.ps1`
   - `relay-broker-bundle.zip`
 
-手順:
+#### 手順
 
 1. unsigned Windows installerをインストールします。
 2. Androidへ`Relay-Android-development-preview-debug.apk`をインストールします。
 3. broker tunnel launcherと`relay-broker-bundle.zip`を同じfolderへ置きます。
 4. `Start-Relay-Broker-Tunnel-Development.cmd`を実行し、ngrok authtokenを対話入力します。
-5. 表示されたlocalhost staff consoleへ、初回に作成した管理者accountでsign inします。
+5. localhost staff consoleへ、初回に作成した管理者accountでsign inします。
+6. GatewayがBrokerへManifestをpublishすると、Android localDevはLANなしで受信先公開鍵を取得できます。
 
 ```powershell
 Start-Relay-Broker-Tunnel-Development.cmd
 ```
 
-launcherは次を自動化します。
+launcherは、Broker container、固定domain tunnel、短命Gateway credential、PC Gateway接続、health確認をまとめて実行します。
 
-1. `eclipse-temurin:17-jre` containerで同梱Broker bundleを起動
-2. `ngrok/ngrok`で固定HTTPS domainへtunnelを開始
-3. shelter限定・短命のGateway credentialを発行
-4. インストール済みPC GatewayをBrokerへ接続
-5. Gateway healthを確認
-
-現在のdevelopment previewは、GitHub Actionsのrepository Variable `RELAY_BROKER_ENDPOINT`をlocalDev APKへbuild-timeで埋め込めます。現在のsource既定domainは次です。
+現在のsource既定domain:
 
 ```text
 https://buffed-unlawful-detached.ngrok-free.dev
@@ -314,9 +373,9 @@ Start-Relay-Broker-Tunnel-Development.cmd -Down
 - credentialの既定有効期間: 2時間（1〜24時間へ変更可能）
 - 2回目以降は既存管理者を使うため、通常はusername/passwordを再入力しません。
 - 管理者を作り直す場合だけ`-ResetAdmin`を指定します。
-- Docker engineが停止中の場合、launcherは曖昧な後続errorではなく明示的に停止します。
-- 初回のAndroid鍵登録にprivate LANが必要な場合は`-EnableLanEnrollment`を指定します。
-- launcherはauthtokenとBroker credentialをconsole・file・command historyへ書き込まない設計です。
+- Docker engineが停止中の場合は明示的に停止します。
+- `-EnableLanEnrollment`はLAN discovery経路も試す場合の開発用optionです。モバイル専用Manifest relayの必須条件ではありません。
+- authtokenとBroker credentialをconsole・file・command historyへ書き込まない設計です。
 
 > [!WARNING]
 > 固定URLであっても、無料ngrok tunnelはproduction infrastructureではありません。SLA、HA、自治体承認、正式TLS運用、監視、incident responseの代わりにはなりません。
@@ -350,6 +409,7 @@ Android設定:
 - min SDK: 23（Android 6.0）
 - target / compile SDK: 36
 - version: `1.0.0`
+- core library desugaring: enabled
 
 Clone:
 
@@ -473,26 +533,43 @@ npm test
 
 | 検証 | 記録 |
 |---|---|
-| Android API 36 instrumentation | 20/20、失敗0 |
-| PC Gateway staff console Playwright | Chromium 4/4 |
-| Broker→Gateway→Receipt E2E | 実HTTP、SQLite、RSA-OAEP、ECDSA署名を使うtestを実装 |
-| Broker/Gateway load test | 60端末相当、pull pagination、各端末へのReceipt分離を検証するtestを実装 |
-| fault injection | 最初のpullとReceipt POSTを失敗させ、loss・duplicateなしでretryするtestを実装 |
+| Android API 36 instrumentation | 20/20、失敗0の記録あり |
+| Background relay unit suite | 状態遷移、明示停止、復元判断、start backoff、lease、exit interpretation |
+| PC Gateway staff console Playwright | Chromium 4/4の記録あり |
+| Mobile provisioning loop | LAN未接続phoneがBroker Manifestだけで暗号化し、Gateway秘密鍵で復号できるin-process test |
+| Broker→Gateway→Receipt E2E | 実HTTP、SQLite、RSA-OAEP、ECDSA署名を使うtest |
+| Broker/Gateway load test | 60端末相当、pull pagination、各端末へのReceipt分離 |
+| fault injection | 最初のpullとReceipt POSTを失敗させ、loss・duplicateなしでretry |
 | Decoder safety | deterministic regressionと実Jazzer target |
 | Windows | PowerShell 5.1 / 7、CP932/ASCII、launcher、autostart、Gateway health smoke test |
 
-このREADME更新では、最新HEADの全workflowがgreenであることを独自に再実行・確認したとは主張しません。GitHub Actions badgeと各workflow runを確認してください。
+### 任意のlive ngrok E2E
+
+`RemoteBrokerTunnelE2ETest`は、環境変数でremote Broker URLとcredentialを渡した場合だけ、実ngrok HTTPS経路で次を試します。
+
+```text
+device register → signed upload → Gateway pull/decrypt
+→ signed Receipt upload → device poll/verify
+```
+
+これはmanual / ops用であり、通常CIではskipされます。test harnessが存在することと、すべての環境でlive tunnel試験がPASSしたことは同義ではありません。
 
 ### まだ必要な実機・現地試験
 
 - Android 2台・3台によるNearby多段中継
+- ARMED → EMERGENCY_ACTIVEの実background start
+- 実reboot、package replacement、Bluetooth OFF/ONからの復元
+- Task Manager、force-stop、OEM省電力、Doze、App Standby
+- ARMED idleとEMERGENCY_ACTIVE 1時間・6時間のbattery / thermal測定
 - 実BLE advertisement / GATT identityと公式Directoryの照合
+- Android 6.0実端末でのNearby・session・Manifest fetch
 - Android→閉域LAN→PC Gateway
 - 実SIM→HTTPS Broker→Gateway→Receipt返送
-- screen-off、force-stop、再起動、OEM省電力
 - Gateway/Broker停止、停電、DB restore、回線復旧
 - 実スタッフによる担当競合、誤操作、fake SOS、負荷訓練
 - Android/Windowsの正式署名artifactを代表端末へinstall
+
+このREADME更新では、最新HEADの全GitHub Actionsがgreenであることを独自に再実行・確認したとは主張しません。CI badgeと各workflow runを確認してください。
 
 ---
 
@@ -508,7 +585,8 @@ npm test
 6. Broker HA、backup、alert、RTO/RPO、障害訓練
 7. 個人情報の保存期間、閲覧、削除、漏えい対応
 8. 法務、保険、通信制度、OSS notice、プロジェクトlicense
-9. 実端末・実networkによるField acceptance test
+9. 自動災害triggerの署名authority、配信server、運用鍵
+10. 実端末・実networkによるField acceptance test
 
 **現在の総合判断:** `READY_FOR_DEVICE_TEST_WITH_TRUST_ARTIFACT_BLOCKER`
 
@@ -518,10 +596,11 @@ npm test
 
 ```text
 app/                         Androidアプリ
+  src/main/.../background/   ARMED / EMERGENCY状態・lease・exit処理
 shared/                      共通model・暗号・trust contract
 relay-protocol/              Gateway wire protocol
 pc-gateway/                  救助拠点PC Gateway
-broker/                      HTTPS暗号文Broker
+broker/                      HTTPS暗号文・Manifest・Receipt Broker
 deployment/broker/           Docker Compose + Caddy構成
 composeApp/                   Compose Multiplatform preview
 pc-ble-bridge/               Windows BLE sidecar
@@ -541,8 +620,8 @@ docs/                        architecture・audit・runbook
 | 目的 | ドキュメント |
 |---|---|
 | 常時待機（ARMED）と災害通信 | [Background relay mode](docs/BACKGROUND_RELAY_MODE.md) |
-| 背景リレーのテスト計画 | [Background relay test plan](docs/BACKGROUND_RELAY_TEST_PLAN.md) |
-| 自動災害トリガー設計 | [Disaster activation triggers](docs/DISASTER_ACTIVATION_TRIGGERS.md) |
+| 背景中継のテスト計画 | [Background relay test plan](docs/BACKGROUND_RELAY_TEST_PLAN.md) |
+| 自動災害trigger設計 | [Disaster activation triggers](docs/DISASTER_ACTIVATION_TRIGGERS.md) |
 | バッテリー検証 | [Battery validation](docs/BATTERY_VALIDATION.md) |
 | Nearby実装 | [Nearby implementation](docs/NEARBY_IMPLEMENTATION.md) |
 | 現在の共同実証readiness | [Municipal pilot readiness](docs/readiness/MUNICIPAL_PILOT_READINESS.md) |
@@ -581,15 +660,18 @@ Relay is a **local-first encrypted rescue-information relay** for outages and in
 
 - Android creates, encrypts, persists, updates, and cancels rescue requests.
 - Nearby devices carry ciphertext without receiving the shelter private key.
-- An optional HTTPS Broker stores and relays ciphertext but never decrypts the rescue body.
-- PC Gateway decrypts at the shelter boundary, supports named staff accounts, and returns signed receipts.
+- An optional HTTPS Broker stores ciphertext, public shelter manifests, and signed receipts; it never decrypts the rescue body.
+- PC Gateway decrypts at the shelter boundary, supports named staff accounts, publishes its public manifest, and returns signed receipts.
+- A localDev phone with no prior LAN visit can fetch the Gateway's public manifest from the Broker and encrypt an SOS with that key. This self-pinning shortcut is development-only and disabled in release/pilot builds.
+- The opt-in ARMED state persists readiness but does not keep the process, Nearby, or a foreground service running. EMERGENCY_ACTIVE uses a connected-device foreground service.
+- A shared owner/lease prevents duplicate communication runtimes when user communication, rescue delivery, and emergency mode overlap.
+- Explicit user stop blocks non-user restart routes. Android/OEM force-stop behavior cannot be bypassed.
+- Automatic FCM/JMA/signed-manifest/BLE disaster activation is design-only and not implemented.
 - Explicit location consent can produce a fresh encrypted location update. Continuous background GPS tracking is not implemented.
-- Nearby supports OPEN and TRUSTED admission policies, but complete operator provisioning for trusted peers is unfinished.
-- QR/manual LAN Gateway enrollment primitives exist, while full persistent Android runtime integration remains unfinished.
-- The development preview can bake a stable ngrok Broker URL into the localDev APK. A repo-free Windows launcher starts the bundled Broker, the tunnel, and the installed Gateway for mobile-data-only testing.
-- The ngrok development path is not production infrastructure and provides no SLA or field-readiness evidence.
+- Core-library desugaring and API-safe calls support minSdk 23 at code/build level; a physical Android 6 device test is still required.
+- The development preview can bake a stable ngrok Broker URL into the localDev APK. The free tunnel is not production infrastructure and provides no SLA.
 - Trusted BLE delivery still requires an authorized Regional Root and Root-signed Shelter Directory that are not included in the repository.
-- Recorded automated evidence includes 20/20 Android instrumentation tests on an API 36 managed emulator and 4/4 Playwright Chromium staff-console tests. Physical RF and field validation remain required.
+- Automated tests do not replace physical RF, reboot, battery, thermal, OEM power-policy, or field validation.
 
 Relay is not an emergency-dispatch service, not a 119 replacement, and not production-ready.
 
