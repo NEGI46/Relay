@@ -38,8 +38,8 @@ Relayは、携帯回線やインターネットが不安定な状況でも、救
 | 課題 | Relayの考え方 |
 |---|---|
 | 携帯回線が使えない | Nearbyによる端末間Store–Carry–Forward |
-| 直接避難所へ届かない | 中継端末が暗号文を保持し、利用可能な経路を再試行 |
-| モバイル回線だけ使える | 任意のHTTPS Brokerへ暗号文を預け、PC Gatewayが取得 |
+| 直接救助拠点へ届かない | 中継端末が暗号文を保持し、利用可能な経路を再試行 |
+| モバイル回線だけ使える | HTTPS Brokerへ暗号文を預け、PC Gatewayがoutboundで取得 |
 | 中継者に内容を見られたくない | 救助拠点公開鍵で暗号化し、中継端末とBrokerは復号しない |
 | 「送信した」と「受け取られた」が混同される | 端末保存・中継・Broker保管・署名済み救助拠点受信を別状態として表示 |
 
@@ -49,14 +49,14 @@ Relayは、携帯回線やインターネットが不安定な状況でも、救
 
 ```mermaid
 flowchart LR
-    A[Android\nSOS / 救助依頼] --> E[端末内で暗号化]
-    E --> N[Nearby\nStore–Carry–Forward]
-    E --> L[承認済み\nGateway経路]
-    E --> B[任意の\nHTTPS Broker]
+    A[Android<br/>SOS / 救助依頼] --> E[端末内で暗号化]
+    E --> N[Nearby<br/>Store–Carry–Forward]
+    E --> L[承認済み<br/>Gateway経路]
+    E --> B[任意の<br/>HTTPS Broker]
     N --> G[PC Gateway]
     L --> G
     B --> G
-    G --> R[救助拠点の\n署名Receipt]
+    G --> R[救助拠点の<br/>署名Receipt]
     R --> A
     R --> N
 ```
@@ -80,7 +80,7 @@ flowchart LR
 
 ### 受信先鍵がまだ見つからない場合
 
-信頼済みの救助拠点公開鍵を取得できない場合でも、SOSは失われません。
+信頼済みの救助拠点公開鍵を取得できない場合でも、SOSは端末内へ安全に保留されます。
 
 - 送信者だけが復元できるAES-GCM暗号化領域へ`PENDING_DESTINATION`として保存します。
 - 平文のSOSや未検証鍵で作ったEnvelopeを周囲へ配布しません。
@@ -91,7 +91,7 @@ flowchart LR
 
 ## 現在の状態
 
-**確認基準: 2026-07-23 / source HEAD `939d4ae`**
+**確認基準: 2026-07-24 / source HEAD `97075bc`**
 
 | 状態 | 意味 |
 |---|---|
@@ -115,6 +115,7 @@ flowchart LR
 | PC Gateway SQLite競合対策 | ✅ | DB単位のwrite coordinatorとlock fileで複数connection/processのwriter競合を抑制 |
 | CSV export | ✅ | messages/auditで共通encoderを使用し、表計算ソフトのformula injectionを防止 |
 | HTTPS Broker | ✅ | 暗号文保存、重複排除、TTL、scoped Gateway credential、Receipt中継 |
+| モバイル通信専用の開発preview | ✅ | 固定ngrokドメインをlocalDev APKへ組み込み、clone不要launcherからBroker・Tunnel・Gatewayを起動可能 |
 | Broker高可用性 | ⛔ | 単一SQLite instance。HA、監視、災害復旧、RTO/RPOは未設計 |
 | Androidエミュレータ | 🧪 | API 36 Gradle Managed Deviceでinstrumentation 20/20成功の記録あり |
 | PCスタッフ画面 | 🧪 | 実Gateway consoleを使うPlaywright Chromium E2E 4/4成功の記録あり |
@@ -131,7 +132,7 @@ flowchart LR
 
 ## 利用者に表示する送達状態
 
-Relayは、単なるHTTP成功やNearby転送完了を「避難所に届いた」と表示しません。
+Relayは、単なるHTTP成功やNearby転送完了を「救助拠点に届いた」と表示しません。
 
 | 内部状態 | 利用者向け表示 | 意味 |
 |---|---|---|
@@ -232,61 +233,88 @@ Gatewayの救助秘密鍵は現在、owner-only local fileです。DPAPI、HSM�
 - Brokerは救助本文を復号しません。
 - Androidは端末固有ECDSA P-256鍵の所持を証明して登録します。
 - Gateway credentialは1つの`gatewayId`と`shelterId`へscopeされます。
-- raw credentialは発行時だけ表示し、DBにはSHA-256 hashを保存します。
+- raw credentialは発行時だけ扱い、DBにはSHA-256 hashを保存します。
 - production/lab Brokerはloopbackへbindし、外部TLS reverse proxyの背後で運用します。
 - 単一BrokerはHAではありません。
+
+開発previewのngrok launcherは、短命credentialとauthtokenをファイルへ保存せず、Docker containerと起動processへだけ渡します。ただし、無料ngrok tunnelはSLA、可用性保証、自治体承認済みnetwork boundaryを提供するものではありません。
 
 ---
 
 ## 開発版を試す
 
 > [!WARNING]
-> 以下は**個人開発・動作確認専用**です。debug/localDev APK、unsigned Windows installer、Quick Tunnelを共同実証の正式配布物や緊急運用へ使わないでください。
+> 以下は**個人開発・動作確認専用**です。debug/localDev APK、unsigned Windows installer、ngrok・Cloudflareの開発tunnelを共同実証の正式配布物や緊急運用へ使わないでください。
 
-### 開発環境
+### 最短: 配布物だけでモバイル通信経路を試す
 
-- JDK 17
-- Android SDK / API 36
-- Git
-- WindowsでGateway installerを作る場合はWiX 3
-- Broker containerまたはQuick Tunnelを試す場合はDocker Compose
-- Playwright E2Eを実行する場合はNode.js
+同じWi-Fiがなく、Androidが**モバイル通信だけ**でも、固定ngrokドメインを経由してBrokerへ暗号化Envelopeを送り、PC Gatewayがoutboundで取得できます。リポジトリのcloneや毎回のAPK buildは不要です。
 
-Android設定:
+必要なもの:
 
-- min SDK: 23（Android 6.0）
-- target / compile SDK: 36
-- version: `1.0.0`
+- Docker Desktop（起動済み）
+- 無料ngrokアカウントとauthtoken
+- `Publish Relay development preview`で配布されるAndroid APK
+- Windows開発previewの次のファイル
+  - `Relay-PC-Gateway-development-preview-unsigned.exe`
+  - `Start-Relay-Broker-Tunnel-Development.cmd`
+  - `Start-Relay-Broker-Tunnel-Development.ps1`
+  - `relay-broker-bundle.zip`
 
-### Clone
+手順:
 
-```bash
-git clone https://github.com/NEGI46/Relay.git
-cd Relay
-git switch agent/zero-operation-relay
-```
-
-### 基本build
-
-Windows:
+1. unsigned Windows installerをインストールします。
+2. Androidへ`Relay-Android-development-preview-debug.apk`をインストールします。
+3. broker tunnel launcherと`relay-broker-bundle.zip`を同じfolderへ置きます。
+4. `Start-Relay-Broker-Tunnel-Development.cmd`を実行し、ngrok authtokenを対話入力します。
+5. 表示されたlocalhost staff consoleへ、初回に作成した管理者accountでsign inします。
 
 ```powershell
-.\gradlew.bat :app:assembleLocalDev :pc-gateway:installDist :broker:build
+Start-Relay-Broker-Tunnel-Development.cmd
 ```
 
-macOS / Linux:
+launcherは次を自動化します。
 
-```bash
-./gradlew :app:assembleLocalDev :pc-gateway:installDist :broker:build
-```
+1. `eclipse-temurin:17-jre` containerで同梱Broker bundleを起動
+2. `ngrok/ngrok`で固定HTTPS domainへtunnelを開始
+3. shelter限定・短命のGateway credentialを発行
+4. インストール済みPC GatewayをBrokerへ接続
+5. Gateway healthを確認
 
-Android APK:
+現在のdevelopment previewは、GitHub Actionsのrepository Variable `RELAY_BROKER_ENDPOINT`をlocalDev APKへbuild-timeで埋め込めます。現在のsource既定domainは次です。
 
 ```text
-app/build/outputs/apk/localDev/app-localDev.apk
+https://buffed-unlawful-detached.ngrok-free.dev
 ```
 
-### PC Gatewayを開発モードで起動
+別の予約済みdomainを使う場合:
+
+```powershell
+Start-Relay-Broker-Tunnel-Development.cmd -NgrokDomain your-name.ngrok-free.dev
+```
+
+停止:
+
+```powershell
+Start-Relay-Broker-Tunnel-Development.cmd -Down
+```
+
+補足:
+
+- stateと生成鍵: `%LOCALAPPDATA%\Relay\broker-tunnel`
+- credentialの既定有効期間: 2時間（1〜24時間へ変更可能）
+- 2回目以降は既存管理者を使うため、通常はusername/passwordを再入力しません。
+- 管理者を作り直す場合だけ`-ResetAdmin`を指定します。
+- Docker engineが停止中の場合、launcherは曖昧な後続errorではなく明示的に停止します。
+- 初回のAndroid鍵登録にprivate LANが必要な場合は`-EnableLanEnrollment`を指定します。
+- launcherはauthtokenとBroker credentialをconsole・file・command historyへ書き込まない設計です。
+
+> [!WARNING]
+> 固定URLであっても、無料ngrok tunnelはproduction infrastructureではありません。SLA、HA、自治体承認、正式TLS運用、監視、incident responseの代わりにはなりません。
+
+### LAN内だけでPC Gatewayを試す
+
+開発previewに含まれる`Start-Relay-PC-Gateway-Development.cmd`を実行するか、sourceから次を実行します。
 
 ```powershell
 .\scripts\start-pc-gateway-development.ps1
@@ -295,13 +323,56 @@ app/build/outputs/apk/localDev/app-localDev.apk
 - 初回に管理者ユーザー名と12文字以上のpasswordを入力します。
 - 開発dataは`%LOCALAPPDATA%\Relay\development`へ隔離されます。
 - staff consoleは`http://127.0.0.1:8080/`で開きます。
-- developmentのみ、匿名救助ingressとUDP discoveryを有効化します。
+- developmentだけ、匿名救助ingressとUDP discoveryを有効化します。
 
-GitHubの`Publish Relay development preview` workflowは、localDev APK、unsigned Windows installer、開発launcher、SHA-256、注意書きをprereleaseとして公開します。正式Releaseとは別物です。
+### Sourceからbuildする
 
-### 任意: HTTPS Broker
+#### 開発環境
 
-管理するdomainを使う限定テスト:
+- JDK 17
+- Android SDK / API 36
+- Git
+- WindowsでGateway installerを作る場合はWiX 3
+- Broker containerまたはtunnelを試す場合はDocker Compose
+- Playwright E2Eを実行する場合はNode.js
+
+Android設定:
+
+- min SDK: 23（Android 6.0）
+- target / compile SDK: 36
+- version: `1.0.0`
+
+Clone:
+
+```bash
+git clone https://github.com/NEGI46/Relay.git
+cd Relay
+git switch agent/zero-operation-relay
+```
+
+基本build:
+
+```powershell
+.\gradlew.bat :app:assembleLocalDev :pc-gateway:installDist :broker:build
+```
+
+Android APK:
+
+```text
+app/build/outputs/apk/localDev/app-localDev.apk
+```
+
+固定Broker endpointを埋め込む場合:
+
+```powershell
+.\gradlew.bat :app:assembleLocalDev -Prelay.broker.endpoint=https://your-domain.example
+```
+
+endpointはHTTPS・host必須・embedded credential禁止です。空の場合はBroker配送を無効化します。
+
+### その他のBroker開発構成
+
+管理するdomainとCaddyを使う限定テスト:
 
 ```bash
 cd deployment/broker
@@ -310,7 +381,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-固定domainなしの短時間PoC:
+固定domainを使わない短時間Cloudflare Quick Tunnel PoC:
 
 ```powershell
 .\gradlew.bat :broker:installDist
@@ -318,60 +389,13 @@ docker compose -f compose.quick-tunnel.yml up -d --build
 docker compose -f compose.quick-tunnel.yml logs -f cloudflared
 ```
 
-Cloudflare Quick TunnelにはSLAがなく、production infrastructureではありません。終了時はprototype dataを削除します。
+終了時:
 
 ```powershell
 docker compose -f compose.quick-tunnel.yml down -v
 ```
 
-詳しい手順は[HTTPS Broker deployment](deployment/broker/README.md)と[Quick Tunnel Broker PoC](docs/runbooks/QUICK_TUNNEL_BROKER_POC.md)を参照してください。
-
-### スマホがモバイル通信だけでもPCで受信する（clone不要）
-
-同じWi-Fi/LANが無く、スマホが**モバイル通信のみ**でも、ngrokの固定ドメイン越しにBrokerへEnvelopeを預け、PC Gatewayがoutboundで取得できます。ngrokの無料ドメインは**再起動してもURLが変わらない**ため、preview APKへ一度だけ焼き込めば以後はスマホの再buildが不要です。**リポジトリ全体のcloneは不要**で、必要なのはDocker Desktopと`Publish Relay development preview`同梱の2ファイルだけです。
-
-必要なもの:
-
-- Docker Desktop（起動済み）
-- インストール済みの`RelayPcGateway.exe`
-- 開発preview同梱の`Start-Relay-Broker-Tunnel-Development.cmd`と`relay-broker-bundle.zip`（同じフォルダに置く）
-- 無料のngrokアカウント: authtoken（[取得先](https://dashboard.ngrok.com/get-started/your-authtoken)）。固定ドメインは本リポジトリで`buffed-unlawful-detached.ngrok-free.dev`を既定設定済みです（別ドメインを使う場合のみ[予約](https://dashboard.ngrok.com/domains)して`-NgrokDomain`で上書き）。
-
-authtokenを渡して起動します（authtokenはconsole・file・履歴へ残さず、ngrok containerへのみ渡ります）。ドメインは既定値が使われるため`-NgrokDomain`は不要です。
-
-```powershell
-Start-Relay-Broker-Tunnel-Development.cmd
-```
-
-ダブルクリック起動でも動作します。authtokenは`NGROK_AUTHTOKEN`環境変数か対話入力から取得します。別のドメインを使う場合は`-NgrokDomain your-name.ngrok-free.dev`または`RELAY_NGROK_DOMAIN`で上書きできます。起動後は次を自動化します。
-
-1. 公開image`eclipse-temurin:17-jre`でBrokerを起動（同梱classを読み込むだけでDockerfile buildもgradlewも不要、Envelopeは復号しない）
-2. `ngrok/ngrok`で固定ドメイン`https://buffed-unlawful-detached.ngrok-free.dev`にトンネルを開く
-3. 短命・shelter限定のBroker credentialを1回だけ発行し、このprocess内にのみ保持
-4. インストール済みEXEをBroker経路へ紐づけて起動し、管理者ユーザー名/passwordを初回だけ確認
-
-ドメインは固定なので、preview APKへ一度だけ焼き込めば以後は再build不要です。本リポジトリでは既に次を設定済みです:
-
-- GitHub ActionsのリポジトリVariable`RELAY_BROKER_ENDPOINT`=`https://buffed-unlawful-detached.ngrok-free.dev`（公開URLなのでsecretではなくVariable）
-- `Publish Relay development preview`ワークフローを実行すれば、このURLを焼き込んだAPKが生成されます
-
-リポジトリを持っていればローカルbuildでも焼き込めます:
-
-```powershell
-.\gradlew.bat :app:assembleLocalDev -Prelay.broker.endpoint=https://buffed-unlawful-detached.ngrok-free.dev
-```
-
-終了時はBrokerとTunnelを停止します。
-
-```powershell
-Start-Relay-Broker-Tunnel-Development.cmd -Down
-```
-
-- 状態・生成鍵: `%LOCALAPPDATA%\Relay\broker-tunnel`へ隔離
-- 既定credential有効期間: 2時間（`-CredentialLifetimeHours`で1〜24）
-- 管理者は**初回のみ**作成されます。2回目以降に別の名前/passwordを入力しても登録されないため、既存の資格情報でサインインしてください。別の資格情報にしたい場合は`-ResetAdmin`付きで再実行するとこのプロファイルのGateway DBを初期化して作り直せます
-- 初回のAndroid鍵登録だけprivate-LANが要る場合は`-EnableLanEnrollment`
-- ngrokの無料枠はSLA無し。開発・動作確認専用で、pilot/緊急運用には使用しないでください
+Cloudflare Quick TunnelにもSLAはありません。詳細は[HTTPS Broker deployment](deployment/broker/README.md)と[Quick Tunnel Broker PoC](docs/runbooks/QUICK_TUNNEL_BROKER_POC.md)を参照してください。
 
 ---
 
@@ -548,6 +572,8 @@ Relay is a **local-first encrypted rescue-information relay** for outages and in
 - Explicit location consent can produce a fresh encrypted location update. Continuous background GPS tracking is not implemented.
 - Nearby supports OPEN and TRUSTED admission policies, but complete operator provisioning for trusted peers is unfinished.
 - QR/manual LAN Gateway enrollment primitives exist, while full persistent Android runtime integration remains unfinished.
+- The development preview can bake a stable ngrok Broker URL into the localDev APK. A repo-free Windows launcher starts the bundled Broker, the tunnel, and the installed Gateway for mobile-data-only testing.
+- The ngrok development path is not production infrastructure and provides no SLA or field-readiness evidence.
 - Trusted BLE delivery still requires an authorized Regional Root and Root-signed Shelter Directory that are not included in the repository.
 - Recorded automated evidence includes 20/20 Android instrumentation tests on an API 36 managed emulator and 4/4 Playwright Chromium staff-console tests. Physical RF and field validation remain required.
 
