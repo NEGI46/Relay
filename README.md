@@ -87,6 +87,15 @@ flowchart LR
 - 信頼済み公開鍵が後から解決された時点で、転送可能な暗号化Envelopeへ変換します。
 - Envelopeが一度も外へ出ていない段階なら、利用者は端末内の保留依頼だけを削除できます。
 
+### 常時待機（ARMED）と災害通信
+
+任意でオプトインできる「常時待機（ARMED）」を追加しました。ARMEDはプロセスやNearbyを常時稼働させるモードではなく、永続化された待機設定とOSの起動経路だけを利用します。それだけでは災害を自動検知できません。
+
+- **ARMED**: Nearbyは停止。ユーザー操作・通知Action・救助情報の作成/受信・再起動復元・Bluetooth再有効化でのみ災害通信へ移行します。
+- **EMERGENCY_ACTIVE**: `connectedDevice` 型 Foreground Service で Nearby Advertising/Discovery/接続/送受信を継続します。既存の SyncCoordinator / ACK / Receipt / Store–Carry–Forward / Gateway・Broker・BLE配送をそのまま利用します。
+- 通常通信と救助配送は `CommunicationLeaseManager` のowner/leaseで単一の共有Runtimeを共有し、Foreground ServiceやNearbyの二重起動を防ぎます。
+- Android・メーカー・ユーザーの強制停止を回避して永続動作することはできません。詳細は [Background relay mode](docs/BACKGROUND_RELAY_MODE.md) を参照。
+
 ---
 
 ## 現在の状態
@@ -531,6 +540,11 @@ docs/                        architecture・audit・runbook
 
 | 目的 | ドキュメント |
 |---|---|
+| 常時待機（ARMED）と災害通信 | [Background relay mode](docs/BACKGROUND_RELAY_MODE.md) |
+| 背景リレーのテスト計画 | [Background relay test plan](docs/BACKGROUND_RELAY_TEST_PLAN.md) |
+| 自動災害トリガー設計 | [Disaster activation triggers](docs/DISASTER_ACTIVATION_TRIGGERS.md) |
+| バッテリー検証 | [Battery validation](docs/BATTERY_VALIDATION.md) |
+| Nearby実装 | [Nearby implementation](docs/NEARBY_IMPLEMENTATION.md) |
 | 現在の共同実証readiness | [Municipal pilot readiness](docs/readiness/MUNICIPAL_PILOT_READINESS.md) |
 | 外部判断が必要な項目 | [Blocked by external decisions](docs/readiness/BLOCKED_BY_EXTERNAL_DECISIONS.md) |
 | 救助session・BLE trust監査 | [Rescue durability and BLE trust audit](docs/audits/RESCUE_DURABILITY_INITIAL_AUDIT.md) |

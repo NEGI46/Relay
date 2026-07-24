@@ -142,3 +142,15 @@ ADB接続端末が0台のため、以下はPASSではなく未検証である。
 - 端末別の電池消費と長時間稼働
 
 実機テストでは、まず1台でインストール、Room保存復元、権限、通信開始停止、Foreground Serviceを確認する。その後に同一APKを2台へ入れて直接同期を確認し、最後に3台の多段中継へ進む。
+
+## 背景リレー（ARMED/EMERGENCY）と単一Transport所有
+
+常時待機（ARMED）と災害通信（EMERGENCY_ACTIVE）の詳細は `BACKGROUND_RELAY_MODE.md` を参照。Nearbyに関する要点のみ以下へ記す。
+
+- **Transportは常に1つ**。以前は `RescueDeliveryService` が救助配送用に別の Foreground Service（`RelayCommunicationService`）を起動し、Nearby Transport / Advertising / Discovery / Gateway Sync が二重に動く可能性があった。
+- 修正として `CommunicationLeaseManager`（owner/lease方式）を導入し、`USER_COMMUNICATION` / `RESCUE_DELIVERY` / `EMERGENCY_MODE` の各ownerが同一の共有Runtimeを参照カウントで起動・停止する。
+  - `acquire` は冪等（既に起動中なら `ALREADY_ACTIVE`）。
+  - `release` は最後のownerが解放したときだけRuntimeを停止（それ以外は `STILL_ACTIVE`）。1つのownerの停止で他ownerの通信は止まらない。
+  - 二重stopは安全（`NOT_HELD`）。起動失敗時はleaseを保持しない（`START_FAILED`）。
+- 既存の `SyncCoordinator`、サイズ制限、TTL、hop limit、重複排除、暗号・署名検証、ACK、Receipt、Store–Carry–Forward、Gateway/Broker/BLE配送は迂回せずそのまま利用する。受信データを直接Roomへ保存する新経路は追加していない。
+- ARMEDでは Nearby を一切起動しない（Advertising/Discoveryなし、無期限FGSなし、短周期ポーリングなし、無期限WakeLockなし、定期BTスキャンなし）。EMERGENCY_ACTIVE のときだけ `connectedDevice` 型 Foreground Service で Nearby を継続する。
