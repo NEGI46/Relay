@@ -152,7 +152,14 @@ class RescueDeliveryService : Service() {
             while (isActive) {
                 val hasPendingDestination = app.activeRescueSessionCoordinator.hasPendingDestination()
                 if (hasPendingDestination && app.rescueShelterKeyStore.load() == null) {
-                    val enrollment = app.developmentShelterManifestBootstrap.tryEnroll()
+                    var enrollment = app.developmentShelterManifestBootstrap.tryEnroll()
+                    if (enrollment != DevelopmentEnrollmentResult.ENROLLED &&
+                        app.rescueShelterKeyStore.load() == null
+                    ) {
+                        // No shared LAN with the Gateway: fetch the recipient manifest the Gateway
+                        // published to the Broker so a mobile-only phone can still build an SOS.
+                        enrollment = app.brokerShelterManifestBootstrap.tryEnroll()
+                    }
                     if (enrollment !in setOf(
                             DevelopmentEnrollmentResult.DISABLED,
                             DevelopmentEnrollmentResult.GATEWAY_NOT_FOUND,

@@ -47,6 +47,7 @@ import com.example.relay.rescue.UploadSigningKeyStore
 import com.example.relay.rescue.HttpShelterManifestClient
 import com.example.relay.rescue.ShelterManifestEnrollment
 import com.example.relay.rescue.DevelopmentShelterManifestBootstrap
+import com.example.relay.rescue.BrokerShelterManifestBootstrap
 import com.example.relay.rescue.RegionalShelterDirectoryResolver
 import com.example.relay.rescue.SignedRegionalShelterDirectory
 import com.example.relay.rescue.ble.AndroidShelterBleClient
@@ -286,6 +287,18 @@ class RelayApplication : Application() {
      */
     val developmentShelterManifestBootstrap: DevelopmentShelterManifestBootstrap by lazy {
         DevelopmentShelterManifestBootstrap(gatewayDiscovery, rescueShelterKeyStore)
+    }
+    /**
+     * Development-preview only: when the phone has no shared LAN with the Gateway, it fetches the
+     * recipient manifest the Gateway published to the Broker so a mobile-only SOS can be built.
+     * Release/pilot builds receive a disabled instance and keep the verified enrollment boundary.
+     */
+    val brokerShelterManifestBootstrap: BrokerShelterManifestBootstrap by lazy {
+        BrokerShelterManifestBootstrap(
+            brokerEndpointProvider = { cloudBrokerEndpoint },
+            shelterId = getString(R.string.rescue_shelter_id).trim(),
+            keyStore = rescueShelterKeyStore,
+        )
     }
     val gatewaySyncEngine: GatewaySyncEngine by lazy {
         GatewaySyncEngine(

@@ -186,6 +186,15 @@ class BrokerStore(dbPath: String) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
+            st.execute(
+                """
+                CREATE TABLE IF NOT EXISTS broker_shelter_manifests(
+                  shelter_id TEXT PRIMARY KEY,
+                  manifest_json TEXT NOT NULL,
+                  updated_at INTEGER NOT NULL
+                )
+                """.trimIndent(),
+            )
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelopes_shelter ON broker_envelopes(shelter_id, expires_at)")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelopes_cursor ON broker_envelopes(shelter_id, stored_at, envelope_id)")
             st.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_broker_receipt_id ON broker_envelopes(broker_receipt_id)")
@@ -193,6 +202,34 @@ class BrokerStore(dbPath: String) : AutoCloseable {
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_receipts_device ON broker_receipts(shelter_id, uploaded_at)")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_receipts_seq ON broker_receipts(seq)")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_gateway_credential_scope ON broker_gateway_credentials(gateway_id, shelter_id, expires_at)")
+        }
+    }
+
+    /**
+     * Stores (or replaces) the public shelter manifest a Gateway publishes for its own shelter.
+     * The Broker keeps only the already-public manifest JSON so a phone on mobile data can enroll
+     * the recipient key without a prior LAN visit. It never stores private material.
+     */
+    fun putShelterManifest(shelterId: String, manifestJson: String, now: Long): Unit = synchronized(lock) {
+        connection.prepareStatement(
+            """INSERT INTO broker_shelter_manifests(shelter_id, manifest_json, updated_at)
+               VALUES(?,?,?)
+               ON CONFLICT(shelter_id) DO UPDATE SET manifest_json=excluded.manifest_json, updated_at=excluded.updated_at""",
+        ).use { ps ->
+            ps.setString(1, shelterId)
+            ps.setString(2, manifestJson)
+            ps.setLong(3, now)
+            ps.executeUpdate()
+        }
+    }
+
+    /** Returns the stored public manifest JSON for a shelter, or null when none was published. */
+    fun shelterManifest(shelterId: String): String? = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT manifest_json FROM broker_shelter_manifests WHERE shelter_id=?",
+        ).use { ps ->
+            ps.setString(1, shelterId)
+            ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
         }
     }
 

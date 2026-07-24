@@ -24,6 +24,10 @@ val relayReleaseSigningConfigured = listOf(
     relayReleaseKeyPassword,
 ).all { !it.isNullOrBlank() }
 val relayBrokerEndpoint = providers.gradleProperty("relay.broker.endpoint").orNull?.trim()?.trimEnd('/') ?: ""
+// The shelter/gateway id a mobile-only phone uses to fetch the recipient manifest from the Broker.
+// Defaults to the standalone launcher's default Gateway id so a baked APK works out of the box.
+val relayShelterId = providers.gradleProperty("relay.shelter.id").orNull?.trim()?.takeIf { it.isNotEmpty() }
+    ?: "development-pc-gateway"
 
 if (relayBrokerEndpoint.isNotEmpty()) {
     val brokerUri = runCatching { URI(relayBrokerEndpoint) }.getOrElse {
@@ -55,6 +59,8 @@ android {
         // The public Broker location is build-time configuration, never editable in a release
         // APK. An empty value deliberately disables mobile-network Broker delivery.
         resValue("string", "broker_endpoint", relayBrokerEndpoint)
+        // The shelter id used to fetch the recipient manifest from the Broker over mobile data.
+        resValue("string", "rescue_shelter_id", relayShelterId)
     }
 
     buildFeatures {

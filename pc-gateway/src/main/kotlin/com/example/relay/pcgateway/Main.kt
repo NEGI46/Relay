@@ -5,6 +5,7 @@ import com.example.relay.pcgateway.rescue.RescueIntakeService
 import com.example.relay.pcgateway.rescue.RescueKeyStore
 import com.example.relay.pcgateway.rescue.BrokerPullAgent
 import com.example.relay.pcgateway.rescue.ReceiptOutbox
+import com.example.relay.pcgateway.rescue.ShelterManifestPublisher
 import com.example.relay.pcgateway.rescue.SqliteRescuePersistence
 import com.example.relay.pcgateway.rescue.provisioning.BleBridgeEnvironmentStore
 import com.example.relay.pcgateway.rescue.provisioning.SignedShelterManifestStore
@@ -158,6 +159,18 @@ fun main(args: Array<String>) {
             pollIntervalMs = config.brokerPollIntervalMs,
         )
         brokerScope.launch { pullAgent.start(this) }
+
+        // 3. Publish this shelter's public manifest so a phone on mobile data (no prior LAN visit)
+        //    can fetch the recipient key. Public-only material; retries until the Broker acknowledges.
+        val manifestPublisher = ShelterManifestPublisher(
+            brokerUrl = config.brokerUrl,
+            shelterId = config.shelterId,
+            gatewayId = config.gatewayId,
+            manifest = rescueKeys.manifest,
+            httpClient = client,
+            gatewayCredential = brokerCredential,
+        )
+        brokerScope.launch { manifestPublisher.start(this) }
 
         println("Broker cloud relay: ${config.brokerUrl} (poll every ${config.brokerPollIntervalMs}ms)")
     } else {

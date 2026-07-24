@@ -1,6 +1,7 @@
 package com.example.relay.broker
 
 import com.example.relay.rescue.RescueValidationResult
+import com.example.relay.rescue.ShelterPublicKeyManifest
 import com.example.relay.rescue.brokerDeviceRegistrationBytes
 import com.example.relay.rescue.validate
 import io.ktor.http.HttpStatusCode
@@ -29,6 +30,7 @@ import java.util.Base64
 private const val MAX_UPLOAD_BODY_BYTES = 64 * 1024
 private const val MAX_REGISTER_BODY_BYTES = 4 * 1024
 private const val MAX_RECEIPT_BODY_BYTES = 64 * 1024
+private const val MAX_MANIFEST_BODY_BYTES = 24 * 1024
 
 /** Maximum pull batch size a Gateway can request. */
 private const val MAX_PULL_LIMIT = 100
@@ -258,6 +260,85 @@ fun Application.brokerModule(
                 accepted = true,
                 reason = if (saved) null else "duplicate",
             ))
+        }
+
+        /**
+         * POST /v1/gateways/{shelterId}/manifest
+         * PC Gateway publishes its own public shelter manifest so a phone that has never been on
+         * the shelter LAN can still fetch the recipient key over mobile data. Requires Bearer auth
+         * scoped to the same shelter. The body carries only already-public key material.
+         */
+        post("/v1/gateways/{shelterId}/manifest") {
+            val shelterId = call.parameters["shelterId"]
+            if (shelterId.isNullOrBlank() || shelterId.length > 128) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_shelter_id"))
+                return@post
+            }
+            val principal = authenticateGateway(config, store, shelterId) ?: return@post
+            if (!pullRateLimiter.allow("manifest:${principal.gatewayId}")) {
+                call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
+                return@post
+            }
+            val contentLength = call.request.contentLength()
+            if (contentLength == null) {
+                call.respond(HttpStatusCode.LengthRequired, mapOf("reason" to "content_length_required"))
+                return@post
+            }
+            if (contentLength > MAX_MANIFEST_BODY_BYTES) {
+                call.respond(HttpStatusCode.PayloadTooLarge, mapOf("reason" to "manifest_too_large"))
+                return@post
+            }
+            val rawBody = call.receiveText()
+            if (rawBody.toByteArray().size > MAX_MANIFEST_BODY_BYTES) {
+                call.respond(HttpStatusCode.PayloadTooLarge, mapOf("reason" to "manifest_too_large"))
+                return@post
+            }
+            val manifest = try {
+                brokerJson.decodeFromString<ShelterPublicKeyManifest>(rawBody)
+            } catch (_: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "malformed_manifest"))
+                return@post
+            }
+            if (manifest.shelterId != shelterId) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "shelter_mismatch"))
+                return@post
+            }
+            if (manifest.validate(System.currentTimeMillis()) != RescueValidationResult.Valid) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_manifest"))
+                return@post
+            }
+            store.putShelterManifest(shelterId, brokerJson.encodeToString(ShelterPublicKeyManifest.serializer(), manifest), System.currentTimeMillis())
+            call.respond(HttpStatusCode.Accepted, mapOf("accepted" to true))
+        }
+
+        /**
+         * GET /v1/shelters/{shelterId}/manifest
+         * Public: returns the last manifest a Gateway published for this shelter. The manifest is
+         * public-only key material; a client still validates it and compares the fingerprint before
+         * trusting it (a debug/localDev build may self-pin it for development enrollment).
+         */
+        get("/v1/shelters/{shelterId}/manifest") {
+            val shelterId = call.parameters["shelterId"]
+            if (shelterId.isNullOrBlank() || shelterId.length > 128) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_shelter_id"))
+                return@get
+            }
+            if (!pullRateLimiter.allow("manifest-fetch:$shelterId")) {
+                call.respond(HttpStatusCode.TooManyRequests, mapOf("reason" to "rate_limited"))
+                return@get
+            }
+            val manifestJson = store.shelterManifest(shelterId)
+            if (manifestJson == null) {
+                call.respond(HttpStatusCode.NotFound, mapOf("reason" to "manifest_not_found"))
+                return@get
+            }
+            val manifest = try {
+                brokerJson.decodeFromString<ShelterPublicKeyManifest>(manifestJson)
+            } catch (_: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, mapOf("reason" to "manifest_corrupt"))
+                return@get
+            }
+            call.respond(HttpStatusCode.OK, manifest)
         }
 
         /**
