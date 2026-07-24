@@ -62,10 +62,25 @@ class HttpShelterManifestClient(
 
 class ShelterManifestEnrollment(
     private val client: ShelterManifestClient,
-    private val keyStore: RescueShelterKeyStore,
+    private val keyStore: VerifiedManifestStore,
 ) {
-    fun enroll(host: String, port: Int, expectedFingerprint: String): ShelterPublicKeys {
+    /**
+     * Fetches, verifies, and pins a shelter manifest. When [expectedShelterId] is supplied (the
+     * shelterId carried by a verified gateway enrollment token), a manifest advertising any other
+     * shelter is refused *before* it is persisted — a fail-closed guard so a swapped or spoofed
+     * manifest cannot be pinned under the wrong shelter identity. Fingerprint verification is still
+     * enforced by [keyStore].
+     */
+    fun enroll(
+        host: String,
+        port: Int,
+        expectedFingerprint: String,
+        expectedShelterId: String? = null,
+    ): ShelterPublicKeys {
         val manifest = client.fetch(host.trim(), port)
+        if (expectedShelterId != null) {
+            require(manifest.shelterId == expectedShelterId.trim()) { "shelter identity mismatch" }
+        }
         keyStore.saveVerifiedManifest(manifest, normalizeFingerprint(expectedFingerprint))
         return requireNotNull(keyStore.load())
     }
