@@ -1,7 +1,7 @@
 package com.example.relay.pcgateway
 
 /** Leading characters that a spreadsheet interprets as the start of a formula. */
-private val CSV_FORMULA_TRIGGERS = setOf('=', '+', '-', '@')
+private val CSV_FORMULA_TRIGGERS = setOf('=', '+', '-', '@', '\t', '\r')
 
 /**
  * Encodes a single value as one CSV cell for any Gateway export (messages, audit, ...).
