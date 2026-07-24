@@ -4,7 +4,9 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
+import android.os.BatteryManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,11 +44,18 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.relay.background.ActivationSource
+import com.example.relay.background.BackgroundRelayMode
+import com.example.relay.background.BackgroundRelayState
+import com.example.relay.background.DegradeReason
 import com.example.relay.domain.SafetyState
 import com.example.relay.domain.SupplyKind
 import com.example.relay.permissions.AndroidNearbyPermissionGate
+import com.example.relay.permissions.NearbyPrerequisite
+import com.example.relay.permissions.NearbyPrerequisiteChecker
 import com.example.relay.RelayApplication
 import com.example.relay.service.RelayCommunicationService
+import com.example.relay.service.RescueDeliveryService
 import com.example.relay.service.shouldAutoStartCommunication
 import com.example.relay.ui.rescue.RescueFlow
 import com.example.relay.ui.rescue.RescueViewModel
@@ -59,6 +68,8 @@ fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val permissionGate = remember { AndroidNearbyPermissionGate(context) }
     val activationStore = remember { RelayCommunicationService.activationStore(context) }
+    val app = remember(context) { context.applicationContext as RelayApplication }
+    val backgroundState by app.backgroundRelayManager.state.collectAsStateWithLifecycle()
     val activity = remember(context) { context.findActivity() }
     var explainPermissions by rememberSaveable { mutableStateOf(false) }
     var openRescueAfterPermission by rememberSaveable { mutableStateOf(false) }
@@ -171,8 +182,13 @@ fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel) {
             RelayScreen.REGIONAL -> OfficialInformationScreen(viewModel::navigate)
             else -> SettingsScreen(
                 state = state,
-                diagnostics = (context.applicationContext as RelayApplication).diagnostics.recent(),
-                clearDiagnostics = { (context.applicationContext as RelayApplication).diagnostics.clear() },
+                backgroundState = backgroundState,
+                diagnostics = app.diagnostics.recent(),
+                clearDiagnostics = { app.diagnostics.clear() },
+                enableStandby = { app.backgroundRelayManager.optIn() },
+                disableStandby = { app.backgroundRelayManager.optOut() },
+                startDisaster = { RescueDeliveryService.enableAndStart(context, ActivationSource.USER_ACTION) },
+                endDisaster = { RescueDeliveryService.stop(context) },
                 openAppSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
                 openBluetoothSettings = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) },
                 navigate = viewModel::navigate,
@@ -385,10 +401,160 @@ internal fun gatewayStatusLabel(lastResult: String?, transportRunning: Boolean):
 }
 
 @Composable
+private fun BackgroundRelaySection(
+    backgroundState: BackgroundRelayState,
+    connectedPeers: Int,
+    enableStandby: () -> Unit,
+    disableStandby: () -> Unit,
+    startDisaster: () -> Unit,
+    endDisaster: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val permissionGate = remember { AndroidNearbyPermissionGate(context) }
+    // Recomputed on each recomposition (e.g. when returning from system settings) so the status
+    // reflects live Bluetooth / permission / Play-services / notification / battery state.
+    val prerequisite = remember(backgroundState) { NearbyPrerequisiteChecker(context, permissionGate).check() }
+    val notificationLabel = remember(backgroundState) { notificationStatusLabel(context) }
+    val batteryLabel = remember(backgroundState) { batteryStatusLabel(context) }
+
+    Card(Modifier.fillMaxWidth().semantics { contentDescription = "常時待機（ARMED）と災害通信" }) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("常時待機（ARMED）", style = MaterialTheme.typography.titleMedium)
+            Text("現在のモード: " + modeLabel(backgroundState.mode))
+            Text("起動理由: " + activationLabel(backgroundState.activationSource))
+            Text("最終送受信: " + timeLabel(backgroundState.lastTransferAtEpochMillis))
+            Text("接続中の端末: ${connectedPeers}台")
+            Text("Bluetooth / Nearby: " + prerequisiteLabel(prerequisite))
+            Text("通知: " + notificationLabel)
+            Text("Google Play services: " + playServicesLabel(prerequisite))
+            Text("バッテリー: " + batteryLabel)
+            backgroundState.degradeReason.takeIf { it != DegradeReason.NONE }?.let {
+                Text("縮退理由: " + degradeLabel(it))
+            }
+            backgroundState.lastError?.let { Text("最終終了/エラー: " + it, style = MaterialTheme.typography.bodySmall) }
+            if (backgroundState.explicitlyStoppedByUser) {
+                Text("ℹ ユーザーが停止しました。自動復元は行いません（手動で再開できます）。", style = MaterialTheme.typography.bodySmall)
+            }
+            Text(
+                "※ ARMEDは「自動起動できる設定が保存された状態」です。" +
+                    "平常時はNearbyを常時動作させず、これだけでは災害を自動検知できません。" +
+                    "災害通信はユーザー操作・通知・救助情報の作成/受信・再起動復元で開始します。",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "※ Androidの制約: OS・メーカー・ユーザーの強制停止を回避して永続動作することはできません。" +
+                    "Android 12以降はバックグラウンドからのFGS起動が制限されます。",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (notificationLabel != "許可済み") {
+                Text("推奨: 通知を許可すると災害通信中の状態を確認できます（未許可でもFGSは起動します）。", style = MaterialTheme.typography.bodySmall)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (backgroundState.optedIn) {
+                    OutlinedButton(
+                        onClick = disableStandby,
+                        modifier = Modifier.weight(1f).semantics { contentDescription = "常時待機を無効化" },
+                    ) { Text("待機を無効化") }
+                } else {
+                    Button(
+                        onClick = enableStandby,
+                        modifier = Modifier.weight(1f).semantics { contentDescription = "常時待機を有効化" },
+                    ) { Text("待機を有効化") }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = startDisaster,
+                    modifier = Modifier.weight(1f).semantics { contentDescription = "災害通信を開始" },
+                ) { Text("災害通信を開始") }
+                OutlinedButton(
+                    onClick = endDisaster,
+                    modifier = Modifier.weight(1f).semantics { contentDescription = "災害通信を終了" },
+                ) { Text("災害通信を終了") }
+            }
+        }
+    }
+}
+
+private fun modeLabel(mode: BackgroundRelayMode): String = when (mode) {
+    BackgroundRelayMode.DISABLED -> "無効（DISABLED）"
+    BackgroundRelayMode.ARMED -> "待機中（ARMED）"
+    BackgroundRelayMode.EMERGENCY_ACTIVE -> "災害通信中（EMERGENCY_ACTIVE）"
+    BackgroundRelayMode.DEGRADED -> "縮退中（DEGRADED）"
+    BackgroundRelayMode.SUSPENDED_BY_USER -> "ユーザー停止（SUSPENDED_BY_USER）"
+}
+
+private fun activationLabel(source: ActivationSource?): String = when (source) {
+    null -> "なし"
+    ActivationSource.USER_ACTION -> "ユーザー操作"
+    ActivationSource.RESCUE_CREATED -> "救助情報の作成"
+    ActivationSource.RESCUE_RECEIVED -> "救助情報の受信"
+    ActivationSource.BOOT_RESTORE -> "再起動復元"
+    ActivationSource.PACKAGE_REPLACED -> "アプリ更新復元"
+    ActivationSource.BLUETOOTH_RESTORED -> "Bluetooth再有効化復元"
+    ActivationSource.DEBUG_SIMULATION -> "デバッグシミュレーション"
+}
+
+private fun degradeLabel(reason: DegradeReason): String = when (reason) {
+    DegradeReason.NONE -> "なし"
+    DegradeReason.MISSING_BLUETOOTH_PERMISSION -> "Bluetooth権限不足"
+    DegradeReason.BLUETOOTH_DISABLED -> "Bluetooth無効"
+    DegradeReason.MISSING_NEARBY_PERMISSION -> "Nearby Wi-Fi権限不足"
+    DegradeReason.PLAY_SERVICES_UNAVAILABLE -> "Google Play services利用不可"
+    DegradeReason.DEGRADED_NOTIFICATION_VISIBILITY -> "通知非表示（動作は継続）"
+    DegradeReason.OS_BACKGROUND_RESTRICTED -> "OSのバックグラウンド制限"
+}
+
+private fun prerequisiteLabel(p: NearbyPrerequisite): String = when (p) {
+    NearbyPrerequisite.Ready -> "利用可能"
+    is NearbyPrerequisite.MissingPermissions -> "権限不足"
+    NearbyPrerequisite.BluetoothUnavailable -> "Bluetooth非対応"
+    NearbyPrerequisite.BluetoothDisabled -> "Bluetooth無効"
+    NearbyPrerequisite.LocationServicesDisabled -> "位置情報無効"
+    is NearbyPrerequisite.PlayServicesUnavailable -> "権限OK（Play servicesを確認）"
+}
+
+private fun playServicesLabel(p: NearbyPrerequisite): String = when (p) {
+    is NearbyPrerequisite.PlayServicesUnavailable -> "利用不可（code=${p.statusCode}）"
+    else -> "利用可能または未確認"
+}
+
+private fun notificationStatusLabel(context: Context): String {
+    if (android.os.Build.VERSION.SDK_INT < 33) return "許可済み"
+    val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+        context,
+        android.Manifest.permission.POST_NOTIFICATIONS,
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    return if (granted) "許可済み" else "未許可（DEGRADED_NOTIFICATION_VISIBILITY）"
+}
+
+private fun batteryStatusLabel(context: Context): String {
+    val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return "不明"
+    val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+    val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+    val pct = if (level >= 0 && scale > 0) level * 100 / scale else -1
+    val statusRaw = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+    val charging = statusRaw == BatteryManager.BATTERY_STATUS_CHARGING || statusRaw == BatteryManager.BATTERY_STATUS_FULL
+    val pctText = if (pct >= 0) "$pct%" else "不明"
+    return pctText + if (charging) "（充電中）" else "（非充電）"
+}
+
+private fun timeLabel(epochMillis: Long): String {
+    if (epochMillis <= 0) return "なし"
+    val fmt = java.text.SimpleDateFormat("MM/dd HH:mm:ss", java.util.Locale.JAPAN)
+    return fmt.format(java.util.Date(epochMillis))
+}
+
+@Composable
 private fun SettingsScreen(
     state: RelayUiState,
+    backgroundState: BackgroundRelayState,
     diagnostics: List<String>,
     clearDiagnostics: () -> Unit,
+    enableStandby: () -> Unit,
+    disableStandby: () -> Unit,
+    startDisaster: () -> Unit,
+    endDisaster: () -> Unit,
     openAppSettings: () -> Unit,
     openBluetoothSettings: () -> Unit,
     navigate: (RelayScreen) -> Unit,
@@ -396,6 +562,16 @@ private fun SettingsScreen(
     MainScaffold(RelayScreen.SETTINGS, navigate) { modifier ->
         LazyColumn(modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text("設定", style = MaterialTheme.typography.headlineMedium) }
+            item {
+                BackgroundRelaySection(
+                    backgroundState = backgroundState,
+                    connectedPeers = state.connectedPeers,
+                    enableStandby = enableStandby,
+                    disableStandby = disableStandby,
+                    startDisaster = startDisaster,
+                    endDisaster = endDisaster,
+                )
+            }
             item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("すべてローカル優先です。登録・ペアリングは不要です。")
                 Text("近くの端末で中継し、利用できる安全なオンライン経路（地域の中継拠点など）へ公開同期できます。")
