@@ -6,8 +6,10 @@ import androidx.activity.compose.setContent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.relay.gateway.enrollment.EnrollmentController
 import com.example.relay.ui.RelayApp
 import com.example.relay.ui.RelayViewModel
+import com.example.relay.ui.enrollment.EnrollmentViewModel
 import com.example.relay.ui.rescue.RescueViewModel
 
 class MainActivity : ComponentActivity() {
@@ -39,7 +41,14 @@ class MainActivity : ComponentActivity() {
                         senderDeviceId = app.deviceId,
                     ) as T
             })
-            RelayApp(relayViewModel, rescueViewModel)
+            val enrollmentViewModel: EnrollmentViewModel = viewModel(factory = object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                    EnrollmentViewModel(
+                        controller = EnrollmentController(app.gatewayEnrollmentStore),
+                    ) as T
+            })
+            RelayApp(relayViewModel, rescueViewModel, enrollmentViewModel)
         }
     }
 }

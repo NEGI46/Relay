@@ -59,9 +59,11 @@ import com.example.relay.service.RescueDeliveryService
 import com.example.relay.service.shouldAutoStartCommunication
 import com.example.relay.ui.rescue.RescueFlow
 import com.example.relay.ui.rescue.RescueViewModel
+import com.example.relay.ui.enrollment.EnrollmentScreen
+import com.example.relay.ui.enrollment.EnrollmentViewModel
 
 @Composable
-fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel) {
+fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel, enrollmentViewModel: EnrollmentViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val rescueState by rescueViewModel.state.collectAsStateWithLifecycle()
     val regionalItems by viewModel.regionalItems.collectAsStateWithLifecycle()
@@ -180,7 +182,7 @@ fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel) {
             RelayScreen.SAFETY_FORM -> SafetyForm(viewModel)
             RelayScreen.SUPPLY_FORM -> SupplyForm(viewModel)
             RelayScreen.REGIONAL -> OfficialInformationScreen(viewModel::navigate)
-            else -> SettingsScreen(
+            RelayScreen.SETTINGS -> SettingsScreen(
                 state = state,
                 backgroundState = backgroundState,
                 diagnostics = app.diagnostics.recent(),
@@ -192,6 +194,10 @@ fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel) {
                 openAppSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
                 openBluetoothSettings = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) },
                 navigate = viewModel::navigate,
+            )
+            RelayScreen.GATEWAY_ENROLLMENT -> EnrollmentScreen(
+                viewModel = enrollmentViewModel,
+                onBack = { viewModel.navigate(RelayScreen.SETTINGS) },
             )
         }
     }
@@ -621,6 +627,14 @@ private fun SettingsScreen(
                         OutlinedButton(onClick = clearDiagnostics) { Text("Clear diagnostics") }
                     }
                 }
+            }
+            item {
+                OutlinedButton(
+                    onClick = { navigate(RelayScreen.GATEWAY_ENROLLMENT) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { contentDescription = "Gateway登録管理を開く" },
+                ) { Text("Gateway登録管理") }
             }
             item {
                 OutlinedButton(
