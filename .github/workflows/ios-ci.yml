@@ -1,0 +1,172 @@
+name: iOS CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apple/**'
+      - 'composeApp/**'
+      - 'shared/**'
+      - 'gradle/**'
+      - 'scripts/ios/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradlew'
+      - '.github/workflows/ios-ci.yml'
+  push:
+    branches:
+      - main
+      - agent/zero-operation-relay
+    paths:
+      - 'apple/**'
+      - 'composeApp/**'
+      - 'shared/**'
+      - 'gradle/**'
+      - 'scripts/ios/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradlew'
+      - '.github/workflows/ios-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-simulator:
+    name: Xcode simulator build
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Java 17
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Prepare build scripts
+        run: |
+          chmod +x ./gradlew
+          chmod +x ./scripts/ios/*.sh
+          mkdir -p artifacts
+
+      - name: Print toolchain information
+        run: |
+          echo '=== Runner ==='
+          uname -a
+          uname -m
+          sw_vers
+          echo
+          echo '=== Xcode ==='
+          xcode-select -p
+          xcodebuild -version
+          echo
+          echo '=== Swift ==='
+          swift --version
+          echo
+          echo '=== Java ==='
+          java -version
+          echo
+          echo '=== Gradle ==='
+          ./gradlew --version
+
+      - name: Run RelayAppleKit tests
+        run: |
+          set -o pipefail
+          swift test --package-path apple/RelayAppleKit \
+            2>&1 | tee "$RUNNER_TEMP/relay-apple-kit-tests.log"
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen version
+
+      - name: Generate Xcode project
+        run: |
+          set -o pipefail
+          ./scripts/ios/generate-xcode-project.sh \
+            2>&1 | tee "$RUNNER_TEMP/xcodegen.log"
+
+      - name: Resolve Swift package dependencies
+        working-directory: composeApp/iosApp
+        run: |
+          set -o pipefail
+          xcodebuild -resolvePackageDependencies \
+            -project RelayIOS.xcodeproj \
+            -scheme RelayIOS \
+            2>&1 | tee "$RUNNER_TEMP/swift-package-resolution.log"
+
+      - name: Build unsigned iOS Simulator app
+        working-directory: composeApp/iosApp
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project RelayIOS.xcodeproj \
+            -scheme RelayIOS \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/RelayDerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/RelayIOS-Build.xcresult" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGN_IDENTITY='' \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            2>&1 | tee "$RUNNER_TEMP/xcodebuild-simulator.log"
+
+      - name: Package simulator application
+        run: |
+          APP_PATH="$(find "$RUNNER_TEMP/RelayDerivedData/Build/Products/Debug-iphonesimulator" \
+            -maxdepth 1 -type d -name '*.app' -print -quit)"
+
+          if [ -z "$APP_PATH" ]; then
+            echo 'No Simulator .app bundle was produced.' >&2
+            exit 1
+          fi
+
+          echo "Packaging $APP_PATH"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$APP_PATH" artifacts/RelayIOS-simulator-arm64.zip
+          ls -lh artifacts/RelayIOS-simulator-arm64.zip
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo '## Relay iOS CI'
+            echo
+            echo "- Runner: \`$(uname -m) / $(sw_vers -productVersion)\`"
+            echo "- Xcode: \`$(xcodebuild -version | tr '\n' ' ')\`"
+            echo '- Target: unsigned arm64 iOS Simulator application'
+            echo '- Physical iPhone installation requires a separately signed device build.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload iOS build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: relay-ios-simulator-${{ github.sha }}
+          path: |
+            artifacts/RelayIOS-simulator-arm64.zip
+            ${{ runner.temp }}/relay-apple-kit-tests.log
+            ${{ runner.temp }}/xcodegen.log
+            ${{ runner.temp }}/swift-package-resolution.log
+            ${{ runner.temp }}/xcodebuild-simulator.log
+            ${{ runner.temp }}/gradle-embed.log
+            ${{ runner.temp }}/RelayIOS-Build.xcresult
+          if-no-files-found: warn
+          retention-days: 7
