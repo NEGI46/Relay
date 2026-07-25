@@ -6,14 +6,15 @@
 
 ### 通信が途切れても、暗号化した救助情報を次の端末・救助拠点へ。
 
-**Android・端末間通信・PC Gateway・任意のHTTPS Brokerを組み合わせる、災害時向けローカル優先中継システム。**
+**Android・Nearby・PC Gateway・HTTPS Brokerを組み合わせる、災害時向けローカル優先中継システム。**
 
 [![Relay CI](https://github.com/NEGI46/Relay/actions/workflows/relay-ci.yml/badge.svg?branch=agent%2Fzero-operation-relay)](https://github.com/NEGI46/Relay/actions/workflows/relay-ci.yml)
 [![Android](https://img.shields.io/badge/Android-6.0%2B-3DDC84?logo=android&logoColor=white)](#開発環境)
-[![Kotlin](https://img.shields.io/badge/Kotlin-JDK%2017-7F52FF?logo=kotlin&logoColor=white)](#開発環境)
+[![iOS](https://img.shields.io/badge/iOS-build%20foundation-999999?logo=apple&logoColor=white)](#ios開発基盤)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.3.20-7F52FF?logo=kotlin&logoColor=white)](#開発環境)
 [![Status](https://img.shields.io/badge/status-device%20testing%20required-F59E0B)](#現在の状態)
 
-[概要](#30秒でわかるrelay) ・ [仕組み](#仕組み) ・ [背景中継](#常時待機armedと災害通信) ・ [現在の状態](#現在の状態) ・ [開発版](#開発版を試す) ・ [検証](#検証) ・ [ドキュメント](#主要ドキュメント) ・ [English](#english-overview)
+[概要](#30秒でわかるrelay) ・ [仕組み](#仕組み) ・ [背景中継](#常時待機armedと災害通信) ・ [iOS](#ios開発基盤) ・ [現在の状態](#現在の状態) ・ [開発版](#開発版を試す) ・ [検証](#検証) ・ [ドキュメント](#主要ドキュメント) ・ [English](#english-overview)
 
 </div>
 
@@ -27,13 +28,14 @@
 
 Relayは、携帯回線やインターネットが不安定な状況でも、救助要請を**暗号化したまま複数の経路で運ぶ**ことを目指しています。
 
-| 誰が使うか | できること |
+| 対象 | 現在できること |
 |---|---|
 | **Android利用者** | SOS・通常依頼の作成、更新、取消、位置共有への明示同意、署名済み対応状況の確認 |
 | **中継端末** | 救助本文を復号せず、暗号化Envelopeと署名ReceiptをStore–Carry–Forward |
 | **PCスタッフ** | 個人アカウントでログインし、受信・担当・対応・完了を管理 |
-| **HTTPS Broker** | 暗号文を一時保管し、Gatewayへの配送とReceipt返送を補助。本文は復号しない |
-| **開発者** | Android、PC Gateway、Broker、背景中継、エミュレータ、E2E、fuzz、Windows検証を実行 |
+| **HTTPS Broker** | 暗号文、公開Shelter Manifest、署名Receiptを中継。救助本文は復号しない |
+| **iOS開発基盤** | SwiftUIホスト、Compose Multiplatform UI、XcodeGen、Codemagic workflow。救助暗号機能は未完成 |
+| **開発者** | Android、PC Gateway、Broker、背景中継、E2E、fuzz、Windows監査、iOS simulator build基盤を検証 |
 
 ### Relayが解決しようとしていること
 
@@ -102,12 +104,10 @@ Android localDev
 救助拠点公開鍵でSOSを暗号化してBrokerへupload
 ```
 
-この経路はモバイル通信のみの開発previewを成立させるためのものです。
-
 - Gatewayの秘密鍵はBrokerへ送信しません。
 - Manifest publishはGateway credentialで認証されます。
 - Android側はHTTPS、size上限、shelter ID、Manifest構造と有効期間を検査します。
-- **release / pilotReleaseでは無効**です。正式運用のRegional Root・署名Directory・承認済みprovisioningの代わりにはなりません。
+- **release / pilotReleaseでは自動self-pinを無効化**します。正式なRegional Root、署名Directory、承認済みprovisioningの代わりにはなりません。
 
 ---
 
@@ -148,20 +148,50 @@ Relayには、利用者が任意で有効化する背景中継の状態モデル
 - 最後のownerが解放された時だけruntimeを停止
 - 明示的な「すべて停止」では全leaseを解放
 
-### できないこと
+### 現在できないこと
 
 - Androidやメーカーの省電力制御、force-stop、Task Manager killを回避して永久動作すること
 - FCM、気象庁XML、固定BLE beaconなどから災害を自動検知すること
 - Direct Boot中に暗号化DBを読み、`LOCKED_BOOT_COMPLETED`から再開すること
-- バッテリー消費量を保証すること
+- バッテリー消費量や熱状態を保証すること
 
 FCM、気象庁情報、署名Activation Manifest、固定BLE Gatewayは設計文書のみで、実働infra・鍵・Firebase設定はありません。
 
 ---
 
+## iOS開発基盤
+
+iOS向けには、Compose Multiplatformを表示するSwiftUIホストと、クラウド上でbuildするための基盤が追加されています。
+
+### 実装されている基盤
+
+- `composeApp/iosApp`のSwiftUI entry pointとCompose view
+- XcodeGenの`project.yml`と生成script
+- Codemagicの`ios-simulator-smoke` workflow
+- 手動実行の`ios-signed-archive` workflow
+- Xcode 26.0、JDK 17、arm64 simulator向けbuild設定
+- Kotlin `2.3.20`、KSP `2.3.10`、Compose Multiplatform `1.11.1`
+- Kotlin/Native向け`NSRecursiveLock`によるmultiplatform同期処理
+- platform依存を避けたpure Kotlin SHA-256
+- storyboard compilationを不要にする`UILaunchScreen` dictionary
+
+### 現在の制約
+
+> [!WARNING]
+> **iOS版は現時点で救助アプリとして利用できません。**
+
+- `RescueCryptography`のiOS実装はSHA-256だけが実装済みです。
+- 鍵生成、鍵import、SOS暗号化・復号、Receipt署名・検証、trust document署名・検証は`ios_not_yet_implemented`で停止します。
+- iOSではMapLibre地図を表示せず、準備中のplaceholderを表示します。
+- APNs、CoreBluetooth救助中継、実機通信、Privacy Manifest監査は未完了です。
+- Codemagic workflowが存在することと、最新HEADのsimulator buildや署名archiveがgreenであることは同義ではありません。
+- 署名archiveにはApple Developer / App Store Connectの証明書とprofileが必要です。
+
+---
+
 ## 現在の状態
 
-**実装確認基準: 2026-07-24 / source baseline `897ee4b`**  
+**実装確認基準: 2026-07-25 / source baseline `e566931`**  
 このREADME更新コミットは文書のみを変更します。
 
 | 状態 | 意味 |
@@ -170,7 +200,7 @@ FCM、気象庁情報、署名Activation Manifest、固定BLE Gatewayは設計�
 | 🧪 | 自動試験・エミュレータ・シミュレータの検証あり |
 | 🧩 | 基盤はあるが、製品統合または運用provisioningが未完了 |
 | ⚠️ | 外部準備または実機検証が必要 |
-| ⛔ | 正式運用を主張できない |
+| ⛔ | 正式運用または当該機能の完成を主張できない |
 
 | 領域 | 状態 | 現在の境界 |
 |---|---:|---|
@@ -178,12 +208,12 @@ FCM、気象庁情報、署名Activation Manifest、固定BLE Gatewayは設計�
 | 暗号化セッション復元 | ✅ | Room + SQLCipher、別Keystore AES-GCM鍵、version CAS、process restart後の復元 |
 | 明示同意型の位置更新 | ✅ | Switchで同意した場合だけ、新しい位置を取得して暗号化した次versionを作成 |
 | 継続バックグラウンドGPS | ⛔ | location FGS、background location permission、WorkManager周期追跡は未実装 |
-| ARMED / EMERGENCY状態モデル | 🧪 | 永続状態、明示停止、degrade/recovery、復元判断を実装しJVM unit testを追加 |
+| ARMED / EMERGENCY状態モデル | 🧪 | 永続状態、明示停止、degrade/recovery、復元判断をJVM unit testで検証 |
 | 単一通信lease | 🧪 | 通常通信・救助配送・災害通信の二重Foreground Service / Nearby起動を防止 |
 | 自動災害検知 | ⛔ | FCM、気象庁、署名Activation Manifest、固定BLE triggerは設計のみ |
 | Nearby救助中継 | ✅ | 暗号化Envelopeと署名ReceiptをStore–Carry–Forward。受信端末は再配送も開始 |
-| Nearby接続ポリシー | 🧩 | `OPEN` / `TRUSTED`を実装。信頼peer allow-listの完成した運用者provisioningは未完成 |
-| LAN Gateway信頼登録 | 🧪 | `relay-gw:1:` tokenをSharedPreferencesへ永続登録（fail-closed load・衝突時は明示rotation）し、GatewaySyncEngineへ配線して矛盾beaconをfail-closedで拒否。checksum・fingerprint照合・spoof拒否・ヘッドレスimport・登録shelterIdへのmanifest pinningをJVM unit testで検証済み。カメラQR取込UIと実機検証は未実施 |
+| Nearby接続ポリシー | 🧩 | `OPEN` / `TRUSTED`を実装し、明示connectを含めfail-closed。allow-list配布・更新の完成した運用者フローは未完成 |
+| LAN Gateway信頼登録 | 🧪 | `relay-gw:1:` tokenを永続登録し、fail-closed load、明示rotation、GatewaySyncEngine配線、manifest pinningをunit testで検証。カメラQR取込UIと実機検証は未実施 |
 | Broker Manifest enrollment | 🧪 | localDev限定。LAN未接続端末がBroker経由で公開鍵を取得し、暗号化SOSを作れるloop testあり |
 | BLE Gateway信頼 | ⚠️ | Root → signed Directory → signed Manifest → advertised/GATT fingerprint。正式な地域Root/Directory未提供 |
 | Android 6.0互換 | 🧪 | core library desugaringとAPI 23-safe処理を追加。実Android 6端末でのfield確認は未実施 |
@@ -191,15 +221,19 @@ FCM、気象庁情報、署名Activation Manifest、固定BLE Gatewayは設計�
 | PC Gateway SQLite競合対策 | ✅ | DB単位のwrite coordinatorとlock fileでwriter競合を抑制 |
 | CSV export | ✅ | messages/audit共通encoderで表計算ソフトのformula injectionを防止 |
 | HTTPS Broker | ✅ | 暗号文保存、重複排除、TTL、scoped Gateway credential、Manifest・Receipt中継 |
+| Broker security observability | 🧪 | 認証失敗・無効proof・rate limitなどを秘密情報なしの粗いcategoryだけで記録するseamとunit testあり |
 | 固定ngrok開発preview | 🧪 | localDev APKへ固定endpointを組み込み、clone不要launcherと任意のlive E2E harnessを提供 |
 | Broker高可用性 | ⛔ | 単一SQLite instance。HA、監視、災害復旧、RTO/RPOは未設計 |
+| iOS host / build基盤 | 🧩 | SwiftUI、Compose、XcodeGen、Codemagic workflow、Kotlin/Native互換修正あり。最新CI greenは未確認 |
+| iOS救助暗号・配送 | ⛔ | SHA-256以外のRescueCryptography、Nearby/CoreBluetooth救助配送、Receipt検証は未実装 |
+| iOS MapLibre | ⛔ | 地図はplaceholder。実MapLibre統合なし |
 | バッテリー・熱 | ⚠️ | ARMED / EMERGENCY_ACTIVEの実機測定は未実施。数値保証なし |
 | 物理端末・現地RF | ⚠️ | Nearby/BLE多段、OEM省電力、実SIM、閉域LAN、停電復旧はField acceptance未完了 |
-| 正式Release | ⛔ | 組織署名、Authenticode、正式TLS、地域trust artifact、法務・運用承認が必要 |
+| 正式Release | ⛔ | 組織署名、Authenticode、Apple signing、正式TLS、地域trust artifact、法務・運用承認が必要 |
 
 > [!IMPORTANT]
-> **IMPLEMENTED、AUTOMATED_TESTED、DEVICE_TESTED、FIELD_READYは同じ意味ではありません。**
-> 自動試験が成功しても、実Android端末、Bluetooth電波環境、停電、回線混雑、避難所スタッフの運用を検証したことにはなりません。
+> **IMPLEMENTED、AUTOMATED_TESTED、EMULATOR_TESTED、DEVICE_TESTED、FIELD_READYは同じ意味ではありません。**
+> 自動試験やクラウドbuildが成功しても、実端末、Bluetooth電波環境、停電、回線混雑、避難所スタッフの運用を検証したことにはなりません。
 
 ---
 
@@ -250,11 +284,23 @@ Relayは、単なるHTTP成功やNearby転送完了を「救助拠点に届い�
 
 `OPEN`はゼロ操作でmeshを形成するため、到達可能なpeerを受け入れる既定モードです。これはpeerの本人確認ではありません。payload側ではsize、TTL、hop、hash、version、重複、衝突を検査します。
 
-`TRUSTED`は明示allow-listに含まれるpeerだけを許可します。allow-listは受信・自動発起に加えて明示的な`connect()`発信経路でもfail-closedで強制されます（許可外peerは再試行せず拒否）。ただしallow-listを安全に配布・更新する完成した運用者フローはありません。
+`TRUSTED`は明示allow-listに含まれるpeerだけを許可します。allow-listは受信・自動発起に加えて明示的な`connect()`発信経路でもfail-closedで強制されます。ただし、allow-listを安全に配布・更新する完成した運用者フローはありません。
 
 ### LAN Gateway discovery
 
-UDP discovery beaconは**発見手段であって認証ではありません**。QR・手入力用の`relay-gw:1:` enrollment token、checksum、manifest fingerprint pinning、矛盾beacon拒否に加え、Androidでの永続登録（fail-closed load・衝突時の明示rotation）とGatewaySyncEngineへの配線、ヘッドレスimport、登録shelterIdへのmanifest pinningを実装しJVM unit testで検証しました。残るはカメラQR取込UIと実機・現地検証です。
+UDP discovery beaconは**発見手段であって認証ではありません**。Androidでは次の境界を実装しています。
+
+- QR・手入力用`relay-gw:1:` token
+- checksum、field validation、fingerprint pinning
+- SharedPreferencesへのcanonical payload永続化
+- 破損entryのfail-closed除外と再保存
+- 同一gatewayIdの異なるidentityをsilent overwriteしない明示rotation
+- GatewaySyncEngineへのenrollment store配線
+- 矛盾beaconの拒否
+- headless import flow
+- 登録tokenのshelterIdとShelter Manifestのfail-closed照合
+
+残る主な項目は、カメラQR取込UIと実端末・現地LAN検証です。
 
 ### Broker Manifest relay
 
@@ -286,7 +332,7 @@ BLE Gatewayへ暗号化Envelopeを提出
 
 staffは個人アカウントを使い、`ADMIN` / `OPERATOR` / `VIEWER`へ分離されます。passwordはPBKDF2-HMAC-SHA-256、session tokenはrandom 256-bitで、DBにはhashだけを保存します。
 
-Gatewayの救助秘密鍵は現在、owner-only local fileです。DPAPI、HSM、KMS保護済みとは主張しません。
+Gatewayの救助秘密鍵は現在、owner-only local fileです。DPAPI、HSM、KMS保護済みとは主張しません。Windows監査ではDPAPI導入を、native依存とthreat modelを含むmaintainer判断が必要な項目として延期しています。
 
 ### Broker
 
@@ -296,6 +342,7 @@ Gatewayの救助秘密鍵は現在、owner-only local fileです。DPAPI、HSM�
 - raw credentialは発行時だけ扱い、DBにはSHA-256 hashを保存します。
 - production/lab Brokerはloopbackへbindし、外部TLS reverse proxyの背後で運用します。
 - 単一BrokerはHAではありません。
+- security observabilityはcategoryだけを扱い、token、key、ciphertext、payloadをsinkへ渡しません。
 
 ### Background relay
 
@@ -304,12 +351,18 @@ Gatewayの救助秘密鍵は現在、owner-only local fileです。DPAPI、HSM�
 - OS exit reasonだけで「利用者が永久停止した」と判断せず、アプリ内で保存した明示停止flagを優先します。
 - force-stopやメーカー独自の深い省電力を回避する仕組みではありません。
 
+### iOS
+
+- 現在のiOS実装はUI/build smoke用です。
+- SHA-256以外の救助暗号操作はfail-fastします。
+- iOS buildが通ることを、救助暗号・BLE・Broker配送が機能する証明として扱いません。
+
 ---
 
 ## 開発版を試す
 
 > [!WARNING]
-> 以下は**個人開発・動作確認専用**です。debug/localDev APK、unsigned Windows installer、ngrok・Cloudflareの開発tunnelを共同実証の正式配布物や緊急運用へ使わないでください。
+> 以下は**個人開発・動作確認専用**です。debug/localDev APK、unsigned Windows installer、未署名iOS simulator app、ngrok・Cloudflareの開発tunnelを共同実証の正式配布物や緊急運用へ使わないでください。
 
 ### 最短: 配布物だけでモバイル通信経路を試す
 
@@ -346,8 +399,6 @@ PC Gateway → Brokerからpull・復号 → 署名Receiptを返送
 ```powershell
 Start-Relay-Broker-Tunnel-Development.cmd
 ```
-
-launcherは、Broker container、固定domain tunnel、短命Gateway credential、PC Gateway接続、health確認をまとめて実行します。
 
 現在のsource既定domain:
 
@@ -403,12 +454,16 @@ Start-Relay-Broker-Tunnel-Development.cmd -Down
 - WindowsでGateway installerを作る場合はWiX 3
 - Broker containerまたはtunnelを試す場合はDocker Compose
 - Playwright E2Eを実行する場合はNode.js
+- iOSをbuildする場合はmacOS、Xcode 26、XcodeGen
 
-Android設定:
+主なversion:
 
-- min SDK: 23（Android 6.0）
-- target / compile SDK: 36
-- version: `1.0.0`
+- Kotlin: `2.3.20`
+- KSP: `2.3.10`
+- Compose Multiplatform: `1.11.1`
+- Android min SDK: 23（Android 6.0）
+- Android target / compile SDK: 36
+- Android version: `1.0.0`
 - core library desugaring: enabled
 
 Clone:
@@ -419,7 +474,7 @@ cd Relay
 git switch agent/zero-operation-relay
 ```
 
-基本build:
+Windowsの基本build:
 
 ```powershell
 .\gradlew.bat :app:assembleLocalDev :pc-gateway:installDist :broker:build
@@ -438,6 +493,29 @@ app/build/outputs/apk/localDev/app-localDev.apk
 ```
 
 endpointはHTTPS・host必須・embedded credential禁止です。空の場合はBroker配送を無効化します。
+
+### iOSをmacOSでbuildする
+
+XcodeGenを導入してprojectを生成します。
+
+```bash
+./scripts/ios/install-xcodegen.sh
+./scripts/ios/generate-xcode-project.sh
+```
+
+Kotlin frameworkだけを先に確認する場合:
+
+```bash
+./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64 --no-daemon --stacktrace
+```
+
+生成後は次のprojectをXcodeで開きます。
+
+```text
+composeApp/iosApp/RelayIOS.xcodeproj
+```
+
+この手順で確認できるのはiOS host / Compose UI / build統合です。救助暗号や通信機能の完成を意味しません。
 
 ### その他のBroker開発構成
 
@@ -488,6 +566,14 @@ Release前の厳格判定:
 .\scripts\validate-windows-development.ps1 -Strict
 ```
 
+2026-07-24のWindows監査では、監査対象HEADに対して次を記録しています。
+
+- **20 PASS / 1 BLOCKED / 0 FAIL**
+- JVM主要suite: **444 tests / 0 failures / 0 errors / 1 infrastructure-gated skip**
+- BLOCKED: `gateway-backup-restore`。Windows向けlitestream binaryがなく、`age` / `age-keygen`も未導入
+
+これは監査時点の証拠です。その後のiOS/toolchain変更を含む最新HEAD全体の再実行結果ではありません。
+
 ### Android instrumentation
 
 ```powershell
@@ -529,19 +615,34 @@ npm test
 
 実Ktor route、実static SPA、実staff session、実救助intakeを起動し、login、critical SOS確認、status更新、health/settings、filterをChromiumで操作します。
 
+### iOS Codemagic
+
+`codemagic.yaml`には次のmanual workflowがあります。
+
+| Workflow | 内容 | 現在の扱い |
+|---|---|---|
+| `ios-simulator-smoke` | Swift tests、shared JVM tests、XcodeGen、Kotlin iOS framework、unsigned arm64 simulator app | source / workflow基盤あり。最新greenはこのREADME更新で未確認 |
+| `ios-signed-archive` | signing file取得、Release archive、IPA生成 | Apple signing設定が必要。成功を未確認 |
+
+simulator workflowはcompiler errorを見失わないよう、Kotlin frameworkをXcode build前に直接compileし、Gradle・xcodebuild logをartifact化します。
+
 ### 現在記録されている自動検証
 
 | 検証 | 記録 |
 |---|---|
-| Android API 36 instrumentation | 20/20、失敗0の記録あり |
+| Android API 36 instrumentation | 20/20、失敗0の過去記録あり |
 | Background relay unit suite | 状態遷移、明示停止、復元判断、start backoff、lease、exit interpretation |
-| PC Gateway staff console Playwright | Chromium 4/4の記録あり |
+| LAN Gateway enrollment | persistence、破損load、衝突、rotation、trust decision、manifest shelter pinning |
+| Nearby TRUSTED policy | inbound、auto-initiate、明示connectのallow-list enforcement |
+| Broker observability | AUTH_FAILED、INVALID_REGISTRATION_PROOF、RATE_LIMITED、no-op default |
+| PC Gateway staff console Playwright | Chromium 4/4の過去記録あり |
 | Mobile provisioning loop | LAN未接続phoneがBroker Manifestだけで暗号化し、Gateway秘密鍵で復号できるin-process test |
 | Broker→Gateway→Receipt E2E | 実HTTP、SQLite、RSA-OAEP、ECDSA署名を使うtest |
 | Broker/Gateway load test | 60端末相当、pull pagination、各端末へのReceipt分離 |
 | fault injection | 最初のpullとReceipt POSTを失敗させ、loss・duplicateなしでretry |
 | Decoder safety | deterministic regressionと実Jazzer target |
-| Windows | PowerShell 5.1 / 7、CP932/ASCII、launcher、autostart、Gateway health smoke test |
+| Windows監査 | 20 PASS / 1 BLOCKED / 0 FAILの監査記録 |
+| iOS | workflow・host・toolchain sourceあり。実機・暗号機能・最新CI greenは未確認 |
 
 ### 任意のlive ngrok E2E
 
@@ -563,13 +664,16 @@ device register → signed upload → Gateway pull/decrypt
 - ARMED idleとEMERGENCY_ACTIVE 1時間・6時間のbattery / thermal測定
 - 実BLE advertisement / GATT identityと公式Directoryの照合
 - Android 6.0実端末でのNearby・session・Manifest fetch
+- QR camera scanと永続Gateway enrollmentの実端末確認
 - Android→閉域LAN→PC Gateway
 - 実SIM→HTTPS Broker→Gateway→Receipt返送
 - Gateway/Broker停止、停電、DB restore、回線復旧
+- iOS simulator buildの最新Codemagic green確認
+- iOS実機build、signing、救助暗号、CoreBluetooth、Broker経路
 - 実スタッフによる担当競合、誤操作、fake SOS、負荷訓練
-- Android/Windowsの正式署名artifactを代表端末へinstall
+- Android / Windows / iOSの正式署名artifactを代表端末へinstall
 
-このREADME更新では、最新HEADの全GitHub Actionsがgreenであることを独自に再実行・確認したとは主張しません。CI badgeと各workflow runを確認してください。
+このREADME更新では、最新HEADの全GitHub ActionsやCodemagic workflowがgreenであることを独自に再実行・確認したとは主張しません。
 
 ---
 
@@ -580,13 +684,14 @@ device register → signed upload → Gateway pull/decrypt
 1. 自治体・消防・避難所による責任分界、運用時間、停止条件、連絡計画
 2. 正式なRegional Root bundleとRoot署名済みShelter Directory
 3. Gatewayの実recipient key・receipt-signing keyとfingerprint確認
-4. Android組織署名、Windows Authenticode、cosign/TUFの管理
+4. Android組織署名、Windows Authenticode、Apple signing、cosign/TUFの管理
 5. TLS、DNS、reverse proxy、firewall、WAF、hosting、monitoring
 6. Broker HA、backup、alert、RTO/RPO、障害訓練
 7. 個人情報の保存期間、閲覧、削除、漏えい対応
 8. 法務、保険、通信制度、OSS notice、プロジェクトlicense
 9. 自動災害triggerの署名authority、配信server、運用鍵
-10. 実端末・実networkによるField acceptance test
+10. iOS救助暗号、通信transport、Privacy Manifest、App Store要件
+11. 実端末・実networkによるField acceptance test
 
 **現在の総合判断:** `READY_FOR_DEVICE_TEST_WITH_TRUST_ARTIFACT_BLOCKER`
 
@@ -598,11 +703,13 @@ device register → signed upload → Gateway pull/decrypt
 app/                         Androidアプリ
   src/main/.../background/   ARMED / EMERGENCY状態・lease・exit処理
 shared/                      共通model・暗号・trust contract
+  src/iosMain/               iOS actual実装（救助暗号はSHA-256以外未完成）
 relay-protocol/              Gateway wire protocol
 pc-gateway/                  救助拠点PC Gateway
 broker/                      HTTPS暗号文・Manifest・Receipt Broker
+composeApp/                  Compose Multiplatform preview
+  iosApp/                    SwiftUI / XcodeGen iOS host
 deployment/broker/           Docker Compose + Caddy構成
-composeApp/                   Compose Multiplatform preview
 pc-ble-bridge/               Windows BLE sidecar
 fuzz-jvm/                    実Jazzer decoder target
 staff-console-e2e/           Playwright browser E2E
@@ -610,7 +717,9 @@ gateway-meshtastic-adapter/  Meshtastic adapter
 gateway-bp7-export/          BPv7 export boundary
 test-lab/                    host・fault・simulator test
 scripts/                     build・起動・検証・release tool
+  ios/                       XcodeGen install・project生成・設定検証
 docs/                        architecture・audit・runbook
+codemagic.yaml               iOS simulator / signed archive workflow
 ```
 
 ---
@@ -619,6 +728,10 @@ docs/                        architecture・audit・runbook
 
 | 目的 | ドキュメント |
 |---|---|
+| iOS buildの状態 | [iOS build status](docs/IOS_BUILD_STATUS.md) |
+| Codemagic設定 | [iOS Codemagic setup](docs/IOS_CODEMAGIC_SETUP.md) |
+| 最新の総合debug監査 | [Full debug audit](docs/audits/FULL_DEBUG_AUDIT_2026-07-24.md) |
+| Windowsで次に行う作業の監査 | [Windows next-work audit](docs/audits/WINDOWS_NEXT_WORK_AUDIT_2026-07.md) |
 | 常時待機（ARMED）と災害通信 | [Background relay mode](docs/BACKGROUND_RELAY_MODE.md) |
 | 背景中継のテスト計画 | [Background relay test plan](docs/BACKGROUND_RELAY_TEST_PLAN.md) |
 | 自動災害trigger設計 | [Disaster activation triggers](docs/DISASTER_ACTIVATION_TRIGGERS.md) |
@@ -641,6 +754,9 @@ docs/                        architecture・audit・runbook
 | 正式Release検証 | [Formal release verification](docs/runbooks/VERIFY_FORMAL_RELEASE.md) |
 | Security reporting | [Security policy](SECURITY.md) |
 
+> [!NOTE]
+> 一部の監査・状態文書は作成時点のtoolchainやHEADを記録しています。現在のversionは`gradle/libs.versions.toml`と最新commitを優先してください。
+
 ---
 
 ## 画面
@@ -662,16 +778,16 @@ Relay is a **local-first encrypted rescue-information relay** for outages and in
 - Nearby devices carry ciphertext without receiving the shelter private key.
 - An optional HTTPS Broker stores ciphertext, public shelter manifests, and signed receipts; it never decrypts the rescue body.
 - PC Gateway decrypts at the shelter boundary, supports named staff accounts, publishes its public manifest, and returns signed receipts.
+- LAN Gateway enrollment is now durably wired into Android with fail-closed loading, explicit rotation, beacon rejection, and shelter-manifest pinning. Camera QR capture and physical-device validation remain unfinished.
 - A localDev phone with no prior LAN visit can fetch the Gateway's public manifest from the Broker and encrypt an SOS with that key. This self-pinning shortcut is development-only and disabled in release/pilot builds.
 - The opt-in ARMED state persists readiness but does not keep the process, Nearby, or a foreground service running. EMERGENCY_ACTIVE uses a connected-device foreground service.
 - A shared owner/lease prevents duplicate communication runtimes when user communication, rescue delivery, and emergency mode overlap.
 - Explicit user stop blocks non-user restart routes. Android/OEM force-stop behavior cannot be bypassed.
 - Automatic FCM/JMA/signed-manifest/BLE disaster activation is design-only and not implemented.
-- Explicit location consent can produce a fresh encrypted location update. Continuous background GPS tracking is not implemented.
-- Core-library desugaring and API-safe calls support minSdk 23 at code/build level; a physical Android 6 device test is still required.
-- The development preview can bake a stable ngrok Broker URL into the localDev APK. The free tunnel is not production infrastructure and provides no SLA.
-- Trusted BLE delivery still requires an authorized Regional Root and Root-signed Shelter Directory that are not included in the repository.
-- Automated tests do not replace physical RF, reboot, battery, thermal, OEM power-policy, or field validation.
+- Broker security observability records coarse rejection categories without tokens, keys, ciphertext, or payload bodies.
+- The repository now includes a SwiftUI/Compose iOS host, XcodeGen project generation, and Codemagic simulator/archive workflows.
+- The iOS rescue implementation is not complete: only SHA-256 is implemented; key generation, encryption, decryption, receipt verification, BLE transport, and MapLibre rendering are unavailable.
+- Recorded automated evidence does not replace physical RF, reboot, battery, thermal, OEM power-policy, iOS-device, or field validation.
 
 Relay is not an emergency-dispatch service, not a 119 replacement, and not production-ready.
 
