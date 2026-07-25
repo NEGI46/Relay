@@ -157,8 +157,17 @@ function Invoke-Step {
         $sw.Stop()
         if ($null -eq $r) { $r = @{ status = 'PASS' } }
         elseif ($r -is [int]) { $r = @{ status = $(if ($r -eq 0) { 'PASS' } else { 'FAIL' }); exitCode = $r } }
-        Add-Result -Name $Name -Status ([string]$r.status) -Category $Category -Mandatory $Mandatory `
-            -ExitCode $r.exitCode -Detail ([string]$r.detail) -Millis $sw.ElapsedMilliseconds
+        # Forward all check result fields to Add-Result (test metrics, artifact paths)
+        $addParams = @{
+            Name = $Name; Status = [string]$r.status; Category = $Category; Mandatory = $Mandatory
+            ExitCode = $r.exitCode; Detail = [string]$r.detail; Millis = $sw.ElapsedMilliseconds
+        }
+        if ($r.ContainsKey('executedTests')) { $addParams['ExecutedTests'] = [int]$r.executedTests }
+        if ($r.ContainsKey('failures'))      { $addParams['Failures'] = [int]$r.failures }
+        if ($r.ContainsKey('errors'))        { $addParams['Errors'] = [int]$r.errors }
+        if ($r.ContainsKey('skipped'))       { $addParams['Skipped'] = [int]$r.skipped }
+        if ($r.ContainsKey('artifactPaths')) { $addParams['ArtifactPaths'] = [string[]]$r.artifactPaths }
+        Add-Result @addParams
     } catch {
         $sw.Stop()
         Add-Result -Name $Name -Status 'FAIL' -Category $Category -Mandatory $Mandatory `
@@ -191,7 +200,64 @@ function Invoke-Logged {
     return @{ status = $(if ($code -eq 0) { 'PASS' } else { 'FAIL' }); exitCode = $code; detail = "exitCode=$code log=$safe.log" }
 }
 
-function Invoke-Gradle { param([string]$Name, [string[]]$Tasks) return (Invoke-Logged -Name $Name -Exe $gradlew -CommandArgs ($Tasks + @('--no-daemon', '--console=plain'))) }
+# Parse JUnit XML files from a directory, returning test metrics.
+# Only considers XML files modified AFTER $StartTime to avoid stale results.
+function Parse-JUnitXml {
+    param([string]$XmlDir, [datetime]$StartTime)
+    $result = @{ executedTests = 0; failures = 0; errors = 0; skipped = 0; suites = @() }
+    if (-not (Test-Path -LiteralPath $XmlDir)) { return $result }
+    $xmlFiles = Get-ChildItem -Path $XmlDir -Filter '*.xml' -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $StartTime }
+    foreach ($f in $xmlFiles) {
+        try {
+            [xml]$xml = Get-Content -LiteralPath $f.FullName -Encoding UTF8
+            $suites = @()
+            if ($xml.testsuites) { $suites = @($xml.testsuites.testsuite) }
+            elseif ($xml.testsuite) { $suites = @($xml.testsuite) }
+            foreach ($s in $suites) {
+                if (-not $s) { continue }
+                $t = [int]($s.tests -as [int])
+                $fl = [int]($s.failures -as [int])
+                $e = [int]($s.errors -as [int])
+                $sk = [int]($s.skipped -as [int])
+                $result.executedTests += $t
+                $result.failures += $fl
+                $result.errors += $e
+                $result.skipped += $sk
+                $result.suites += @{ name = $s.name; tests = $t; failures = $fl; errors = $e; skipped = $sk }
+            }
+        } catch {
+            Write-Host "  WARNING: Failed to parse $($f.Name): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+    return $result
+}
+
+# Run Gradle with JUnit XML result parsing. Validates exit code and test count.
+function Invoke-Gradle {
+    param([string]$Name, [string[]]$Tasks, [string]$XmlResultDir = '')
+    $stepStart = Get-Date
+    $r = Invoke-Logged -Name $Name -Exe $gradlew -CommandArgs ($Tasks + @('--no-daemon', '--console=plain'))
+    # If Gradle failed, never report PASS regardless of old XML
+    if ($r.exitCode -ne 0) { return $r }
+    # Parse JUnit XML if result dir specified
+    if ($XmlResultDir -and (Test-Path -LiteralPath $XmlResultDir)) {
+        $parsed = Parse-JUnitXml -XmlDir $XmlResultDir -StartTime $stepStart
+        $r['executedTests'] = $parsed.executedTests
+        $r['failures'] = $parsed.failures
+        $r['errors'] = $parsed.errors
+        $r['skipped'] = $parsed.skipped
+        # 0 executed tests with Gradle success = FAIL (false-green prevention)
+        if ($parsed.executedTests -eq 0) {
+            $r.status = 'FAIL'
+            $r.detail = 'Gradle succeeded but 0 tests executed (no JUnit XML evidence)'
+        } elseif ($parsed.failures -gt 0 -or $parsed.errors -gt 0) {
+            $r.status = 'FAIL'
+            $r.detail = "Tests failed: $($parsed.failures) failures, $($parsed.errors) errors"
+        }
+    }
+    return $r
+}
 function Invoke-PsTest { param([string]$Name, [string]$RelPath) return (Invoke-Logged -Name $Name -Exe 'powershell' -CommandArgs @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $Root $RelPath))) }
 function Invoke-Python { param([string]$Name, [string[]]$PythonArgs) return (Invoke-Logged -Name $Name -Exe 'python' -CommandArgs $PythonArgs) }
 
@@ -210,48 +276,32 @@ $hasNode = Has-Command 'node'
 $hasNpm = Has-Command 'npm'
 $playwrightBlocked = if ($hasNode -and $hasNpm -and (Test-Path -LiteralPath (Join-Path $Root 'staff-console-e2e\package-lock.json'))) { '' } else { 'Node.js, npm, or staff-console-e2e/package-lock.json not found' }
 
-Invoke-Step -Name 'shared-jvm-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'shared-jvm-test' @(':shared:jvmTest') }
-Invoke-Step -Name 'relay-protocol-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'relay-protocol-test' @(':relay-protocol:test') }
-Invoke-Step -Name 'android-unit-test' -Category 'gradle' -Mandatory $false -BlockedReason $androidBlocked -Check { Invoke-Gradle 'android-unit-test' @(':app:testDebugUnitTest') }
+Invoke-Step -Name 'shared-jvm-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'shared-jvm-test' @(':shared:jvmTest') -XmlResultDir (Join-Path $Root 'shared\build\test-results') }
+Invoke-Step -Name 'relay-protocol-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'relay-protocol-test' @(':relay-protocol:test') -XmlResultDir (Join-Path $Root 'relay-protocol\build\test-results') }
+Invoke-Step -Name 'android-unit-test' -Category 'gradle' -Mandatory $false -BlockedReason $androidBlocked -Check { Invoke-Gradle 'android-unit-test' @(':app:testDebugUnitTest') -XmlResultDir (Join-Path $Root 'app\build\test-results') }
 Invoke-Step -Name 'android-lint' -Category 'gradle' -Mandatory $false -BlockedReason $androidBlocked -Check { Invoke-Gradle 'android-lint' @(':app:lintDebug') }
 Invoke-Step -Name 'android-instrumentation-compile' -Category 'gradle' -Mandatory $false -BlockedReason $androidBlocked -Check { Invoke-Gradle 'android-instrumentation-compile' @(':app:compileDebugAndroidTestKotlin') }
 Invoke-Step -Name 'android-api36-instrumentation' -Category 'gradle' -Mandatory $false -BlockedReason $androidBlocked -Check {
-    $r = Invoke-Gradle 'android-api36-instrumentation' @(':app:mediumPhoneApi36DebugAndroidTest')
-    # Verify that at least one test actually executed (BUILD SUCCESSFUL with 0 tests = FAIL)
-    $logFile = Join-Path $script:logRoot 'android-api36-instrumentation.log'
-    if (Test-Path -LiteralPath $logFile) {
-        $logContent = Get-Content -LiteralPath $logFile -Raw -ErrorAction SilentlyContinue
-        if ($r.status -eq 'PASS' -and $logContent -notmatch 'tests? (found|completed|run)') {
-            # Check for JUnit XML results
-            $xmlDir = Join-Path $Root 'app\build\outputs\androidTest-results'
-            $hasXml = (Test-Path -LiteralPath $xmlDir) -and ((Get-ChildItem -Path $xmlDir -Filter '*.xml' -Recurse -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
-            if (-not $hasXml) {
-                $r.status = 'FAIL'
-                $r.detail = 'BUILD SUCCESSFUL but no test execution evidence found'
-            }
-        }
-    }
+    # Clean result directory to avoid stale XML
+    $xmlDir = Join-Path $Root 'app\build\outputs\androidTest-results\managedDevice\mediumPhoneApi36'
+    if (Test-Path -LiteralPath $xmlDir) { Remove-Item -Path $xmlDir -Recurse -Force -ErrorAction SilentlyContinue }
+    $r = Invoke-Gradle 'android-api36-instrumentation' @(':app:mediumPhoneApi36DebugAndroidTest') -XmlResultDir (Join-Path $Root 'app\build\outputs\androidTest-results')
     return $r
 }
-Invoke-Step -Name 'android-api23-instrumentation' -Category 'gradle' -Mandatory $false -BlockedReason $androidBlocked -Check {
-    $r = Invoke-Gradle 'android-api23-instrumentation' @(':app:mediumPhoneApi23DebugAndroidTest')
-    $logFile = Join-Path $script:logRoot 'android-api23-instrumentation.log'
-    if (Test-Path -LiteralPath $logFile) {
-        $logContent = Get-Content -LiteralPath $logFile -Raw -ErrorAction SilentlyContinue
-        if ($r.status -eq 'PASS' -and $logContent -notmatch 'tests? (found|completed|run)') {
-            $xmlDir = Join-Path $Root 'app\build\outputs\androidTest-results'
-            $hasXml = (Test-Path -LiteralPath $xmlDir) -and ((Get-ChildItem -Path $xmlDir -Filter '*.xml' -Recurse -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
-            if (-not $hasXml) {
-                $r.status = 'FAIL'
-                $r.detail = 'BUILD SUCCESSFUL but no test execution evidence found'
-            }
-        }
+Invoke-Step -Name 'android-api23-avd-smoke' -Category 'android-avd' -Mandatory $false -BlockedReason $androidBlocked -Check {
+    # API 23 cannot use Gradle Managed Devices (GMD supports API 27+ only).
+    # Delegate to the classic AVD smoke script instead.
+    $scriptPath = Join-Path $Root 'scripts\android-test\run-api23-smoke.ps1'
+    if (-not (Test-Path -LiteralPath $scriptPath)) {
+        return @{ status = 'BLOCKED'; detail = 'scripts\android-test\run-api23-smoke.ps1 not found' }
     }
+    $r = Invoke-Logged -Name 'android-api23-avd-smoke' -Exe 'powershell' -CommandArgs @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath)
+    if ($r.exitCode -eq 2) { $r.status = 'BLOCKED'; $r.detail = 'blocked (API 23 image or license missing) ' + $r.detail }
     return $r
 }
-Invoke-Step -Name 'pc-gateway-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'pc-gateway-test' @(':pc-gateway:test') }
-Invoke-Step -Name 'broker-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'broker-test' @(':broker:test') }
-Invoke-Step -Name 'compose-desktop-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'compose-desktop-test' @(':composeApp:desktopTest') }
+Invoke-Step -Name 'pc-gateway-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'pc-gateway-test' @(':pc-gateway:test') -XmlResultDir (Join-Path $Root 'pc-gateway\build\test-results') }
+Invoke-Step -Name 'broker-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'broker-test' @(':broker:test') -XmlResultDir (Join-Path $Root 'broker\build\test-results') }
+Invoke-Step -Name 'compose-desktop-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'compose-desktop-test' @(':composeApp:desktopTest') -XmlResultDir (Join-Path $Root 'composeApp\build\test-results') }
 Invoke-Step -Name 'staff-console-playwright' -Category 'e2e' -Mandatory $false -BlockedReason $playwrightBlocked -Check {
     $e2eDir = Join-Path $Root 'staff-console-e2e'
     $safe = 'staff-console-playwright'
@@ -301,7 +351,7 @@ Invoke-Step -Name 'implementation-contract-check' -Category 'script' -Mandatory 
 Invoke-Step -Name 'host-checks' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'host-checks' 'test-lab\run-host-checks.ps1' }
 Invoke-Step -Name 'decoder-regression' -Category 'python' -Mandatory $false -BlockedReason $(if ($hasPython) { '' } else { 'python not found' }) -Check { Invoke-Python 'decoder-regression' @('-m', 'unittest', 'discover', '-s', 'test-lab/fuzz', '-p', 'decoder*_test.py') }
 Invoke-Step -Name 'virtual-ble-test' -Category 'python' -Mandatory $false -BlockedReason $(if ($hasPython) { '' } else { 'python not found' }) -Check { Invoke-Python 'virtual-ble-test' @('tools/ble-sim/run_tests.py') }
-Invoke-Step -Name 'jvm-jazzer-regression' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'jvm-jazzer-regression' @(':fuzz-jvm:test') }
+Invoke-Step -Name 'jvm-jazzer-regression' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'jvm-jazzer-regression' @(':fuzz-jvm:test') -XmlResultDir (Join-Path $Root 'fuzz-jvm\build\test-results') }
 Invoke-Step -Name 'windows-launcher-test' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'windows-launcher-test' 'scripts\tests\run-pc-gateway-launcher.tests.ps1' }
 Invoke-Step -Name 'windows-autostart-test' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'windows-autostart-test' 'scripts\tests\register-poc-gateway-autostart.tests.ps1' }
 Invoke-Step -Name 'windows-setup-test' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'windows-setup-test' 'scripts\tests\pc-gateway-setup.tests.ps1' }
