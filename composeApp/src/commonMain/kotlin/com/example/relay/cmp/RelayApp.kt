@@ -21,7 +21,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -279,7 +278,7 @@ private fun SafetyForm(
     onSave: (SafetyState, Int, String, String) -> Unit,
 ) {
     var selected by remember { mutableStateOf(SafetyState.SAFE) }
-    var companions by remember { mutableIntStateOf(0) }
+    var companions by remember { mutableStateOf(0) }
     var location by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     Scaffold { padding ->
@@ -339,7 +338,7 @@ private fun SupplyForm(
     onSave: (SupplyKind, Int, String, String, String?) -> Unit,
 ) {
     var selected by remember { mutableStateOf(SupplyKind.WATER) }
-    var count by remember { mutableIntStateOf(1) }
+    var count by remember { mutableStateOf(1) }
     var location by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var other by remember { mutableStateOf("") }

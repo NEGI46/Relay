@@ -3,7 +3,7 @@ package com.example.relay.rescue
 import com.example.relay.domain.RelayMessage
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
-import kotlinx.cinterop.convert
+import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.usePinned
 import platform.CoreCrypto.CC_SHA256
 import platform.CoreCrypto.CC_SHA256_DIGEST_LENGTH
@@ -58,17 +58,22 @@ actual object RescueCryptography {
 
     @OptIn(ExperimentalForeignApi::class)
     actual fun sha256Hex(bytes: ByteArray): String {
-        val digest = UByteArray(CC_SHA256_DIGEST_LENGTH)
-        bytes.usePinned { pinned ->
-            digest.usePinned { digestPinned ->
+        val digest = ByteArray(CC_SHA256_DIGEST_LENGTH)
+        bytes.usePinned { inputPinned ->
+            digest.usePinned { outputPinned ->
                 CC_SHA256(
-                    pinned.addressOf(0),
-                    bytes.size.convert(),
-                    digestPinned.addressOf(0),
+                    inputPinned.addressOf(0),
+                    bytes.size.toUInt(),
+                    outputPinned.addressOf(0).reinterpret(),
                 )
             }
         }
-        return digest.joinToString("") { it.toString(16).padStart(2, '0') }
+        return buildString(CC_SHA256_DIGEST_LENGTH * 2) {
+            for (b in digest) {
+                val unsigned = b.toInt() and 0xFF
+                append(unsigned.toString(16).padStart(2, '0'))
+            }
+        }
     }
 
     actual fun signReceipt(
