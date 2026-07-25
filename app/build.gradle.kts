@@ -1,5 +1,7 @@
 import com.android.build.api.dsl.ManagedVirtualDevice
 import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.net.URI
 import java.util.Collections
 import java.util.zip.ZipFile
@@ -69,9 +71,38 @@ android {
     }
 
     defaultConfig {
-        val gitCommit = providers.exec { commandLine("git", "rev-parse", "HEAD") }.standardOutput.asText.get().trim()
+        // Deterministic build metadata: prefer SOURCE_DATE_EPOCH, then GITHUB_SHA/CI env,
+        // then git commit timestamp for reproducibility. Fall back to current time only for debug.
+        val gitCommit: String = providers.environmentVariable("GITHUB_SHA").orNull
+            ?: runCatching {
+                providers.exec { commandLine("git", "rev-parse", "HEAD") }.standardOutput.asText.get().trim()
+            }.getOrElse { "unknown" }
+
+        val buildTimestamp: String = run {
+            // SOURCE_DATE_EPOCH is the standard reproducibility variable
+            val sourceDateEpoch = providers.environmentVariable("SOURCE_DATE_EPOCH").orNull
+            if (!sourceDateEpoch.isNullOrBlank()) {
+                return@run Instant.ofEpochSecond(sourceDateEpoch.toLong())
+                    .atOffset(ZoneOffset.UTC)
+                    .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+            }
+            // Next: use git commit timestamp for release reproducibility
+            val gitTimestamp = runCatching {
+                providers.exec { commandLine("git", "log", "-1", "--format=%cI") }.standardOutput.asText.get().trim()
+            }.getOrNull()?.takeIf { it.isNotBlank() }
+            if (gitTimestamp != null) return@run gitTimestamp
+            // Fallback for non-git source archives or debug
+            Instant.now().atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+        }
+
+        // Allow explicit version overrides from properties (CI, release tags)
+        val overrideVersionName = providers.gradleProperty("relay.version.name").orNull
+        val overrideVersionCode = providers.gradleProperty("relay.version.code").orNull
+        if (!overrideVersionName.isNullOrBlank()) versionName = overrideVersionName
+        if (!overrideVersionCode.isNullOrBlank()) versionCode = overrideVersionCode.toInt()
+
         buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
-        buildConfigField("String", "BUILD_TIME", "\"${Instant.now()}\"")
+        buildConfigField("String", "BUILD_TIME", "\"$buildTimestamp\"")
     }
 
     val releaseSigningConfig = if (relayReleaseSigningConfigured) {
@@ -135,6 +166,11 @@ android {
                     device = "Medium Phone"
                     apiLevel = 36
                     systemImageSource = "google_apis_playstore"
+                }
+                maybeCreate<ManagedVirtualDevice>("mediumPhoneApi23").apply {
+                    device = "Medium Phone"
+                    apiLevel = 23
+                    systemImageSource = "google"
                 }
             }
         }
