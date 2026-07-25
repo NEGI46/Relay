@@ -290,15 +290,10 @@ private fun EnrollmentInputScreen(
             } else if (!cameraPermissionDenied) {
                 Button(
                     onClick = {
-                        if (hasCameraPermission) {
-                            showCamera = true
-                        } else {
-                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                        }
+                        if (hasCameraPermission) showCamera = true
+                        else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
                         .semantics { contentDescription = "カメラでQRスキャン" },
                 ) { Text("カメラでQRをスキャン") }
             } else {
