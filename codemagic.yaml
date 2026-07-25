@@ -1,0 +1,160 @@
+workflows:
+  ios-simulator-smoke:
+    name: "iOS Simulator Smoke Build"
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      java: 17
+      xcode: 26.0
+      vars:
+        BUNDLE_ID: "com.example.relay.ios"
+        XCODEGEN_VERSION: "2.45.0"
+    cache:
+      cache_paths:
+        - $HOME/.gradle/caches
+        - $HOME/.gradle/wrapper
+    scripts:
+      - name: "Print toolchain info"
+        script: |
+          echo "=== System Info ==="
+          uname -a
+          sw_vers
+          echo ""
+          echo "=== Xcode ==="
+          xcodebuild -version
+          echo ""
+          echo "=== Swift ==="
+          swift --version
+          echo ""
+          echo "=== Java ==="
+          java -version
+          echo ""
+          echo "=== Gradle Wrapper ==="
+          chmod +x ./gradlew
+          ./gradlew --version
+          echo ""
+
+      - name: "Grant execute permission to Gradle Wrapper"
+        script: chmod +x ./gradlew
+
+      - name: "Run RelayAppleKit Swift tests"
+        script: |
+          cd apple/RelayAppleKit
+          swift test
+          cd ../..
+
+      - name: "Run shared JVM tests"
+        script: ./gradlew :shared:jvmTest --no-daemon
+
+      - name: "Install XcodeGen"
+        script: |
+          echo "Installing XcodeGen ${XCODEGEN_VERSION}..."
+          brew install xcodegen
+          xcodegen version
+
+      - name: "Generate Xcode project"
+        script: |
+          cd composeApp/iosApp
+          xcodegen generate
+          echo ""
+          echo "=== Project structure ==="
+          ls -la RelayIOS.xcodeproj/ || true
+
+      - name: "List Xcode project targets and schemes"
+        script: |
+          cd composeApp/iosApp
+          xcodebuild -list -project RelayIOS.xcodeproj
+
+      - name: "Resolve Swift Package dependencies"
+        script: |
+          cd composeApp/iosApp
+          xcodebuild -resolvePackageDependencies \
+            -project RelayIOS.xcodeproj \
+            -scheme RelayIOS
+
+      - name: "Build unsigned iOS Simulator app"
+        script: |
+          cd composeApp/iosApp
+          xcodebuild build \
+            -project RelayIOS.xcodeproj \
+            -scheme RelayIOS \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            | tee /tmp/xcodebuild_logs/simulator-build.log
+
+    artifacts:
+      - composeApp/iosApp/build/Build/Products/Debug-iphonesimulator/*.app
+      - composeApp/iosApp/build/Build/Products/Debug-iphonesimulator/*.dSYM
+      - /tmp/xcodebuild_logs/*.log
+
+  ios-signed-archive:
+    name: "iOS Signed Archive (Manual)"
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      java: 17
+      xcode: 26.0
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.example.relay.ios
+      vars:
+        BUNDLE_ID: "com.example.relay.ios"
+        XCODEGEN_VERSION: "2.45.0"
+    cache:
+      cache_paths:
+        - $HOME/.gradle/caches
+        - $HOME/.gradle/wrapper
+    scripts:
+      - name: "Print toolchain info"
+        script: |
+          uname -a
+          sw_vers
+          xcodebuild -version
+          swift --version
+          java -version
+
+      - name: "Grant execute permission"
+        script: chmod +x ./gradlew
+
+      - name: "Install XcodeGen"
+        script: |
+          brew install xcodegen
+          xcodegen version
+
+      - name: "Generate Xcode project"
+        script: |
+          cd composeApp/iosApp
+          xcodegen generate
+
+      - name: "Fetch signing certificates"
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: "Set build number"
+        script: |
+          cd composeApp/iosApp
+          agvtool new-version -all $((${PROJECT_BUILD_NUMBER:-1}))
+
+      - name: "Build IPA"
+        script: |
+          cd composeApp/iosApp
+          xcode-project build-ipa \
+            --project RelayIOS.xcodeproj \
+            --scheme RelayIOS \
+            --config Release \
+            | tee /tmp/xcodebuild_logs/archive-build.log
+
+    artifacts:
+      - composeApp/iosApp/build/ios/ipa/*.ipa
+      - composeApp/iosApp/build/Build/Products/Release-iphoneos/*.app
+      - composeApp/iosApp/build/Build/Products/Release-iphoneos/*.dSYM
+      - /tmp/xcodebuild_logs/*.log
