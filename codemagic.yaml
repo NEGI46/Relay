@@ -74,12 +74,35 @@ workflows:
 
       - name: "Pre-compile Kotlin iOS Framework (diagnostics)"
         script: |
+          set -o pipefail
           echo "=== Pre-compiling Kotlin iOS framework (outside Xcode) ==="
           echo "This step surfaces the full Gradle error if compilation fails."
+          echo ""
           ./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64 \
             --no-daemon \
-            --stacktrace \
+            --info \
             2>&1 | tee /tmp/gradle-ios-compile.log
+          RESULT=$?
+          if [ $RESULT -ne 0 ]; then
+            echo ""
+            echo "========================================="
+            echo "=== COMPILATION FAILED (exit $RESULT) ==="
+            echo "========================================="
+            echo ""
+            echo "=== Lines containing 'error' (case-insensitive): ==="
+            grep -i "error" /tmp/gradle-ios-compile.log | grep -v "^\s*at " | head -40 || true
+            echo ""
+            echo "=== Lines containing 'unresolved\|not found\|cannot find': ==="
+            grep -i "unresolved\|not found\|cannot find\|no such" /tmp/gradle-ios-compile.log | head -20 || true
+            echo ""
+            echo "=== Kotlin compiler output (w: and e: lines): ==="
+            grep "^[ew]:" /tmp/gradle-ios-compile.log | head -40 || true
+            echo ""
+            echo "=== What went wrong: ==="
+            grep -A15 "What went wrong" /tmp/gradle-ios-compile.log || true
+            echo ""
+            exit $RESULT
+          fi
           echo ""
           echo "=== Kotlin iOS Framework compiled successfully ==="
 
