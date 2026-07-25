@@ -31,6 +31,8 @@ targets:
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: ""
         PROVISIONING_PROFILE_SPECIFIER: ""
+        # Only arm64 simulator — we define iosSimulatorArm64 but not iosX64
+        EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
         # Kotlin direct integration output
         FRAMEWORK_SEARCH_PATHS:
           - "$(SRCROOT)/../../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
