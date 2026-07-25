@@ -43,11 +43,11 @@ kotlin {
             implementation(project(":shared"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
-            implementation(libs.maplibre.compose)
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
             implementation(libs.kotlinx.coroutines.android)
+            implementation(libs.maplibre.compose)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
@@ -55,6 +55,7 @@ kotlin {
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)
+                implementation(libs.maplibre.compose)
             }
         }
     }
