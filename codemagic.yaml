@@ -74,7 +74,9 @@ workflows:
 
       - name: "Build unsigned iOS Simulator app"
         script: |
+          mkdir -p /tmp/xcodebuild_logs
           cd composeApp/iosApp
+          set -o pipefail
           xcodebuild build \
             -project RelayIOS.xcodeproj \
             -scheme RelayIOS \
@@ -84,7 +86,7 @@ workflows:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            | tee /tmp/xcodebuild_logs/simulator-build.log
+            2>&1 | tee /tmp/xcodebuild_logs/simulator-build.log
 
     artifacts:
       - composeApp/iosApp/build/Build/Products/Debug-iphonesimulator/*.app
@@ -146,12 +148,14 @@ workflows:
 
       - name: "Build IPA"
         script: |
+          mkdir -p /tmp/xcodebuild_logs
           cd composeApp/iosApp
+          set -o pipefail
           xcode-project build-ipa \
             --project RelayIOS.xcodeproj \
             --scheme RelayIOS \
             --config Release \
-            | tee /tmp/xcodebuild_logs/archive-build.log
+            2>&1 | tee /tmp/xcodebuild_logs/archive-build.log
 
     artifacts:
       - composeApp/iosApp/build/ios/ipa/*.ipa

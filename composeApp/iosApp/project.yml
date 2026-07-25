@@ -55,8 +55,8 @@ targets:
           fi
           cd "$SRCROOT/../.."
           ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode \
-            -Pios.arch=${ARCHS} \
-            -Pkotlin.native.cocoapods.generate.wrapper=true
+            --no-daemon \
+            --stacktrace
         inputFiles: []
         outputFiles: []
     scheme:
