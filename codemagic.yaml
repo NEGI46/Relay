@@ -80,7 +80,7 @@ workflows:
           echo ""
           ./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64 \
             --no-daemon \
-            --info \
+            --stacktrace \
             2>&1 | tee /tmp/gradle-ios-compile.log
           RESULT=$?
           if [ $RESULT -ne 0 ]; then
