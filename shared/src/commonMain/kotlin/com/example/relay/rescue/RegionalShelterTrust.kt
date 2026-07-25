@@ -244,13 +244,12 @@ class RegionalShelterDirectoryResolver(rootBundles: Collection<RegionalRootBundl
     }
     private val accepted = mutableMapOf<String, SignedRegionalShelterDirectory>()
 
-    @Synchronized
-    fun accept(candidate: SignedRegionalShelterDirectory, nowEpochMillis: Long): DirectoryAcceptance {
-        val root = roots[candidate.directory.regionId] ?: return DirectoryAcceptance.Invalid
+    fun accept(candidate: SignedRegionalShelterDirectory, nowEpochMillis: Long): DirectoryAcceptance = platformSynchronized(this) {
+        val root = roots[candidate.directory.regionId] ?: return@platformSynchronized DirectoryAcceptance.Invalid
         if (root.validate() != RescueValidationResult.Valid ||
             !root.rootSigningPublicKey.isUsablePublicKey() ||
             !verifyRegionalShelterDirectory(candidate, root, nowEpochMillis)
-        ) return DirectoryAcceptance.Invalid
+        ) return@platformSynchronized DirectoryAcceptance.Invalid
         // The directory signature authenticates membership, but each member remains an
         // independently signed manifest.  Never trust a re-signed directory carrying an altered
         // recipient key, receipt key, or BLE identity whose manifest signature no longer verifies.
@@ -260,28 +259,27 @@ class RegionalShelterDirectoryResolver(rootBundles: Collection<RegionalRootBundl
                     !it.manifest.receiptSigningPublicKey.isUsablePublicKey()
             }
         ) {
-            return DirectoryAcceptance.Invalid
+            return@platformSynchronized DirectoryAcceptance.Invalid
         }
         val current = accepted[candidate.directory.regionId]
-        if (current != null && candidate.directory.generation < current.directory.generation) return DirectoryAcceptance.Stale
+        if (current != null && candidate.directory.generation < current.directory.generation) return@platformSynchronized DirectoryAcceptance.Stale
         if (current != null && candidate.directory.generation == current.directory.generation) {
-            return if (candidate.signedDirectoryFingerprint() == current.signedDirectoryFingerprint()) {
+            return@platformSynchronized if (candidate.signedDirectoryFingerprint() == current.signedDirectoryFingerprint()) {
                 DirectoryAcceptance.AlreadyAccepted
             } else {
                 DirectoryAcceptance.Invalid
             }
         }
         accepted[candidate.directory.regionId] = candidate
-        return DirectoryAcceptance.Accepted(candidate)
+        DirectoryAcceptance.Accepted(candidate)
     }
 
     /** Public digest only; never exposes key or payload material. */
-    @Synchronized
-    fun acceptedDirectoryDigest(regionId: String): String? =
+    fun acceptedDirectoryDigest(regionId: String): String? = platformSynchronized(this) {
         accepted[regionId]?.signedDirectoryFingerprint()
+    }
 
-    @Synchronized
-    fun resolveForNewRequest(regionId: String, shelterId: String, nowEpochMillis: Long): ResolvedShelterKeys? =
+    fun resolveForNewRequest(regionId: String, shelterId: String, nowEpochMillis: Long): ResolvedShelterKeys? = platformSynchronized(this) {
         accepted[regionId]
             ?.takeIf { it.directory.validate(nowEpochMillis) == RescueValidationResult.Valid }
             ?.directory
@@ -290,9 +288,9 @@ class RegionalShelterDirectoryResolver(rootBundles: Collection<RegionalRootBundl
             ?.filter { it.manifest.shelterId == shelterId && it.manifest.validate(nowEpochMillis) == RescueValidationResult.Valid }
             ?.maxWithOrNull(compareBy<SignedShelterManifest> { it.manifest.generation }.thenBy { it.manifest.recipientPublicKey.keyId })
             ?.toResolvedKeys()
+    }
 
-    @Synchronized
-    fun resolveForEnvelope(regionId: String, shelterId: String, recipientKeyId: String, nowEpochMillis: Long): ResolvedShelterKeys? =
+    fun resolveForEnvelope(regionId: String, shelterId: String, recipientKeyId: String, nowEpochMillis: Long): ResolvedShelterKeys? = platformSynchronized(this) {
         accepted[regionId]
             ?.takeIf { it.directory.validate(nowEpochMillis) == RescueValidationResult.Valid }
             ?.directory
@@ -303,22 +301,21 @@ class RegionalShelterDirectoryResolver(rootBundles: Collection<RegionalRootBundl
                     it.manifest.validate(nowEpochMillis) == RescueValidationResult.Valid
             }
             ?.toResolvedKeys()
+    }
 
-    @Synchronized
-    fun verifyAdvertisedManifest(signed: SignedShelterManifest, nowEpochMillis: Long): Boolean {
-        val root = roots[signed.regionId] ?: return false
-        if (root.validate() != RescueValidationResult.Valid || !verifyShelterManifest(signed, root, nowEpochMillis)) return false
-        val trusted = accepted[signed.regionId]?.directory?.shelters ?: return false
-        return trusted.any { it == signed }
+    fun verifyAdvertisedManifest(signed: SignedShelterManifest, nowEpochMillis: Long): Boolean = platformSynchronized(this) {
+        val root = roots[signed.regionId] ?: return@platformSynchronized false
+        if (root.validate() != RescueValidationResult.Valid || !verifyShelterManifest(signed, root, nowEpochMillis)) return@platformSynchronized false
+        val trusted = accepted[signed.regionId]?.directory?.shelters ?: return@platformSynchronized false
+        trusted.any { it == signed }
     }
 
     /** Resolves the legacy-advertisement-safe signed-manifest fingerprint prefix. */
-    @Synchronized
     fun resolveBeaconIdentity(
         signedManifestFingerprintPrefix: ByteArray,
         nowEpochMillis: Long,
-    ): SignedShelterManifest? {
-        if (signedManifestFingerprintPrefix.size != BLE_SIGNED_MANIFEST_FINGERPRINT_PREFIX_BYTES) return null
+    ): SignedShelterManifest? = platformSynchronized(this) {
+        if (signedManifestFingerprintPrefix.size != BLE_SIGNED_MANIFEST_FINGERPRINT_PREFIX_BYTES) return@platformSynchronized null
         val matches = accepted.values
             .asSequence()
             .filter { it.directory.validate(nowEpochMillis) == RescueValidationResult.Valid }
@@ -326,7 +323,7 @@ class RegionalShelterDirectoryResolver(rootBundles: Collection<RegionalRootBundl
             .filter { it.validate(nowEpochMillis) == RescueValidationResult.Valid }
             .filter { it.beaconFingerprintBytes().copyOf(BLE_SIGNED_MANIFEST_FINGERPRINT_PREFIX_BYTES).contentEquals(signedManifestFingerprintPrefix) }
             .toList()
-        return matches.singleOrNull()
+        matches.singleOrNull()
     }
 
     private companion object {
