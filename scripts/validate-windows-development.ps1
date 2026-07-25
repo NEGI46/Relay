@@ -114,16 +114,23 @@ $script:logRoot = Join-Path $Root 'artifacts\windows-validation-logs'
 New-Item -ItemType Directory -Force -Path $script:logRoot | Out-Null
 
 function Add-Result {
-    param([string]$Name, [string]$Status, [string]$Category, [bool]$Mandatory, $ExitCode, [string]$Detail, [long]$Millis)
-    [void]$script:results.Add([ordered]@{
-        name      = $Name
-        status    = $Status
-        category  = $Category
-        mandatory = $Mandatory
-        exitCode  = $ExitCode
-        detail    = $Detail
-        millis    = $Millis
-    })
+    param([string]$Name, [string]$Status, [string]$Category, [bool]$Mandatory, $ExitCode, [string]$Detail, [long]$Millis,
+          [int]$ExecutedTests = -1, [int]$Failures = -1, [int]$Errors = -1, [int]$Skipped = -1, [string[]]$ArtifactPaths = @())
+    $entry = [ordered]@{
+        name           = $Name
+        status         = $Status
+        category       = $Category
+        mandatory      = $Mandatory
+        exitCode       = $ExitCode
+        detail         = $Detail
+        durationMillis = $Millis
+    }
+    if ($ExecutedTests -ge 0) { $entry['executedTests'] = $ExecutedTests }
+    if ($Failures -ge 0) { $entry['failures'] = $Failures }
+    if ($Errors -ge 0) { $entry['errors'] = $Errors }
+    if ($Skipped -ge 0) { $entry['skipped'] = $Skipped }
+    if ($ArtifactPaths.Count -gt 0) { $entry['artifactPaths'] = $ArtifactPaths }
+    [void]$script:results.Add($entry)
     $color = switch ($Status) { 'PASS' { 'Green' } 'FAIL' { 'Red' } 'BLOCKED' { 'Yellow' } default { 'Gray' } }
     Write-Host ("[{0}] {1} {2}" -f $Status, $Name, $(if ($Detail) { "- $Detail" } else { '' })) -ForegroundColor $color
 }
@@ -199,13 +206,96 @@ function Invoke-PsTestTri { param([string]$Name, [string]$RelPath)
 # --- Check catalog -----------------------------------------------------------
 
 $androidBlocked = if ($androidSdk) { '' } else { 'Android SDK not found (set ANDROID_HOME or install Android Studio)' }
+$hasNode = Has-Command 'node'
+$hasNpm = Has-Command 'npm'
+$playwrightBlocked = if ($hasNode -and $hasNpm -and (Test-Path -LiteralPath (Join-Path $Root 'staff-console-e2e\package-lock.json'))) { '' } else { 'Node.js, npm, or staff-console-e2e/package-lock.json not found' }
 
 Invoke-Step -Name 'shared-jvm-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'shared-jvm-test' @(':shared:jvmTest') }
+Invoke-Step -Name 'relay-protocol-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'relay-protocol-test' @(':relay-protocol:test') }
 Invoke-Step -Name 'android-unit-test' -Category 'gradle' -Mandatory $false -BlockedReason $androidBlocked -Check { Invoke-Gradle 'android-unit-test' @(':app:testDebugUnitTest') }
+Invoke-Step -Name 'android-lint' -Category 'gradle' -Mandatory $false -BlockedReason $androidBlocked -Check { Invoke-Gradle 'android-lint' @(':app:lintDebug') }
 Invoke-Step -Name 'android-instrumentation-compile' -Category 'gradle' -Mandatory $false -BlockedReason $androidBlocked -Check { Invoke-Gradle 'android-instrumentation-compile' @(':app:compileDebugAndroidTestKotlin') }
+Invoke-Step -Name 'android-api36-instrumentation' -Category 'gradle' -Mandatory $false -BlockedReason $androidBlocked -Check {
+    $r = Invoke-Gradle 'android-api36-instrumentation' @(':app:mediumPhoneApi36DebugAndroidTest')
+    # Verify that at least one test actually executed (BUILD SUCCESSFUL with 0 tests = FAIL)
+    $logFile = Join-Path $script:logRoot 'android-api36-instrumentation.log'
+    if (Test-Path -LiteralPath $logFile) {
+        $logContent = Get-Content -LiteralPath $logFile -Raw -ErrorAction SilentlyContinue
+        if ($r.status -eq 'PASS' -and $logContent -notmatch 'tests? (found|completed|run)') {
+            # Check for JUnit XML results
+            $xmlDir = Join-Path $Root 'app\build\outputs\androidTest-results'
+            $hasXml = (Test-Path -LiteralPath $xmlDir) -and ((Get-ChildItem -Path $xmlDir -Filter '*.xml' -Recurse -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
+            if (-not $hasXml) {
+                $r.status = 'FAIL'
+                $r.detail = 'BUILD SUCCESSFUL but no test execution evidence found'
+            }
+        }
+    }
+    return $r
+}
+Invoke-Step -Name 'android-api23-instrumentation' -Category 'gradle' -Mandatory $false -BlockedReason $androidBlocked -Check {
+    $r = Invoke-Gradle 'android-api23-instrumentation' @(':app:mediumPhoneApi23DebugAndroidTest')
+    $logFile = Join-Path $script:logRoot 'android-api23-instrumentation.log'
+    if (Test-Path -LiteralPath $logFile) {
+        $logContent = Get-Content -LiteralPath $logFile -Raw -ErrorAction SilentlyContinue
+        if ($r.status -eq 'PASS' -and $logContent -notmatch 'tests? (found|completed|run)') {
+            $xmlDir = Join-Path $Root 'app\build\outputs\androidTest-results'
+            $hasXml = (Test-Path -LiteralPath $xmlDir) -and ((Get-ChildItem -Path $xmlDir -Filter '*.xml' -Recurse -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
+            if (-not $hasXml) {
+                $r.status = 'FAIL'
+                $r.detail = 'BUILD SUCCESSFUL but no test execution evidence found'
+            }
+        }
+    }
+    return $r
+}
 Invoke-Step -Name 'pc-gateway-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'pc-gateway-test' @(':pc-gateway:test') }
 Invoke-Step -Name 'broker-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'broker-test' @(':broker:test') }
 Invoke-Step -Name 'compose-desktop-test' -Category 'gradle' -Mandatory $true -Check { Invoke-Gradle 'compose-desktop-test' @(':composeApp:desktopTest') }
+Invoke-Step -Name 'staff-console-playwright' -Category 'e2e' -Mandatory $false -BlockedReason $playwrightBlocked -Check {
+    $e2eDir = Join-Path $Root 'staff-console-e2e'
+    $safe = 'staff-console-playwright'
+    $outLog = Join-Path $script:logRoot "$safe.out.log"
+    $errLog = Join-Path $script:logRoot "$safe.err.log"
+    $nul = Join-Path $script:logRoot "$safe.nul"
+    Set-Content -LiteralPath $nul -Value '' -ErrorAction SilentlyContinue
+    # Install dependencies
+    $p1 = Start-Process -FilePath 'npm' -ArgumentList @('ci') -WorkingDirectory $e2eDir `
+        -RedirectStandardInput $nul -RedirectStandardOutput $outLog -RedirectStandardError $errLog `
+        -NoNewWindow -PassThru -Wait
+    if ($p1.ExitCode -ne 0) {
+        Remove-Item -LiteralPath $nul -ErrorAction SilentlyContinue
+        return @{ status = 'FAIL'; exitCode = $p1.ExitCode; detail = "npm ci failed exitCode=$($p1.ExitCode)" }
+    }
+    # Install Chromium (cached if already present)
+    $p2 = Start-Process -FilePath 'npx' -ArgumentList @('playwright', 'install', 'chromium') -WorkingDirectory $e2eDir `
+        -RedirectStandardInput $nul -RedirectStandardOutput $outLog -RedirectStandardError $errLog `
+        -NoNewWindow -PassThru -Wait
+    if ($p2.ExitCode -ne 0) {
+        Remove-Item -LiteralPath $nul -ErrorAction SilentlyContinue
+        return @{ status = 'BLOCKED'; exitCode = $p2.ExitCode; detail = "playwright install chromium failed exitCode=$($p2.ExitCode)" }
+    }
+    # Run tests
+    $testLog = Join-Path $script:logRoot "$safe.test.log"
+    $testErr = Join-Path $script:logRoot "$safe.test.err.log"
+    $p3 = Start-Process -FilePath 'npx' -ArgumentList @('playwright', 'test') -WorkingDirectory $e2eDir `
+        -RedirectStandardInput $nul -RedirectStandardOutput $testLog -RedirectStandardError $testErr `
+        -NoNewWindow -PassThru -Wait
+    Remove-Item -LiteralPath $nul -ErrorAction SilentlyContinue
+    $combined = @()
+    if (Test-Path -LiteralPath $testLog) { $combined += Get-Content -LiteralPath $testLog }
+    if (Test-Path -LiteralPath $testErr) { $combined += Get-Content -LiteralPath $testErr }
+    $combined | Set-Content -LiteralPath (Join-Path $script:logRoot "$safe.log") -ErrorAction SilentlyContinue
+    # Copy artifacts for inspection
+    $reportDir = Join-Path $e2eDir 'playwright-report'
+    if (Test-Path -LiteralPath $reportDir) {
+        $artifactDest = Join-Path $script:logRoot 'playwright-report'
+        Copy-Item -Path $reportDir -Destination $artifactDest -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $code = $p3.ExitCode
+    if ($null -eq $code) { $code = 0 }
+    return @{ status = $(if ($code -eq 0) { 'PASS' } else { 'FAIL' }); exitCode = $code; detail = "exitCode=$code log=$safe.log" }
+}
 Invoke-Step -Name 'accessibility-check' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'accessibility-check' 'scripts\check-accessibility.ps1' }
 Invoke-Step -Name 'implementation-contract-check' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'implementation-contract-check' 'scripts\verify-implementation-contracts.ps1' }
 Invoke-Step -Name 'host-checks' -Category 'script' -Mandatory $true -Check { Invoke-PsTest 'host-checks' 'test-lab\run-host-checks.ps1' }
