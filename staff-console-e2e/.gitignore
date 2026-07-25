@@ -5,4 +5,3 @@ blob-report/
 playwright/.cache/
 .e2e-tmp/
 *.log
-package-lock.json

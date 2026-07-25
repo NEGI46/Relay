@@ -49,6 +49,20 @@ artifacts/jazzer/
 artifacts/*.apk
 artifacts/*.aab
 artifacts/*.ipa
+artifacts/*.exe
+artifacts/device-tests/
+
+# Distribution packages should be built by CI, not committed
+distribution/Relay-User-Package/Windows/BleBridge-*/
+distribution/Relay-User-Package/Windows/*.msix
+distribution/Relay-User-Package/Android/*.apk
+pc-ble-bridge/bin/
+pc-ble-bridge/obj/
+
+# Playwright
+staff-console-e2e/node_modules/
+staff-console-e2e/playwright-report/
+staff-console-e2e/test-results/
 
 # iOS / Xcode generated files
 composeApp/iosApp/RelayIOS.xcodeproj/

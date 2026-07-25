@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
     application
+    alias(libs.plugins.kover)
 }
 
 application { mainClass.set("com.example.relay.pcgateway.MainKt") }
