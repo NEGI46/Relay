@@ -63,9 +63,30 @@ targets:
           echo "SRCROOT=${SRCROOT}"
           cd "$SRCROOT/../.."
           echo "Working dir: $(pwd)"
+          set -o pipefail
           ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode \
             --no-daemon \
-            --stacktrace
+            --stacktrace 2>&1 | tee /tmp/gradle-embed.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo "========================================="
+            echo "=== GRADLE EMBED FAILED (exit $EXIT_CODE) ==="
+            echo "========================================="
+            echo ""
+            echo "=== ACTUAL ERROR (e: lines): ==="
+            grep "^e:" /tmp/gradle-embed.log || true
+            echo ""
+            echo "=== FAILURE CAUSE: ==="
+            grep -B2 -A10 "FAILURE:" /tmp/gradle-embed.log || true
+            echo ""
+            echo "=== WHAT FAILED: ==="
+            grep -B2 -A5 "What went wrong" /tmp/gradle-embed.log || true
+            echo ""
+            echo "=== LAST 30 LINES: ==="
+            tail -30 /tmp/gradle-embed.log
+            exit $EXIT_CODE
+          fi
         inputFiles: []
         outputFiles: []
     scheme:

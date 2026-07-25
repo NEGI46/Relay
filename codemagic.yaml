@@ -106,6 +106,7 @@ workflows:
       - composeApp/iosApp/build/Build/Products/Debug-iphonesimulator/*.dSYM
       - /tmp/xcodebuild_logs/*.log
       - /tmp/gradle-ios-compile.log
+      - /tmp/gradle-embed.log
 
   ios-signed-archive:
     name: "iOS Signed Archive (Manual)"
