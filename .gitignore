@@ -53,9 +53,7 @@ artifacts/*.exe
 artifacts/device-tests/
 
 # Distribution packages should be built by CI, not committed
-distribution/Relay-User-Package/Windows/BleBridge-*/
-distribution/Relay-User-Package/Windows/*.msix
-distribution/Relay-User-Package/Android/*.apk
+distribution/Relay-User-Package/
 pc-ble-bridge/bin/
 pc-ble-bridge/obj/
 

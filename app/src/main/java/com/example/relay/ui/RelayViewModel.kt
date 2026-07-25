@@ -41,7 +41,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /** Primary user flow only. Operator/debug enums retained for navigation demotion (map to HOME). */
-enum class RelayScreen { HOME, RESCUE, SAFETY_FORM, SUPPLY_FORM, REGIONAL, SETTINGS }
+enum class RelayScreen { HOME, RESCUE, SAFETY_FORM, SUPPLY_FORM, REGIONAL, SETTINGS, GATEWAY_ENROLLMENT }
 
 data class RelayUiState(
     val screen: RelayScreen = RelayScreen.HOME,
@@ -185,6 +185,7 @@ class RelayViewModel(
             RelayScreen.SUPPLY_FORM,
             RelayScreen.REGIONAL,
             RelayScreen.SETTINGS,
+            RelayScreen.GATEWAY_ENROLLMENT,
             -> screen
         }
         _uiState.value = _uiState.value.copy(screen = allowed)
