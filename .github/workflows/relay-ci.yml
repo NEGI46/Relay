@@ -53,6 +53,28 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
       - run: ./gradlew :shared:jvmTest :relay-protocol:test :app:testDebugUnitTest --no-daemon
+      - name: Verify test execution (0 tests = FAIL)
+        if: always()
+        shell: bash
+        run: |
+          total=0
+          for xml in $(find . -path '*/test-results/testDebugUnitTest/*.xml' -o -path '*/test-results/test/*.xml' -o -path '*/test-results/jvmTest/*.xml'); do
+            count=$(grep -c '<testcase' "$xml" 2>/dev/null || echo 0)
+            total=$((total + count))
+          done
+          echo "Total test cases found in JUnit XML: $total"
+          if [ "$total" -eq 0 ]; then
+            echo "::error::No test cases found in JUnit XML results. This indicates tests did not run."
+            exit 1
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: relay-unit-test-results
+          path: |
+            **/build/test-results/
+            **/build/reports/tests/
+          if-no-files-found: warn
 
   lint:
     name: Android Lint
