@@ -53,7 +53,14 @@ targets:
             echo "Skip Kotlin build — IDE handles it"
             exit 0
           fi
+          echo "=== Kotlin Framework Build ==="
+          echo "CONFIGURATION=${CONFIGURATION}"
+          echo "SDK_NAME=${SDK_NAME}"
+          echo "ARCHS=${ARCHS}"
+          echo "PLATFORM_NAME=${PLATFORM_NAME}"
+          echo "SRCROOT=${SRCROOT}"
           cd "$SRCROOT/../.."
+          echo "Working dir: $(pwd)"
           ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode \
             --no-daemon \
             --stacktrace
