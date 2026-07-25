@@ -49,3 +49,20 @@ artifacts/jazzer/
 artifacts/*.apk
 artifacts/*.aab
 artifacts/*.ipa
+
+# iOS / Xcode generated files
+composeApp/iosApp/RelayIOS.xcodeproj/
+composeApp/iosApp/RelayIOS.xcworkspace/
+composeApp/iosApp/build/
+composeApp/iosApp/Pods/
+composeApp/iosApp/.xcodegen/
+*.xcuserdata/
+*.xcscmblueprint
+DerivedData/
+*.dSYM
+*.dSYM.zip
+*.ipa
+*.mobileprovision
+*.p12
+*.p8
+.aicoding-chat-workspace

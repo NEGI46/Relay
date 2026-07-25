@@ -45,8 +45,7 @@ import com.example.relay.domain.randomUuid
 import com.example.relay.gateway.DiscoveredGateway
 import com.example.relay.gateway.GatewayPublicClient
 import kotlinx.coroutines.launch
-import org.maplibre.compose.map.MaplibreMap
-import org.maplibre.compose.style.BaseStyle
+
 
 private enum class Screen { HOME, SAFETY, SUPPLY, REGIONAL, OFFLINE_MAP }
 
@@ -258,11 +257,13 @@ private fun OfflineMapScreen(pack: VerifiedOfflineMapPack?, onBack: () -> Unit) 
             Text("オフライン地図", style = MaterialTheme.typography.headlineMedium)
             if (pack == null) {
                 Text("地図パックが未検証のため表示できません。")
+            } else if (!isPlatformMapAvailable) {
+                Text("地図を準備中（このプラットフォームでは今後対応予定）")
             } else {
                 Box(Modifier.fillMaxWidth().height(300.dp)) {
-                    MaplibreMap(
+                    PlatformMapView(
                         modifier = Modifier.fillMaxSize(),
-                        baseStyle = BaseStyle.Uri(pack.styleUri),
+                        styleUri = pack.styleUri,
                     )
                 }
                 Text("style: ${pack.styleUri}")

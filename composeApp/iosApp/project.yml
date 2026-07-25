@@ -1,0 +1,75 @@
+name: RelayIOS
+options:
+  bundleIdPrefix: com.example.relay
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "26.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.9"
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+
+packages:
+  RelayAppleKit:
+    path: ../../apple/RelayAppleKit
+
+targets:
+  RelayIOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: RelayIOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.relay.ios
+        INFOPLIST_FILE: RelayIOS/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: ""
+        PROVISIONING_PROFILE_SPECIFIER: ""
+        # Kotlin direct integration output
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(SRCROOT)/../../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
+        OTHER_LINKER_FLAGS:
+          - "-framework"
+          - "ComposeApp"
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: ""
+          OTHER_SWIFT_FLAGS: "-D DEBUG"
+        Release:
+          OTHER_SWIFT_FLAGS: ""
+    dependencies:
+      - package: RelayAppleKit
+    preBuildScripts:
+      - name: "Generate Kotlin Framework"
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "YES" = "${OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED}" ]; then
+            echo "Skip Kotlin build — IDE handles it"
+            exit 0
+          fi
+          cd "$SRCROOT/../.."
+          ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode \
+            -Pios.arch=${ARCHS} \
+            -Pkotlin.native.cocoapods.generate.wrapper=true
+        inputFiles: []
+        outputFiles: []
+    scheme:
+      testTargets: []
+      gatherCoverageData: false
+      commandLineArguments: {}
+
+schemes:
+  RelayIOS:
+    build:
+      targets:
+        RelayIOS: all
+    run:
+      config: Debug
+    archive:
+      config: Release
