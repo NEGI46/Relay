@@ -72,6 +72,17 @@ workflows:
             -project RelayIOS.xcodeproj \
             -scheme RelayIOS
 
+      - name: "Pre-compile Kotlin iOS Framework (diagnostics)"
+        script: |
+          echo "=== Pre-compiling Kotlin iOS framework (outside Xcode) ==="
+          echo "This step surfaces the full Gradle error if compilation fails."
+          ./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64 \
+            --no-daemon \
+            --stacktrace \
+            2>&1 | tee /tmp/gradle-ios-compile.log
+          echo ""
+          echo "=== Kotlin iOS Framework compiled successfully ==="
+
       - name: "Build unsigned iOS Simulator app"
         script: |
           mkdir -p /tmp/xcodebuild_logs
@@ -92,6 +103,7 @@ workflows:
       - composeApp/iosApp/build/Build/Products/Debug-iphonesimulator/*.app
       - composeApp/iosApp/build/Build/Products/Debug-iphonesimulator/*.dSYM
       - /tmp/xcodebuild_logs/*.log
+      - /tmp/gradle-ios-compile.log
 
   ios-signed-archive:
     name: "iOS Signed Archive (Manual)"
