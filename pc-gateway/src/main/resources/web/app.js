@@ -337,11 +337,17 @@
   }
   async function prepareMap() { await api("/api/map/prepare", { method: "POST", headers: authHeaders() }); await loadMapStatus(); }
 
+  function provenanceLabel(provenance) {
+    if (!provenance) return "";
+    const verification = { TRANSPORT_TLS_ONLY: "TLS接続のみ検証（内容署名なし）", CACHED_UNVERIFIED: "保存済み・未検証", UNVERIFIED: "未検証・取得不能" }[provenance.verification] || provenance.verification;
+    const fetched = provenance.fetchedAtEpochMillis ? ` / 取得 ${fmtTime(provenance.fetchedAtEpochMillis)}` : "";
+    return ` / 来歴: ${verification}${fetched}`;
+  }
   async function loadOfficial() {
     const info = await api("/api/official-info", { headers: authHeaders() });
     $("officialAlert").textContent = info.urgent ? `気象庁: ${info.warningHeadline}` : `公式情報: ${info.warningHeadline}`;
     $("officialAlert").classList.toggle("urgent", info.urgent);
-    $("warningDetail").innerHTML = `<h3>気象庁 警報・注意報</h3><p>${escapeHtml(info.warningHeadline)}</p><ul>${info.warningStatuses.map((value) => `<li>${escapeHtml(value)}</li>`).join("") || "<li>府中町の発表状況なし</li>"}</ul><p class="fine">確認 ${fmtTime(info.checkedAtEpochMillis)}${info.usedCachedWarning ? "（保存済み情報）" : ""}</p>`;
+    $("warningDetail").innerHTML = `<h3>気象庁 警報・注意報</h3><p>${escapeHtml(info.warningHeadline)}</p><ul>${info.warningStatuses.map((value) => `<li>${escapeHtml(value)}</li>`).join("") || "<li>府中町の発表状況なし</li>"}</ul><p class="fine">確認 ${fmtTime(info.checkedAtEpochMillis)}${info.usedCachedWarning ? "（保存済み情報）" : ""}${escapeHtml(provenanceLabel(info.provenance))}</p>`;
     $("officialSources").innerHTML = info.sources.map((source) => `<a class="source-card" href="${escapeHtml(source.url)}" target="_blank" rel="noopener"><strong>${escapeHtml(source.title)}</strong><span>${escapeHtml(source.organization)} 公式サイト</span></a>`).join("");
     if (info.urgent && !state.notifiedWarning && "Notification" in window && Notification.permission === "granted") {
       new Notification("Relay 府中町 公式警報", { body: info.warningHeadline }); state.notifiedWarning = true;
