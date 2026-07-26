@@ -17,7 +17,8 @@ param(
     [ValidateRange(1, 65535)]
     [int]$Port = 8080,
     [string]$Executable,
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    [switch]$AllowLan
 )
 
 $ErrorActionPreference = 'Stop'
@@ -88,7 +89,7 @@ New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 # shell's production root/manifests into a generated-key development run.
 $env:RELAY_PROFILE = 'development'
 $env:RELAY_GATEWAY_LAN_MODE = 'disabled'
-$env:RELAY_GATEWAY_HOST = '0.0.0.0'
+$env:RELAY_GATEWAY_HOST = if ($AllowLan) { '0.0.0.0' } else { '127.0.0.1' }
 $env:RELAY_GATEWAY_PORT = "$Port"
 $env:RELAY_GATEWAY_PUBLIC_PORT = "$Port"
 $env:RELAY_GATEWAY_PUBLIC_SCHEME = 'http'
@@ -98,7 +99,8 @@ $env:RELAY_SHELTER_ID = $env:RELAY_GATEWAY_ID
 $env:RELAY_GATEWAY_REMOTE_MANAGEMENT = 'false'
 $env:RELAY_GATEWAY_ENABLE_LEGACY_ADMIN_KEY = 'false'
 $env:RELAY_GATEWAY_ANONYMOUS_INGRESS = 'true'
-$env:RELAY_GATEWAY_LAN_DISCOVERY = 'true'
+$env:RELAY_GATEWAY_LAN_DISCOVERY = if ($AllowLan) { 'true' } else { 'false' }
+$env:RELAY_LOCAL_PILOT_INGRESS = 'true'
 $env:RELAY_RESCUE_KEY_FILE = Join-Path $stateRoot 'rescue-keys.json'
 $env:RELAY_BLE_BRIDGE_SECRET_FILE = Join-Path $stateRoot 'ble-bridge.key'
 Remove-Item Env:RELAY_RESCUE_SIGNED_MANIFEST_FILE -ErrorAction SilentlyContinue
@@ -155,5 +157,8 @@ if ($health.status -eq 'bootstrap_required') {
 }
 
 Write-Host "Relay PC Gateway development preview started: $consoleUrl"
+Write-Host "Local pilot page: http://127.0.0.1:$Port/local-pilot"
+if ($AllowLan) { Write-Warning 'LAN exposure is enabled for development/training only. Restrict Windows Firewall manually to a trusted private network.' }
 Write-Host 'In the browser, sign in with the same username and password you entered here.'
 if (-not $NoBrowser) { Start-Process $consoleUrl | Out-Null }
+$process.Id

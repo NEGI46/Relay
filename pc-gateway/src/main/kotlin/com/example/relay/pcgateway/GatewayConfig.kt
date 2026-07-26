@@ -52,10 +52,11 @@ data class GatewayConfig(
     val version: String = System.getProperty("relay.version") ?: System.getenv("RELAY_VERSION") ?: "dev",
     val buildSha: String = System.getenv("GIT_COMMIT") ?: "unknown",
     /**
-     * Production and lab bind to loopback unless a deliberate LAN topology is configured.
-     * Development keeps the historic LAN behavior solely for local compatibility work.
+     * Every profile binds to loopback by default. A non-loopback value is an explicit operator
+     * choice and the Windows local-pilot launcher requires -AllowLan before setting one.
      */
-    val host: String = System.getenv("RELAY_GATEWAY_HOST") ?: if (profile == GatewayProfile.DEVELOPMENT) "0.0.0.0" else "127.0.0.1",
+    val host: String = System.getenv("RELAY_GATEWAY_HOST")
+        ?: if (profile == GatewayProfile.DEVELOPMENT) "127.0.0.1" else "127.0.0.1",
     val port: Int = (System.getenv("RELAY_GATEWAY_PORT") ?: "8080").toIntOrNull() ?: 8080,
     /** External endpoint advertised by a TLS reverse proxy, never a secret. */
     val publicScheme: String = (System.getenv("RELAY_GATEWAY_PUBLIC_SCHEME")
@@ -131,6 +132,11 @@ data class GatewayConfig(
     val anonymousIngressEnabled: Boolean = environmentBoolean(
         "RELAY_GATEWAY_ANONYMOUS_INGRESS",
         default = profile == GatewayProfile.DEVELOPMENT,
+    ),
+    /** PUERTA is intentionally unavailable in production even when its environment variable is set. */
+    val localPilotIngressEnabled: Boolean = profile != GatewayProfile.PRODUCTION && environmentBoolean(
+        "RELAY_LOCAL_PILOT_INGRESS",
+        default = false,
     ),
     val maxAnonymousRequestBytes: Int = 256 * 1024,
     val maxAnonymousMessagesPerRequest: Int = 32,
@@ -214,6 +220,9 @@ data class GatewayConfig(
         }
         require(!(profile != GatewayProfile.DEVELOPMENT && legacyAdminKeyEnabled)) {
             "X-Admin-Key compatibility is permitted only in the development profile"
+        }
+        require(!(profile == GatewayProfile.PRODUCTION && localPilotIngressEnabled)) {
+            "RELAY_LOCAL_PILOT_INGRESS is never available in production"
         }
         require(!(profile != GatewayProfile.DEVELOPMENT && brokerLegacyApiKey != null)) {
             "RELAY_BROKER_API_KEY / RELAY_BROKER_GATEWAY_API_KEY are development-only legacy credentials; use RELAY_BROKER_CREDENTIAL"

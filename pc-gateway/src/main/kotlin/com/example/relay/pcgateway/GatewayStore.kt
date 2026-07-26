@@ -126,6 +126,8 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
     private val accessStoreDelegate = lazy {
         GatewayAccessStore(config.dbPath)
     }
+    private val puertaStoreDelegate = lazy { PuertaStore(config.dbPath) }
+    private val pilotOperationsStoreDelegate = lazy { PilotOperationsStore(config.dbPath) }
 
     /**
      * Durable rescue storage sharing the gateway database file, but using its own
@@ -135,6 +137,12 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
 
     /** Durable local staff accounts, sessions, and audit metadata in this Gateway's SQLite file. */
     fun accessStore(): GatewayAccessStore = accessStoreDelegate.value
+
+    /** PUERTA Gateway-only provenance; all callers use the validating local ingress service. */
+    fun puertaStore(): PuertaStore = puertaStoreDelegate.value
+
+    /** Batch B-D drill records, separated from encrypted rescue payloads and staff sessions. */
+    fun pilotOperationsStore(): PilotOperationsStore = pilotOperationsStoreDelegate.value
 
     init {
         File(config.dbPath).parentFile?.mkdirs()
@@ -935,6 +943,8 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
     override fun close() {
         if (rescuePersistenceDelegate.isInitialized()) rescuePersistenceDelegate.value.close()
         if (accessStoreDelegate.isInitialized()) accessStoreDelegate.value.close()
+        if (puertaStoreDelegate.isInitialized()) puertaStoreDelegate.value.close()
+        if (pilotOperationsStoreDelegate.isInitialized()) pilotOperationsStoreDelegate.value.close()
         synchronized(lock) { connection.close() }
     }
 
