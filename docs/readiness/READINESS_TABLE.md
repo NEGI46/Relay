@@ -61,6 +61,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `mutation-testing` | relay-protocolのPITミューテーションテストゲート（閾値95） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `architecture-tests` | JVMセキュリティ境界のArchUnitアーキテクチャルール | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `broker-api-contract` | BrokerのOpenAPI 3.1契約とSchemathesis適合ゲート | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
+| `broker-resilience-load` | Brokerのネットワーク障害耐性（Toxiproxy）と並行負荷ゲート | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 
 ## Notes per feature
 
@@ -107,3 +108,4 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `mutation-testing`: PIT 1.17.4 via info.solidsoft.pitest 1.15.0, pinned in verification-metadata.xml; targetTests set explicitly because the plugin default silently skipped tests outside the targetClasses package (false NO_COVERAGE); PIT analysis drove the tamper property from 5 to all 15 canonical fields.
 - `architecture-tests`: ArchUnit 1.4.1 (archunit-junit4) runs inside :pc-gateway:test whose classpath contains all JVM production modules (relay-protocol, shared-jvm, pc-gateway, broker); :pc-gateway:test --rerun-tasks 97 tests 0 failures. Android-only modules (app, composeApp) are outside this JVM import and remain covered only by their own unit tests.
 - `broker-api-contract`: Contract conformance checks only (not_a_server_error, status/content-type/headers/schema conformance); positive_data_acceptance and negative_data_rejection are deliberately excluded because signature-requiring endpoints legitimately answer documented 401s to generated data - positive-path coverage with real ECDSA proofs stays in the Kotlin integration tests. The ~33-route PC Gateway staff/bridge API is not yet specified and remains a follow-up.
+- `broker-resilience-load`: Required testcontainers 2.0.5: Docker Engine 29 rejects the pre-1.44 API negotiation of testcontainers 1.x with HTTP 400 (1.21.3 verified failing locally, 2.0.5 verified passing). Full :broker:test suite 54 tests / 0 failures. The load test is a correctness-under-load gate with a 10s p95 sanity bound, explicitly NOT a calibrated capacity or SLA benchmark; Toxiproxy tests have not yet executed on a GitHub runner.
