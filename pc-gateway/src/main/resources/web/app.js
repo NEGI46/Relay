@@ -135,9 +135,15 @@
     $("selectedDetail").innerHTML = `
       <div class="detail-head"><div><p class="eyebrow">${isImmediate(request) ? "IMMEDIATE" : "RESCUE REQUEST"}</p><h3>${request.personCount == null ? "人数不明" : `${request.personCount}人`} / ${statusLabel(request.responseStatus)}</h3></div><span class="status-chip">v${request.requestVersion}</span></div>
       ${ownedElsewhere ? `<p class="assignment-note">${escapeHtml(request.assignedNodeId)} が担当中です。</p>` : ""}
-      <dl class="detail-grid"><dt>GPS</dt><dd>${request.latitude?.toFixed(6) ?? "不明"}, ${request.longitude?.toFixed(6) ?? "不明"}</dd><dt>位置精度</dt><dd>${request.accuracyMeters == null ? "不明" : `約${Math.round(request.accuracyMeters)}m`}</dd><dt>位置取得</dt><dd>${fmtTime(request.locationCapturedAtEpochMillis)}</dd><dt>場所の補足</dt><dd>${escapeHtml(request.locationDescription || "なし")}</dd><dt>状態・タグ</dt><dd>${tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join(" ") || "なし"}</dd><dt>補足文</dt><dd class="free-text">${escapeHtml(request.freeText || "なし")}</dd><dt>中継端末</dt><dd>${request.uniqueCarrierCount}台</dd></dl>
-      <div class="action-row">${actions}</div>`;
+      <dl class="detail-grid"><dt>出所・信頼度</dt><dd>${escapeHtml(request.sourceChannel || "既存経路") } / ${escapeHtml(request.ingressAssurance || "暗号Envelopeの受信")}</dd><dt>GPS</dt><dd>${request.latitude?.toFixed(6) ?? "不明"}, ${request.longitude?.toFixed(6) ?? "不明"}</dd><dt>位置精度</dt><dd>${request.accuracyMeters == null ? "不明" : `約${Math.round(request.accuracyMeters)}m`}</dd><dt>位置取得</dt><dd>${fmtTime(request.locationCapturedAtEpochMillis)}</dd><dt>場所の補足</dt><dd>${escapeHtml(request.locationDescription || "なし")}</dd><dt>状態・タグ</dt><dd>${tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join(" ") || "なし"}</dd><dt>補足文</dt><dd class="free-text">${escapeHtml(request.freeText || "なし")}</dd><dt>中継端末</dt><dd>${request.uniqueCarrierCount}台</dd></dl>
+      <div class="action-row">${actions}</div><section><h4>経路履歴</h4><div id="routeAttempts" class="fine">確認中</div></section>`;
     $("selectedDetail").querySelectorAll("[data-status]").forEach((button) => button.addEventListener("click", () => updateStatus(request.requestId, button.dataset.status)));
+    loadRouteAttempts(request.requestId);
+  }
+
+  async function loadRouteAttempts(requestId) {
+    const box = $("routeAttempts"); if (!box || !requestId) { if (box) box.textContent = "既存データの経路履歴はありません。"; return; }
+    try { const attempts = await api(`/api/rescue/requests/${encodeURIComponent(requestId)}/routes`, { headers: authHeaders() }); box.textContent = attempts.length ? attempts.map((a) => `${a.routeType}: ${a.result}${a.result === "RECEIPT_CONFIRMED" ? "（署名Receipt確認済み）" : "（正式受領は未確認）"}`).join(" / ") : "経路履歴はありません。"; } catch (_) { box.textContent = "経路履歴を取得できません。"; }
   }
 
   function nextActions(request) {
@@ -337,6 +343,12 @@
   }
   async function prepareMap() { await api("/api/map/prepare", { method: "POST", headers: authHeaders() }); await loadMapStatus(); }
 
+  async function loadReviewQueue() { const rows = await api("/api/review-queue", { headers: authHeaders() }); $("reviewQueue").innerHTML = rows.length ? rows.map((row) => `<article class="request-card"><strong>${escapeHtml(row.subjectToken)} / ${escapeHtml(row.state)}</strong><span>確認優先度: ${escapeHtml(row.priority)} · ${escapeHtml(row.rationale)}</span><span class="fine">${row.manualOverride ? "手動変更あり" : "ルール計算"}${row.profileExpired ? " · 支援情報は期限切れ" : ""}</span><button class="button quiet" data-review-subject="${escapeHtml(row.subjectToken)}" type="button">手動で確認状態を変更</button></article>`).join("") : '<p class="empty">要確認候補はありません。</p>'; $("reviewQueue").querySelectorAll("[data-review-subject]").forEach((button) => button.addEventListener("click", async () => { const stateValue=prompt("状態（確認済み / 再確認対象 / 本人申告あり / 第三者情報あり・要確認 / 端末観測のみ・本人未確認 / 未確認）", "再確認対象"); if(!stateValue)return; const priority=prompt("確認優先度（高 / 中 / 低 / 完了、空欄は自動）", ""); const note=prompt("安全なメモ（氏名・住所・詳細な医療情報は入力しない）", ""); try{await api(`/api/review-queue/${encodeURIComponent(button.dataset.reviewSubject)}`,{method:"POST",headers:authHeaders(true),body:JSON.stringify({subjectToken:button.dataset.reviewSubject,state:stateValue,priority:priority||null,note:note||null})});await loadReviewQueue();}catch(_){alert("手動変更を保存できませんでした。");} })); }
+  async function submitObservation(event) { event.preventDefault(); try { await api("/api/observations", { method:"POST", headers:authHeaders(true), body:JSON.stringify({subjectToken:$("observationSubject").value.trim(),observationType:$("observationType").value,locationCell:$("observationCell").value.trim()||null}) }); event.target.reset(); await loadReviewQueue(); } catch (_) { alert("観測を登録できませんでした。"); } }
+  async function saveProfile(event) { event.preventDefault(); const due = $("profileDue").value; if (!due) return; const supportFlags=[]; if($("profileMobility").checked)supportFlags.push("MOBILITY");if($("profilePower").checked)supportFlags.push("POWER");if($("profileChildren").checked)supportFlags.push("CHILDREN");try { await api("/api/support-profiles",{method:"POST",headers:authHeaders(true),body:JSON.stringify({subjectToken:$("profileSubject").value.trim(),supportFlags,reviewDueAtEpochMillis:new Date(`${due}T00:00:00Z`).getTime()})});event.target.reset();await loadReviewQueue();}catch(_){alert("支援プロファイルを保存できませんでした。");} }
+  async function revokeProfile() { const subject=$("revokeSubject").value.trim(); if(!subject)return; try{await api(`/api/support-profiles/${encodeURIComponent(subject)}/revoke`,{method:"POST",headers:authHeaders()});$("revokeSubject").value="";await loadReviewQueue();}catch(_){alert("支援プロファイルを撤回できませんでした。");} }
+  async function csvAction(importNow) { try { const body={kind:$("csvKind").value,csv:$("csvText").value,dryRun:!importNow}; const result=await api(importNow?"/api/import":"/api/import/preview",{method:"POST",headers:authHeaders(true),body:JSON.stringify(body)}); $("csvResult").textContent=`有効 ${result.validRows} / 重複 ${result.duplicateRows} / 拒否 ${result.rejectedRows}${result.errors?.length?`（${result.errors.join("; ")}）`:""}`; if(importNow&&result.rejectedRows===0) await loadReviewQueue(); } catch (_) { $("csvResult").textContent="CSVを処理できませんでした。"; } }
+
   async function loadOfficial() {
     const info = await api("/api/official-info", { headers: authHeaders() });
     $("officialAlert").textContent = info.urgent ? `気象庁: ${info.warningHeadline}` : `公式情報: ${info.warningHeadline}`;
@@ -350,7 +362,7 @@
 
   async function refreshAll() {
     try {
-      await Promise.all([loadRequests(), loadMapStatus(), loadOfficial(), api("/api/health").then((health) => { $("healthStatus").textContent = `Gateway ${health.status} / BLE ${health.bleBridgeStatus}`; renderOperationMode(health); })]);
+      await Promise.all([loadRequests(), loadMapStatus(), loadOfficial(), loadReviewQueue(), api("/api/health").then((health) => { $("healthStatus").textContent = `Gateway ${health.status} / BLE ${health.bleBridgeStatus}`; renderOperationMode(health); })]);
       $("connectionDot").classList.add("online"); $("connectionLabel").textContent = "接続中";
     } catch (error) {
       if (error.status === 401) return lock();
@@ -365,6 +377,8 @@
 
   $("setupForm").addEventListener("submit", unlock); $("lockButton").addEventListener("click", lock);
   $("refreshButton").addEventListener("click", refreshAll); $("prepareMap").addEventListener("click", prepareMap);
+  $("observationForm").addEventListener("submit", submitObservation); $("csvPreview").addEventListener("click", () => csvAction(false)); $("csvImport").addEventListener("click", () => csvAction(true));
+  $("profileForm").addEventListener("submit", saveProfile); $("revokeProfile").addEventListener("click", revokeProfile);
   document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => activatePanel(tab.dataset.panel)));
   document.querySelectorAll(".filter").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; document.querySelectorAll(".filter").forEach((item) => item.classList.toggle("active", item === button)); renderRequests(); }));
   (async () => {

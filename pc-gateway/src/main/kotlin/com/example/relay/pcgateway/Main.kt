@@ -88,7 +88,7 @@ fun main(args: Array<String>) {
     rescueIntakeService.purgeExpiredDetails()
     val offlineMap = GsiTileCache(Path.of(config.offlineMapPath))
     val officialInformation = OfficialInformationService(Path.of(config.officialInfoCachePath))
-    val rescueIngress = rescueDeliveryReady.let { ready -> if (ready) RescueDeliveryIngress(rescueIntakeService) else null }
+    val rescueIngress = rescueDeliveryReady.let { ready -> if (ready) RescueDeliveryIngress(rescueIntakeService, routeType = RouteType.NEARBY, routeAttemptSink = store.pilotOperationsStore()::recordRouteAttempt) else null }
     val beacon = GatewayLanBeacon(config, rescueTrustReady = rescueDeliveryReady)
     val consoleHost = if (config.host in setOf("0.0.0.0", "::")) "127.0.0.1" else config.host
     println("Relay PC Gateway listening on http://${config.host}:${config.port}")
@@ -157,6 +157,7 @@ fun main(args: Array<String>) {
             gatewayCredential = brokerCredential,
             cursorPath = cursorPath,
             pollIntervalMs = config.brokerPollIntervalMs,
+            routeAttemptSink = store.pilotOperationsStore()::recordRouteAttempt,
         )
         brokerScope.launch { pullAgent.start(this) }
 
