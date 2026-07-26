@@ -21,6 +21,8 @@ private const val ROUTE_AUTHENTICATED_BRIDGE = "AUTHENTICATED_BRIDGE"
 private const val ROUTE_ANONYMOUS_LAN = "ANONYMOUS_LAN"
 private const val CONTENT_UNVERIFIED = "UNVERIFIED"
 private const val CONTENT_SIGNED_UNVERIFIED = "SIGNED_UNVERIFIED"
+private const val PAIRING_CODE_MIN = 100000
+private const val PAIRING_CODE_MAX = 999999
 
 data class StoreOutcome(
     val messageId: String,
@@ -227,7 +229,9 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
     }
 
     fun createPairingCode(now: Long = System.currentTimeMillis()): String = synchronized(lock) {
-        val code = (100000..999999).random().toString()
+        // CSPRNG: pairing codes gate bridge enrollment, so kotlin.random is not acceptable.
+        val span = PAIRING_CODE_MAX - PAIRING_CODE_MIN + 1
+        val code = (PAIRING_CODE_MIN + java.security.SecureRandom().nextInt(span)).toString()
         writeCoordinator.write {
             connection.prepareStatement("INSERT INTO pairing_codes(code, expires_at) VALUES (?, ?)").use {
                 it.setString(1, code)

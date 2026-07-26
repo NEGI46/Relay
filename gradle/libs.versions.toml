@@ -29,6 +29,7 @@ junitJupiter = "5.11.4"
 kotestProperty = "5.9.1"
 pitestPlugin = "1.15.0"
 pitest = "1.17.4"
+archunit = "1.4.1"
 desugarJdkLibs = "2.1.5"
 kover = "0.9.1"
 
@@ -84,6 +85,7 @@ jazzer-junit = { module = "com.code-intelligence:jazzer-junit", version.ref = "j
 desugar-jdk-libs = { module = "com.android.tools:desugar_jdk_libs", version.ref = "desugarJdkLibs" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junitJupiter" }
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotestProperty" }
+archunit-junit4 = { module = "com.tngtech.archunit:archunit-junit4", version.ref = "archunit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
