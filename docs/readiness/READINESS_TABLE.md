@@ -59,6 +59,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `detekt-static-analysis` | detekt静的解析（Relay固有の機微ログ禁止ルール） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `property-based-testing` | Gateway署名プロトコルのプロパティベーステスト（kotest-property） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `mutation-testing` | relay-protocolのPITミューテーションテストゲート（閾値95） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
+| `architecture-tests` | JVMセキュリティ境界のArchUnitアーキテクチャルール | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 
 ## Notes per feature
 
@@ -103,3 +104,4 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `detekt-static-analysis`: 1294 existing findings recorded as baseline debt (0 ForbiddenImport); CLI checksum-pinned, no Gradle plugin dependency added.
 - `property-based-testing`: kotest-property 5.9.1 pinned in verification-metadata.xml (sha256); JUnit4 + runBlocking bridge; :relay-protocol:test green under active dependency verification.
 - `mutation-testing`: PIT 1.17.4 via info.solidsoft.pitest 1.15.0, pinned in verification-metadata.xml; targetTests set explicitly because the plugin default silently skipped tests outside the targetClasses package (false NO_COVERAGE); PIT analysis drove the tamper property from 5 to all 15 canonical fields.
+- `architecture-tests`: ArchUnit 1.4.1 (archunit-junit4) runs inside :pc-gateway:test whose classpath contains all JVM production modules (relay-protocol, shared-jvm, pc-gateway, broker); :pc-gateway:test --rerun-tasks 97 tests 0 failures. Android-only modules (app, composeApp) are outside this JVM import and remain covered only by their own unit tests.

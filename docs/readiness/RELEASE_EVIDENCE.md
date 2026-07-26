@@ -227,3 +227,8 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 - **test**: `relay-protocol/src/test/kotlin/com/example/relay/gateway/protocol/GatewayProtocolEdgeCaseTest.kt` — 10 deterministic survivor-killing tests; negative evidence: gate failed closed at 29% and 75% before test-strength fixes
 - **workflow**: `.github/workflows/relay-ci.yml` — mutation job runs :relay-protocol:pitest with SHA-pinned actions and uploads the PIT report artifact; job itself NOT_RUN on GitHub until pushed
 
+## `architecture-tests` — ArchUnit architecture rules for JVM security boundaries
+
+- **test**: `pc-gateway/src/test/kotlin/com/example/relay/pcgateway/ArchitectureTest.kt` — Six bytecode-level rules: relay-protocol purity, Broker never touches javax.crypto, Cipher confined to the rescue crypto boundary, java.util.Random/kotlin.random banned, java.sql confined to the persistence layer, module dependency direction; negative test: planting kotlin.random back into GatewayStore.createPairingCode failed noWeakRandomnessAnywhere naming the exact method, then was reverted
+- **source**: `pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayStore.kt` — Real finding fixed: bridge pairing codes were generated with kotlin.random; now SecureRandom (same 6-digit space)
+
