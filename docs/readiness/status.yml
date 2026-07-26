@@ -897,3 +897,27 @@ features:
     last_verified: "2026-07-26"
     commit: "dd381ca"
     notes: "kotest-property 5.9.1 pinned in verification-metadata.xml (sha256); JUnit4 + runBlocking bridge; :relay-protocol:test green under active dependency verification."
+
+  - id: mutation-testing
+    name: "PIT mutation testing gate for relay-protocol (threshold 95)"
+    name_ja: "relay-protocolのPITミューテーションテストゲート（閾値95）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: relay-protocol/build.gradle.kts
+        note: "Fail-closed mutationThreshold 95; measured 113/114 killed (99%), 0 NO_COVERAGE; sole survivor is an equivalent mutant (NoOpGatewayMessageSigner.keyId already returns empty string)"
+      - kind: test
+        ref: relay-protocol/src/test/kotlin/com/example/relay/gateway/protocol/GatewayProtocolEdgeCaseTest.kt
+        note: "10 deterministic survivor-killing tests; negative evidence: gate failed closed at 29% and 75% before test-strength fixes"
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+        note: "mutation job runs :relay-protocol:pitest with SHA-pinned actions and uploads the PIT report artifact; job itself NOT_RUN on GitHub until pushed"
+    last_verified: "2026-07-26"
+    commit: "7909e0b"
+    notes: "PIT 1.17.4 via info.solidsoft.pitest 1.15.0, pinned in verification-metadata.xml; targetTests set explicitly because the plugin default silently skipped tests outside the targetClasses package (false NO_COVERAGE); PIT analysis drove the tamper property from 5 to all 15 canonical fields."

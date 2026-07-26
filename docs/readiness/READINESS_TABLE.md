@@ -58,6 +58,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `release-provenance-attestation` | 正式リリース成果物のビルド来歴attestation | Release | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
 | `detekt-static-analysis` | detekt静的解析（Relay固有の機微ログ禁止ルール） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `property-based-testing` | Gateway署名プロトコルのプロパティベーステスト（kotest-property） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
+| `mutation-testing` | relay-protocolのPITミューテーションテストゲート（閾値95） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 
 ## Notes per feature
 
@@ -101,3 +102,4 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `release-provenance-attestation`: Real attestation requires an actual formal release run on GitHub; not executable locally.
 - `detekt-static-analysis`: 1294 existing findings recorded as baseline debt (0 ForbiddenImport); CLI checksum-pinned, no Gradle plugin dependency added.
 - `property-based-testing`: kotest-property 5.9.1 pinned in verification-metadata.xml (sha256); JUnit4 + runBlocking bridge; :relay-protocol:test green under active dependency verification.
+- `mutation-testing`: PIT 1.17.4 via info.solidsoft.pitest 1.15.0, pinned in verification-metadata.xml; targetTests set explicitly because the plugin default silently skipped tests outside the targetClasses package (false NO_COVERAGE); PIT analysis drove the tamper property from 5 to all 15 canonical fields.

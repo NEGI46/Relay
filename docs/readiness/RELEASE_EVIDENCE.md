@@ -221,3 +221,9 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 - **test**: `relay-protocol/src/test/kotlin/com/example/relay/gateway/protocol/GatewayIntegrityPropertyTest.kt` — 6 properties (1250 randomized cases/run): round-trip, per-field tamper, unknown key, malformed signature crash-freedom, canonical boundary collisions, JSON key-order independence
 - **test**: `relay-protocol/src/main/kotlin/com/example/relay/gateway/GatewayIntegrity.kt` — Mutation check: removing length prefix from CanonicalFields.add caused property failure (no false green), then reverted
 
+## `mutation-testing` — PIT mutation testing gate for relay-protocol (threshold 95)
+
+- **source**: `relay-protocol/build.gradle.kts` — Fail-closed mutationThreshold 95; measured 113/114 killed (99%), 0 NO_COVERAGE; sole survivor is an equivalent mutant (NoOpGatewayMessageSigner.keyId already returns empty string)
+- **test**: `relay-protocol/src/test/kotlin/com/example/relay/gateway/protocol/GatewayProtocolEdgeCaseTest.kt` — 10 deterministic survivor-killing tests; negative evidence: gate failed closed at 29% and 75% before test-strength fixes
+- **workflow**: `.github/workflows/relay-ci.yml` — mutation job runs :relay-protocol:pitest with SHA-pinned actions and uploads the PIT report artifact; job itself NOT_RUN on GitHub until pushed
+
