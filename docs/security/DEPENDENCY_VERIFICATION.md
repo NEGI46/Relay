@@ -36,6 +36,20 @@ $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 - PGP 署名検証（`verify-signatures`）は現時点で無効です。導入する場合は
   鍵の信頼リスト整備が必要です。
 
+## Dependency Locking を導入しない判断（記録）
+
+Gradle の lockfile（`--write-locks`）は導入していません。理由:
+
+1. 直接依存は `gradle/libs.versions.toml` で全て固定バージョン指定であり、
+   動的バージョン（`+` / `latest.release` / 範囲指定）は 0 件（2026-07-26 走査）。
+2. 推移的依存が別バージョンに変動した場合、そのアーティファクトは
+   verification-metadata に未登録のため **ビルドが fail-closed で失敗**する。
+   つまりチェックサム検証が事実上のロックとして機能する。
+3. 7 モジュール × 全 configuration の lockfile は Dependabot 更新のたびに
+   大量差分を生み、レビュー品質を下げる（誤マージリスクの方が大きい）。
+
+動的バージョンを導入する変更が入った場合は、この判断を再評価すること。
+
 ## カバーしたタスク
 
 生成時に以下を解決済み: `:app:compileDebugKotlin` / `:app:testDebugUnitTest`(実行) と、
