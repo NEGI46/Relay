@@ -54,6 +54,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `scorecard-monitoring` | OSSF Scorecardサプライチェーン姿勢モニタリング | Supply chain | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
 | `dependabot-updates` | Dependabot更新設定（gradle/actions/npm/pip） | Supply chain | IMPLEMENTED | N/A | N/A | N/A | N/A | - |
 | `branch-protection` | 必須セキュリティチェック付きブランチ保護 | Supply chain | BLOCKED_EXTERNAL | BLOCKED_EXTERNAL | N/A | N/A | N/A | Repository owner must apply the settings documented in docs/security/BRANCH_PROTECTION.md |
+| `gradle-dependency-verification` | Gradle依存関係検証（sha256・fail-closed） | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 
 ## Notes per feature
 
@@ -93,3 +94,4 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `scorecard-monitoring`: Honestly gated to the default branch; will not produce results until merged there.
 - `dependabot-updates`: Configuration only; GitHub activates it server-side once present on the default branch.
 - `branch-protection`: CI cannot verify repository settings; remains blocked until the owner applies and confirms them.
+- `gradle-dependency-verification`: Generated on Windows; platform-specific artifacts for ubuntu/macos CI lanes may need additions (fail-closed, documented).

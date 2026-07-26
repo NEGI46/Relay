@@ -816,3 +816,24 @@ features:
     last_verified: "2026-07-26"
     commit: "869c77c"
     notes: "CI cannot verify repository settings; remains blocked until the owner applies and confirms them."
+
+  - id: gradle-dependency-verification
+    name: "Gradle dependency verification (sha256, fail-closed)"
+    name_ja: "Gradle依存関係検証（sha256・fail-closed）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: gradle/verification-metadata.xml
+        note: "935 components / 1632 sha256 hashes; auto-activates by file presence"
+      - kind: doc
+        ref: docs/security/DEPENDENCY_VERIFICATION.md
+        note: "Local negative test: all-checksum tamper fails build (exit 1); positive build passes (exit 0)"
+    last_verified: "2026-07-26"
+    commit: "6ec906a"
+    notes: "Generated on Windows; platform-specific artifacts for ubuntu/macos CI lanes may need additions (fail-closed, documented)."

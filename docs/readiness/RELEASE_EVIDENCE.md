@@ -202,3 +202,8 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 
 - **doc**: `docs/security/BRANCH_PROTECTION.md`
 
+## `gradle-dependency-verification` — Gradle dependency verification (sha256, fail-closed)
+
+- **source**: `gradle/verification-metadata.xml` — 935 components / 1632 sha256 hashes; auto-activates by file presence
+- **doc**: `docs/security/DEPENDENCY_VERIFICATION.md` — Local negative test: all-checksum tamper fails build (exit 1); positive build passes (exit 0)
+
