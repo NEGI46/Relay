@@ -1,0 +1,73 @@
+# Gitleaks configuration for Relay.
+#
+# Extends the default ruleset with Relay-specific secret shapes. Scans must
+# stay fail-closed: a finding fails CI; nothing downgrades findings to
+# warnings. Test fixtures use clearly fake values allowlisted by path below.
+
+[extend]
+useDefault = true
+
+# --- Relay-specific rules -------------------------------------------------
+
+[[rules]]
+id = "relay-gateway-enrollment-token"
+description = "Relay LAN Gateway enrollment token (relay-gw:1:...) outside test fixtures"
+regex = '''relay-gw:1:[A-Za-z0-9+/=_-]{16,}'''
+keywords = ["relay-gw:1:"]
+[rules.allowlist]
+paths = [
+    '''(^|/)src/test/''',
+    '''(^|/)src/androidTest/''',
+    '''(^|/)src/commonTest/''',
+    '''(^|/)src/jvmTest/''',
+    '''^test-lab/''',
+    '''^docs/''',
+]
+
+[[rules]]
+id = "relay-broker-scoped-credential"
+description = "Relay Broker scoped credential secret assignment"
+regex = '''(?i)(broker[_-]?(credential|secret|token))\s*[:=]\s*["'][A-Za-z0-9+/=_-]{20,}["']'''
+keywords = ["broker_credential", "broker-secret", "broker_token"]
+[rules.allowlist]
+paths = [
+    '''(^|/)src/test/''',
+    '''(^|/)src/jvmTest/''',
+    '''^docs/''',
+]
+
+[[rules]]
+id = "relay-receipt-signing-key"
+description = "Receipt or gateway signing key material assignment"
+regex = '''(?i)(receipt|gateway)[_-]?(signing|private)[_-]?key\s*[:=]\s*["'][A-Za-z0-9+/=]{32,}["']'''
+keywords = ["signing_key", "private_key", "signing-key", "private-key"]
+[rules.allowlist]
+paths = [
+    '''(^|/)src/test/''',
+    '''(^|/)src/jvmTest/''',
+    '''^docs/''',
+]
+
+[[rules]]
+id = "relay-keystore-password"
+description = "Android keystore/signing password literal committed in Gradle or properties files"
+# Only quoted literal values count; property/env indirection is the safe pattern.
+regex = '''(?i)(keystore|store|key)[._-]?(password|pass)\s*[:=]\s*["'][^"'\s]{8,}["']'''
+path = '''\.(properties|gradle|kts)$'''
+keywords = ["keystorePassword", "keyPassword", "storePassword"]
+
+# --- Global allowlist -----------------------------------------------------
+
+[allowlist]
+description = "Non-secret paths and zero-entropy prose matches"
+paths = [
+    '''(^|/)gradle/wrapper/gradle-wrapper\.jar$''',
+    '''\.(png|jpg|webp|ico|svg)$''',
+    '''^docs/readiness/RELEASE_EVIDENCE\.md$''',
+]
+# regexTarget defaults to the extracted secret: plain English words or
+# slash-separated word lists carry no secret entropy.
+regexes = [
+    '''^[A-Za-z]+(/[A-Za-z-]+){1,4}$''',
+    '''^[A-Za-z]{1,6}$''',
+]

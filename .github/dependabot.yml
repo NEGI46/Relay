@@ -1,0 +1,43 @@
+# Dependabot keeps dependency update PRs small and grouped. Updates only
+# raise PRs; nothing is auto-merged. Security fixes take priority.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      kotlin-and-compose:
+        patterns:
+          - "org.jetbrains.kotlin*"
+          - "org.jetbrains.compose*"
+          - "com.google.devtools.ksp*"
+      ktor:
+        patterns:
+          - "io.ktor*"
+      androidx:
+        patterns:
+          - "androidx.*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /staff-console-e2e
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: pip
+    directory: /tools
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
