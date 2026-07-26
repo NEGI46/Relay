@@ -56,6 +56,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `branch-protection` | 必須セキュリティチェック付きブランチ保護 | Supply chain | BLOCKED_EXTERNAL | BLOCKED_EXTERNAL | N/A | N/A | N/A | Repository owner must apply the settings documented in docs/security/BRANCH_PROTECTION.md |
 | `gradle-dependency-verification` | Gradle依存関係検証（sha256・fail-closed） | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `release-provenance-attestation` | 正式リリース成果物のビルド来歴attestation | Release | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
+| `detekt-static-analysis` | detekt静的解析（Relay固有の機微ログ禁止ルール） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 
 ## Notes per feature
 
@@ -97,3 +98,4 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `branch-protection`: CI cannot verify repository settings; remains blocked until the owner applies and confirms them.
 - `gradle-dependency-verification`: Generated on Windows; platform-specific artifacts for ubuntu/macos CI lanes may need additions (fail-closed, documented).
 - `release-provenance-attestation`: Real attestation requires an actual formal release run on GitHub; not executable locally.
+- `detekt-static-analysis`: 1294 existing findings recorded as baseline debt (0 ForbiddenImport); CLI checksum-pinned, no Gradle plugin dependency added.

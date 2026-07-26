@@ -211,3 +211,8 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 
 - **workflow**: `.github/workflows/publish-release.yml` — attest-build-provenance step blocks publication on failure; linted locally (actionlint/zizmor)
 
+## `detekt-static-analysis` — detekt static analysis with Relay sensitive-logging rules
+
+- **source**: `config/detekt/detekt.yml` — ForbiddenImport android.util.Log / java.util.Random; baseline gates only new findings
+- **workflow**: `.github/workflows/security-baseline.yml` — Local negative test: planted android.util.Log import detected (exit 2); positive run exit 0
+

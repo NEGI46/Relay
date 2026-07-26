@@ -855,3 +855,24 @@ features:
     last_verified: "2026-07-26"
     commit: "398cc1a"
     notes: "Real attestation requires an actual formal release run on GitHub; not executable locally."
+
+  - id: detekt-static-analysis
+    name: "detekt static analysis with Relay sensitive-logging rules"
+    name_ja: "detekt静的解析（Relay固有の機微ログ禁止ルール）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: config/detekt/detekt.yml
+        note: "ForbiddenImport android.util.Log / java.util.Random; baseline gates only new findings"
+      - kind: workflow
+        ref: .github/workflows/security-baseline.yml
+        note: "Local negative test: planted android.util.Log import detected (exit 2); positive run exit 0"
+    last_verified: "2026-07-26"
+    commit: "ac1ddc2"
+    notes: "1294 existing findings recorded as baseline debt (0 ForbiddenImport); CLI checksum-pinned, no Gradle plugin dependency added."
