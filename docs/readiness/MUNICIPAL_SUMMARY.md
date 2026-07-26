@@ -43,7 +43,7 @@
 | Meshtastic adapter（契約境界） | 自動試験まで完了 | 外部準備待ち |
 | BPv7 export境界 | 自動試験まで完了 | 対象外 |
 | 訓練モード（本番データ完全分離） | 未実装 | — |
-| 公式情報の来歴モデル（JMA XML・CAP） | 未実装 | — |
+| 公式情報の来歴モデル（JMA XML・CAP） | 自動試験まで完了 | 未実施 |
 | Windows DPAPIによるGateway秘密鍵保護 | 未実装 | — |
 | 個人・救助情報のretention管理 | 未実装 | — |
 | CodeQL静的解析（java-kotlin / js-ts / actions） | 実装のみ | 対象外 |

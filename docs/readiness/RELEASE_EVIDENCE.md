@@ -159,7 +159,10 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 
 ## `official-info-provenance` — Official information provenance model (JMA XML / CAP)
 
-- 証跡なし（NOT_IMPLEMENTEDまたは設計のみ）
+- **source**: `pc-gateway/src/main/kotlin/com/example/relay/pcgateway/official/OfficialInfoProvenance.kt` — Provenance record with an honest verification ceiling: unsigned JMA content is at most TRANSPORT_TLS_ONLY on live fetch, CACHED_UNVERIFIED on cache replay, UNVERIFIED when nothing is available; SHA-256 of the exact raw document
+- **source**: `pc-gateway/src/main/kotlin/com/example/relay/pcgateway/official/CapAlertParser.kt` — Fail-closed OASIS CAP 1.2 and JMA Atom feed parsers over XXE-hardened XML (DOCTYPE banned, external entities/DTD/XInclude off); CAP status Exercise/Test preserved so drills are never shown as real alerts; XML-DSig only recorded as present, never claimed verified
+- **test**: `pc-gateway/src/test/kotlin/com/example/relay/pcgateway/official/OfficialXmlParsersTest.kt` — 13 fixture/fail-closed tests incl. 3 XXE gates that assert the DOCTYPE ban specifically; negative test: planted disallow-doctype-decl=false made all 3 XXE gates FAIL, reverted exactly, suite green
+- **test**: `pc-gateway/src/test/kotlin/com/example/relay/pcgateway/OfficialInformationServiceProvenanceTest.kt` — 5 provenance-state tests: live fetch, cache replay keeping original fetch time via digest-checked sidecar, tampered cache losing its fetch time, nothing available never presented as verified, throttle stability; full :pc-gateway:test suite green
 
 ## `dpapi-key-protection` — Windows DPAPI protection for Gateway private keys
 

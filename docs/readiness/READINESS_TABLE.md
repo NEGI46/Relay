@@ -43,7 +43,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `meshtastic-adapter` | Meshtastic adapter（契約境界） | 外部連携 | IMPLEMENTED | AUTOMATED_TESTED | N/A | BLOCKED_EXTERNAL | BLOCKED_EXTERNAL | Physical Meshtastic hardware |
 | `bp7-export` | BPv7 export境界 | 外部連携 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `training-mode` | 訓練モード（本番データ完全分離） | 運用 | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | - |
-| `official-info-provenance` | 公式情報の来歴モデル（JMA XML・CAP） | 運用 | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | - |
+| `official-info-provenance` | 公式情報の来歴モデル（JMA XML・CAP） | 運用 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | NOT_RUN | - |
 | `dpapi-key-protection` | Windows DPAPIによるGateway秘密鍵保護 | PC Gateway | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | - |
 | `data-retention` | 個人・救助情報のretention管理 | 運用 | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | Privacy/legal owner approval of retention periods |
 | `codeql-analysis` | CodeQL静的解析（java-kotlin / js-ts / actions） | Supply chain | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
@@ -91,7 +91,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `formal-release`: The gate exists and fails closed without organization secrets. No formal release has ever been produced; the workflow result is BLOCKED_EXTERNAL until keys exist.
 - `ios-preview`: Simulator build evidence only; no physical iPhone claim.
 - `training-mode`: Planned: separate DB/keys/accounts/credentials with mandatory training banner.
-- `official-info-provenance`: Current JMA warning fetch has no provenance/verification-state model yet.
+- `official-info-provenance`: Provenance is transport-honest only: no trust anchors exist for JMA/CAP publishers, so content authenticity is never claimed; staff console renders the verification state. CAP/Atom parsers are not yet wired to a live polling source (JMA XML feed polling remains a documented future activation trigger).
 - `dpapi-key-protection`: Current boundary is owner-only file permission verification, deliberately not claimed as DPAPI/HSM/KMS.
 - `data-retention`: Terminal-detail 30-day retention exists in Gateway; a general policy engine does not.
 - `codeql-analysis`: Workflow linted locally (actionlint/zizmor) but not yet executed on GitHub-hosted runners.

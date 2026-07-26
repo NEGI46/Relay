@@ -633,16 +633,28 @@ features:
     name: "Official information provenance model (JMA XML / CAP)"
     name_ja: "公式情報の来歴モデル（JMA XML・CAP）"
     area: operations
-    implementation: NOT_IMPLEMENTED
-    automated_test: NOT_APPLICABLE
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
     emulator_simulator: NOT_APPLICABLE
     real_device: NOT_APPLICABLE
-    field_test: NOT_APPLICABLE
+    field_test: NOT_RUN
     external_decisions: []
-    evidence: []
+    evidence:
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/official/OfficialInfoProvenance.kt
+        note: "Provenance record with an honest verification ceiling: unsigned JMA content is at most TRANSPORT_TLS_ONLY on live fetch, CACHED_UNVERIFIED on cache replay, UNVERIFIED when nothing is available; SHA-256 of the exact raw document"
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/official/CapAlertParser.kt
+        note: "Fail-closed OASIS CAP 1.2 and JMA Atom feed parsers over XXE-hardened XML (DOCTYPE banned, external entities/DTD/XInclude off); CAP status Exercise/Test preserved so drills are never shown as real alerts; XML-DSig only recorded as present, never claimed verified"
+      - kind: test
+        ref: pc-gateway/src/test/kotlin/com/example/relay/pcgateway/official/OfficialXmlParsersTest.kt
+        note: "13 fixture/fail-closed tests incl. 3 XXE gates that assert the DOCTYPE ban specifically; negative test: planted disallow-doctype-decl=false made all 3 XXE gates FAIL, reverted exactly, suite green"
+      - kind: test
+        ref: pc-gateway/src/test/kotlin/com/example/relay/pcgateway/OfficialInformationServiceProvenanceTest.kt
+        note: "5 provenance-state tests: live fetch, cache replay keeping original fetch time via digest-checked sidecar, tampered cache losing its fetch time, nothing available never presented as verified, throttle stability; full :pc-gateway:test suite green"
     last_verified: "2026-07-26"
-    commit: "89e7651"
-    notes: "Current JMA warning fetch has no provenance/verification-state model yet."
+    commit: "e7a67ad"
+    notes: "Provenance is transport-honest only: no trust anchors exist for JMA/CAP publishers, so content authenticity is never claimed; staff console renders the verification state. CAP/Atom parsers are not yet wired to a live polling source (JMA XML feed polling remains a documented future activation trigger)."
 
   - id: dpapi-key-protection
     name: "Windows DPAPI protection for Gateway private keys"
