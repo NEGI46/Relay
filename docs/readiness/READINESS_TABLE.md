@@ -55,6 +55,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `dependabot-updates` | Dependabot更新設定（gradle/actions/npm/pip） | Supply chain | IMPLEMENTED | N/A | N/A | N/A | N/A | - |
 | `branch-protection` | 必須セキュリティチェック付きブランチ保護 | Supply chain | BLOCKED_EXTERNAL | BLOCKED_EXTERNAL | N/A | N/A | N/A | Repository owner must apply the settings documented in docs/security/BRANCH_PROTECTION.md |
 | `gradle-dependency-verification` | Gradle依存関係検証（sha256・fail-closed） | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
+| `release-provenance-attestation` | 正式リリース成果物のビルド来歴attestation | Release | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
 
 ## Notes per feature
 
@@ -95,3 +96,4 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `dependabot-updates`: Configuration only; GitHub activates it server-side once present on the default branch.
 - `branch-protection`: CI cannot verify repository settings; remains blocked until the owner applies and confirms them.
 - `gradle-dependency-verification`: Generated on Windows; platform-specific artifacts for ubuntu/macos CI lanes may need additions (fail-closed, documented).
+- `release-provenance-attestation`: Real attestation requires an actual formal release run on GitHub; not executable locally.

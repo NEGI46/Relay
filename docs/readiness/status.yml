@@ -837,3 +837,21 @@ features:
     last_verified: "2026-07-26"
     commit: "6ec906a"
     notes: "Generated on Windows; platform-specific artifacts for ubuntu/macos CI lanes may need additions (fail-closed, documented)."
+
+  - id: release-provenance-attestation
+    name: "Build provenance attestation for formal release artifacts"
+    name_ja: "正式リリース成果物のビルド来歴attestation"
+    area: release
+    implementation: IMPLEMENTED
+    automated_test: NOT_RUN
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/publish-release.yml
+        note: "attest-build-provenance step blocks publication on failure; linted locally (actionlint/zizmor)"
+    last_verified: "2026-07-26"
+    commit: "398cc1a"
+    notes: "Real attestation requires an actual formal release run on GitHub; not executable locally."

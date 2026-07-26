@@ -207,3 +207,7 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 - **source**: `gradle/verification-metadata.xml` — 935 components / 1632 sha256 hashes; auto-activates by file presence
 - **doc**: `docs/security/DEPENDENCY_VERIFICATION.md` — Local negative test: all-checksum tamper fails build (exit 1); positive build passes (exit 0)
 
+## `release-provenance-attestation` — Build provenance attestation for formal release artifacts
+
+- **workflow**: `.github/workflows/publish-release.yml` — attest-build-provenance step blocks publication on failure; linted locally (actionlint/zizmor)
+
