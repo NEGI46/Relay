@@ -17,6 +17,11 @@ class PilotOperationsTest {
         assertEquals("中", item.priority)
     }
 
+    @Test fun `observation-only subject remains in review queue`() = store().use { store ->
+        store.addObservation(ObservationInput("new-token", ObservationType.THIRD_PARTY_REPORT), SourceChannel.STAFF_DESK, IngressAssurance.UNVERIFIED, 100)
+        assertEquals("第三者情報あり・要確認", store.reviewQueue(101).single().state)
+    }
+
     @Test fun `csv preview and rejected import preserve existing data`() = store().use { store ->
         val valid = "subject_token,group_id,support_mobility,support_power,children_present,review_due_at\ndemo-a,g,true,false,false,2026-12-31\n"
         assertEquals(1, store.importCsv(CsvImportRequest("baseline", valid, dryRun = false)).validRows)
@@ -24,6 +29,11 @@ class PilotOperationsTest {
         val result = store.importCsv(CsvImportRequest("baseline", invalid, dryRun = false))
         assertEquals(1, result.rejectedRows)
         assertEquals(listOf("demo-a"), store.reviewQueue().map { it.subjectToken })
+    }
+
+    @Test fun `csv rejects misspelled support boolean`() = store().use { store ->
+        val csv = "subject_token,group_id,support_mobility,support_power,children_present,review_due_at\\ndemo-a,g,treu,false,false,2026-12-31\\n"
+        assertEquals(1, store.previewCsv("baseline", csv, dryRun = true).rejectedRows)
     }
 
     @Test fun `expired and revoked support profiles are not current facts`() = store().use { store ->
