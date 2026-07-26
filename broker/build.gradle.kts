@@ -19,4 +19,7 @@ dependencies {
     implementation("org.slf4j:slf4j-simple:2.0.17")
     testImplementation(libs.ktor.server.test.host)
     testImplementation(libs.junit)
+    testImplementation(libs.testcontainers.core)
+    testImplementation(libs.testcontainers.toxiproxy)
+    testImplementation(libs.toxiproxy.java)
 }

@@ -29,6 +29,11 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
       - name: Build debug APK and JVM artifacts
+        # RELAY_REQUIRE_DOCKER: ubuntu-latest runners ship Docker, so the
+        # Toxiproxy resilience tests must FAIL (not skip) if Docker is missing -
+        # otherwise a runner image change could silently disable the gate.
+        env:
+          RELAY_REQUIRE_DOCKER: 'true'
         run: ./gradlew :app:assembleDebug :pc-gateway:build :pc-gateway:installDist :broker:test --no-daemon
       - name: Upload build artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

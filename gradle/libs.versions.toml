@@ -30,6 +30,9 @@ kotestProperty = "5.9.1"
 pitestPlugin = "1.15.0"
 pitest = "1.17.4"
 archunit = "1.4.1"
+# 2.x required: Docker Engine 29 rejects the pre-1.44 API negotiation used by testcontainers 1.x
+testcontainers = "2.0.5"
+toxiproxyJava = "2.1.7"
 desugarJdkLibs = "2.1.5"
 kover = "0.9.1"
 
@@ -86,6 +89,9 @@ desugar-jdk-libs = { module = "com.android.tools:desugar_jdk_libs", version.ref 
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junitJupiter" }
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotestProperty" }
 archunit-junit4 = { module = "com.tngtech.archunit:archunit-junit4", version.ref = "archunit" }
+testcontainers-core = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
+testcontainers-toxiproxy = { module = "org.testcontainers:testcontainers-toxiproxy", version.ref = "testcontainers" }
+toxiproxy-java = { module = "eu.rekawek.toxiproxy:toxiproxy-java", version.ref = "toxiproxyJava" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
