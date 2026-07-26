@@ -55,7 +55,8 @@ data class GatewayConfig(
      * Every profile binds to loopback by default. A non-loopback value is an explicit operator
      * choice and the Windows local-pilot launcher requires -AllowLan before setting one.
      */
-    val host: String = System.getenv("RELAY_GATEWAY_HOST") ?: "127.0.0.1",
+    val host: String = System.getenv("RELAY_GATEWAY_HOST")
+        ?: if (profile == GatewayProfile.DEVELOPMENT) "127.0.0.1" else "127.0.0.1",
     val port: Int = (System.getenv("RELAY_GATEWAY_PORT") ?: "8080").toIntOrNull() ?: 8080,
     /** External endpoint advertised by a TLS reverse proxy, never a secret. */
     val publicScheme: String = (System.getenv("RELAY_GATEWAY_PUBLIC_SCHEME")
