@@ -15,6 +15,7 @@ Status date: **2026-07-26** / commit `89e7651`
 - `official-info-provenance` 公式情報の来歴モデル（JMA XML・CAP） — NOT_IMPLEMENTED
 - `dpapi-key-protection` Windows DPAPIによるGateway秘密鍵保護 — NOT_IMPLEMENTED
 - `data-retention` 個人・救助情報のretention管理 — NOT_IMPLEMENTED（外部判断: Privacy/legal owner approval of retention periods）
+- `branch-protection` 必須セキュリティチェック付きブランチ保護 — BLOCKED_EXTERNAL（外部判断: Repository owner must apply the settings documented in docs/security/BRANCH_PROTECTION.md）
 
 ## 実装済みだが実機未検証（DEVICE_TESTEDなし）
 
@@ -48,5 +49,6 @@ Status date: **2026-07-26** / commit `89e7651`
 | `ios-preview` | iOS simulatorプレビュービルド | Apple Developer signing and iPhone hardware |
 | `meshtastic-adapter` | Meshtastic adapter（契約境界） | Physical Meshtastic hardware |
 | `data-retention` | 個人・救助情報のretention管理 | Privacy/legal owner approval of retention periods |
+| `branch-protection` | 必須セキュリティチェック付きブランチ保護 | Repository owner must apply the settings documented in docs/security/BRANCH_PROTECTION.md |
 
 詳細な背景は [BLOCKED_BY_EXTERNAL_DECISIONS](BLOCKED_BY_EXTERNAL_DECISIONS.md) を参照。

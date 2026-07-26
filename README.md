@@ -68,7 +68,7 @@ flowchart LR
 >
 > **status基準: 2026-07-26 / commit `89e7651` / branch `agent/zero-operation-relay`**
 >
-> 管理対象 34機能: 実装済み 27 / 未実装 7 / 自動試験済み 27 / emulator検証済み 1 / **実機検証済み 0 / 現地検証済み 0** / 外部判断待ちを含む 6
+> 管理対象 42機能: 実装済み 34 / 未実装 7 / 自動試験済み 30 / emulator検証済み 1 / **実機検証済み 0 / 現地検証済み 0** / 外部判断待ちを含む 7
 >
 > IMPLEMENTEDやAUTOMATED_TESTEDはDEVICE_TESTED・FIELD_TESTEDを意味しません。全機能の軸別状態は [READINESS_TABLE](docs/readiness/READINESS_TABLE.md)、未完了項目は [OPEN_ITEMS](docs/readiness/OPEN_ITEMS.md)、自治体向け要約は [MUNICIPAL_SUMMARY](docs/readiness/MUNICIPAL_SUMMARY.md) を参照してください。
 <!-- END GENERATED: readiness-summary -->

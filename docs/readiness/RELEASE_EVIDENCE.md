@@ -169,3 +169,36 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 
 - 証跡なし（NOT_IMPLEMENTEDまたは設計のみ）
 
+## `codeql-analysis` — CodeQL static analysis (java-kotlin / js-ts / actions)
+
+- **workflow**: `.github/workflows/codeql.yml`
+
+## `secret-scanning-gitleaks` — Secret scanning with Relay-specific gitleaks rules
+
+- **workflow**: `.github/workflows/security-baseline.yml`
+- **doc**: `.gitleaks.toml` — Local run: 293 commits clean; negative test with planted fake secrets detected 2 leaks (exit 1)
+
+## `workflow-lint-zizmor` — Workflow lint and hardening audit (actionlint + zizmor)
+
+- **workflow**: `.github/workflows/security-baseline.yml` — Local run: actionlint exit 0; zizmor 0 findings (30 suppressed via persist-credentials:false)
+
+## `action-sha-pinning-gate` — CI gate rejecting non-SHA-pinned GitHub Actions
+
+- **workflow**: `.github/workflows/security-baseline.yml` — Local regex gate run: 0 violations across all workflows
+
+## `dependency-review` — PR dependency review (fail on high severity, license denylist)
+
+- **workflow**: `.github/workflows/dependency-review.yml`
+
+## `scorecard-monitoring` — OSSF Scorecard supply-chain posture monitoring
+
+- **workflow**: `.github/workflows/scorecard.yml`
+
+## `dependabot-updates` — Dependabot update configuration (gradle/actions/npm/pip)
+
+- **doc**: `.github/dependabot.yml`
+
+## `branch-protection` — Branch protection with required security checks
+
+- **doc**: `docs/security/BRANCH_PROTECTION.md`
+

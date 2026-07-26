@@ -46,6 +46,14 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `official-info-provenance` | 公式情報の来歴モデル（JMA XML・CAP） | 運用 | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | - |
 | `dpapi-key-protection` | Windows DPAPIによるGateway秘密鍵保護 | PC Gateway | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | - |
 | `data-retention` | 個人・救助情報のretention管理 | 運用 | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | Privacy/legal owner approval of retention periods |
+| `codeql-analysis` | CodeQL静的解析（java-kotlin / js-ts / actions） | Supply chain | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
+| `secret-scanning-gitleaks` | gitleaks秘密情報スキャン（Relay固有ルール） | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
+| `workflow-lint-zizmor` | ワークフローlintと堅牢化監査（actionlint + zizmor） | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
+| `action-sha-pinning-gate` | SHA固定されていないGitHub Actionsを拒否するCIゲート | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
+| `dependency-review` | PR依存関係レビュー（high以上で失敗・ライセンス拒否リスト） | Supply chain | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
+| `scorecard-monitoring` | OSSF Scorecardサプライチェーン姿勢モニタリング | Supply chain | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
+| `dependabot-updates` | Dependabot更新設定（gradle/actions/npm/pip） | Supply chain | IMPLEMENTED | N/A | N/A | N/A | N/A | - |
+| `branch-protection` | 必須セキュリティチェック付きブランチ保護 | Supply chain | BLOCKED_EXTERNAL | BLOCKED_EXTERNAL | N/A | N/A | N/A | Repository owner must apply the settings documented in docs/security/BRANCH_PROTECTION.md |
 
 ## Notes per feature
 
@@ -78,3 +86,10 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `official-info-provenance`: Current JMA warning fetch has no provenance/verification-state model yet.
 - `dpapi-key-protection`: Current boundary is owner-only file permission verification, deliberately not claimed as DPAPI/HSM/KMS.
 - `data-retention`: Terminal-detail 30-day retention exists in Gateway; a general policy engine does not.
+- `codeql-analysis`: Workflow linted locally (actionlint/zizmor) but not yet executed on GitHub-hosted runners.
+- `secret-scanning-gitleaks`: Scan executed locally with checksum-pinned gitleaks 8.30.1; CI execution on GitHub runners pending first push.
+- `workflow-lint-zizmor`: All checkouts use persist-credentials:false; publish workflows demoted to contents:read with job-level write.
+- `dependency-review`: Only runs on pull_request events; requires GitHub dependency graph.
+- `scorecard-monitoring`: Honestly gated to the default branch; will not produce results until merged there.
+- `dependabot-updates`: Configuration only; GitHub activates it server-side once present on the default branch.
+- `branch-protection`: CI cannot verify repository settings; remains blocked until the owner applies and confirms them.

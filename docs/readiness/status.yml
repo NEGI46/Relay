@@ -674,3 +674,145 @@ features:
     last_verified: "2026-07-26"
     commit: "89e7651"
     notes: "Terminal-detail 30-day retention exists in Gateway; a general policy engine does not."
+
+  - id: codeql-analysis
+    name: "CodeQL static analysis (java-kotlin / js-ts / actions)"
+    name_ja: "CodeQL静的解析（java-kotlin / js-ts / actions）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: NOT_RUN
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/codeql.yml
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "Workflow linted locally (actionlint/zizmor) but not yet executed on GitHub-hosted runners."
+
+  - id: secret-scanning-gitleaks
+    name: "Secret scanning with Relay-specific gitleaks rules"
+    name_ja: "gitleaks秘密情報スキャン（Relay固有ルール）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/security-baseline.yml
+      - kind: doc
+        ref: .gitleaks.toml
+        note: "Local run: 293 commits clean; negative test with planted fake secrets detected 2 leaks (exit 1)"
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "Scan executed locally with checksum-pinned gitleaks 8.30.1; CI execution on GitHub runners pending first push."
+
+  - id: workflow-lint-zizmor
+    name: "Workflow lint and hardening audit (actionlint + zizmor)"
+    name_ja: "ワークフローlintと堅牢化監査（actionlint + zizmor）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/security-baseline.yml
+        note: "Local run: actionlint exit 0; zizmor 0 findings (30 suppressed via persist-credentials:false)"
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "All checkouts use persist-credentials:false; publish workflows demoted to contents:read with job-level write."
+
+  - id: action-sha-pinning-gate
+    name: "CI gate rejecting non-SHA-pinned GitHub Actions"
+    name_ja: "SHA固定されていないGitHub Actionsを拒否するCIゲート"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/security-baseline.yml
+        note: "Local regex gate run: 0 violations across all workflows"
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: ""
+
+  - id: dependency-review
+    name: "PR dependency review (fail on high severity, license denylist)"
+    name_ja: "PR依存関係レビュー（high以上で失敗・ライセンス拒否リスト）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: NOT_RUN
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/dependency-review.yml
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "Only runs on pull_request events; requires GitHub dependency graph."
+
+  - id: scorecard-monitoring
+    name: "OSSF Scorecard supply-chain posture monitoring"
+    name_ja: "OSSF Scorecardサプライチェーン姿勢モニタリング"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: NOT_RUN
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/scorecard.yml
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "Honestly gated to the default branch; will not produce results until merged there."
+
+  - id: dependabot-updates
+    name: "Dependabot update configuration (gradle/actions/npm/pip)"
+    name_ja: "Dependabot更新設定（gradle/actions/npm/pip）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: NOT_APPLICABLE
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: doc
+        ref: .github/dependabot.yml
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "Configuration only; GitHub activates it server-side once present on the default branch."
+
+  - id: branch-protection
+    name: "Branch protection with required security checks"
+    name_ja: "必須セキュリティチェック付きブランチ保護"
+    area: supply-chain
+    implementation: BLOCKED_EXTERNAL
+    automated_test: BLOCKED_EXTERNAL
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions:
+      - "Repository owner must apply the settings documented in docs/security/BRANCH_PROTECTION.md"
+    evidence:
+      - kind: doc
+        ref: docs/security/BRANCH_PROTECTION.md
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "CI cannot verify repository settings; remains blocked until the owner applies and confirms them."

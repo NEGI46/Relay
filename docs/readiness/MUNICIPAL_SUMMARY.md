@@ -46,5 +46,13 @@
 | 公式情報の来歴モデル（JMA XML・CAP） | 未実装 | — |
 | Windows DPAPIによるGateway秘密鍵保護 | 未実装 | — |
 | 個人・救助情報のretention管理 | 未実装 | — |
+| CodeQL静的解析（java-kotlin / js-ts / actions） | 実装のみ | 対象外 |
+| gitleaks秘密情報スキャン（Relay固有ルール） | 自動試験まで完了 | 対象外 |
+| ワークフローlintと堅牢化監査（actionlint + zizmor） | 自動試験まで完了 | 対象外 |
+| SHA固定されていないGitHub Actionsを拒否するCIゲート | 自動試験まで完了 | 対象外 |
+| PR依存関係レビュー（high以上で失敗・ライセンス拒否リスト） | 実装のみ | 対象外 |
+| OSSF Scorecardサプライチェーン姿勢モニタリング | 実装のみ | 対象外 |
+| Dependabot更新設定（gradle/actions/npm/pip） | 実装のみ | 対象外 |
+| 必須セキュリティチェック付きブランチ保護 | 外部判断待ち | — |
 
 実機検証済み: **0件** / 現地検証済み: **0件**（2026-07-26時点）
