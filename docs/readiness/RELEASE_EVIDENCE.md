@@ -216,3 +216,8 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 - **source**: `config/detekt/detekt.yml` — ForbiddenImport android.util.Log / java.util.Random; baseline gates only new findings
 - **workflow**: `.github/workflows/security-baseline.yml` — Local negative test: planted android.util.Log import detected (exit 2); positive run exit 0
 
+## `property-based-testing` — Property-based tests for Gateway signing protocol (kotest-property)
+
+- **test**: `relay-protocol/src/test/kotlin/com/example/relay/gateway/protocol/GatewayIntegrityPropertyTest.kt` — 6 properties (1250 randomized cases/run): round-trip, per-field tamper, unknown key, malformed signature crash-freedom, canonical boundary collisions, JSON key-order independence
+- **test**: `relay-protocol/src/main/kotlin/com/example/relay/gateway/GatewayIntegrity.kt` — Mutation check: removing length prefix from CanonicalFields.add caused property failure (no false green), then reverted
+

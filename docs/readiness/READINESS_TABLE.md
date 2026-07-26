@@ -57,6 +57,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `gradle-dependency-verification` | Gradle依存関係検証（sha256・fail-closed） | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `release-provenance-attestation` | 正式リリース成果物のビルド来歴attestation | Release | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
 | `detekt-static-analysis` | detekt静的解析（Relay固有の機微ログ禁止ルール） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
+| `property-based-testing` | Gateway署名プロトコルのプロパティベーステスト（kotest-property） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 
 ## Notes per feature
 
@@ -99,3 +100,4 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `gradle-dependency-verification`: Generated on Windows; platform-specific artifacts for ubuntu/macos CI lanes may need additions (fail-closed, documented).
 - `release-provenance-attestation`: Real attestation requires an actual formal release run on GitHub; not executable locally.
 - `detekt-static-analysis`: 1294 existing findings recorded as baseline debt (0 ForbiddenImport); CLI checksum-pinned, no Gradle plugin dependency added.
+- `property-based-testing`: kotest-property 5.9.1 pinned in verification-metadata.xml (sha256); JUnit4 + runBlocking bridge; :relay-protocol:test green under active dependency verification.

@@ -876,3 +876,24 @@ features:
     last_verified: "2026-07-26"
     commit: "ac1ddc2"
     notes: "1294 existing findings recorded as baseline debt (0 ForbiddenImport); CLI checksum-pinned, no Gradle plugin dependency added."
+
+  - id: property-based-testing
+    name: "Property-based tests for Gateway signing protocol (kotest-property)"
+    name_ja: "Gateway署名プロトコルのプロパティベーステスト（kotest-property）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: relay-protocol/src/test/kotlin/com/example/relay/gateway/protocol/GatewayIntegrityPropertyTest.kt
+        note: "6 properties (1250 randomized cases/run): round-trip, per-field tamper, unknown key, malformed signature crash-freedom, canonical boundary collisions, JSON key-order independence"
+      - kind: test
+        ref: relay-protocol/src/main/kotlin/com/example/relay/gateway/GatewayIntegrity.kt
+        note: "Mutation check: removing length prefix from CanonicalFields.add caused property failure (no false green), then reverted"
+    last_verified: "2026-07-26"
+    commit: "dd381ca"
+    notes: "kotest-property 5.9.1 pinned in verification-metadata.xml (sha256); JUnit4 + runBlocking bridge; :relay-protocol:test green under active dependency verification."
