@@ -32,7 +32,7 @@ class PilotOperationsTest {
     }
 
     @Test fun `csv rejects misspelled support boolean`() = store().use { store ->
-        val csv = "subject_token,group_id,support_mobility,support_power,children_present,review_due_at\\ndemo-a,g,treu,false,false,2026-12-31\\n"
+        val csv = "subject_token,group_id,support_mobility,support_power,children_present,review_due_at\ndemo-a,g,treu,false,false,2026-12-31\n"
         assertEquals(1, store.previewCsv("baseline", csv, dryRun = true).rejectedRows)
     }
 
