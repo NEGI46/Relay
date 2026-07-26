@@ -9,4 +9,6 @@ kotlin { jvmToolchain(17) }
 dependencies {
     implementation(libs.kotlinx.serialization.json)
     testImplementation(libs.junit)
+    testImplementation(libs.kotest.property)
+    testImplementation(libs.kotlinx.coroutines.core)
 }

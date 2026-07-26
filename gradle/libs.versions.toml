@@ -26,6 +26,7 @@ camerax = "1.4.2"
 workmanager = "2.10.2"
 jazzer = "0.24.0"
 junitJupiter = "5.11.4"
+kotestProperty = "5.9.1"
 desugarJdkLibs = "2.1.5"
 kover = "0.9.1"
 
@@ -80,6 +81,7 @@ androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version
 jazzer-junit = { module = "com.code-intelligence:jazzer-junit", version.ref = "jazzer" }
 desugar-jdk-libs = { module = "com.android.tools:desugar_jdk_libs", version.ref = "desugarJdkLibs" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junitJupiter" }
+kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotestProperty" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
