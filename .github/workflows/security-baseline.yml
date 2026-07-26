@@ -15,6 +15,8 @@ env:
   ACTIONLINT_VERSION: 1.7.12
   ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
   ZIZMOR_VERSION: 1.28.0
+  DETEKT_VERSION: 1.23.8
+  DETEKT_SHA256: 2ce2ff952e150baf28a29cda70a363b0340b3e81a55f43e51ec5edffc3d066c1
 
 jobs:
   gitleaks:
@@ -91,3 +93,27 @@ jobs:
             exit 1
           fi
           echo "All action references are SHA-pinned."
+
+  detekt:
+    name: Kotlin static analysis (detekt + Relay rules)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install pinned detekt CLI (checksum verified, fail-closed)
+        run: |
+          curl -fsSL -o detekt-cli.jar "https://github.com/detekt/detekt/releases/download/v${DETEKT_VERSION}/detekt-cli-${DETEKT_VERSION}-all.jar"
+          echo "${DETEKT_SHA256}  detekt-cli.jar" | sha256sum -c -
+      - name: Run detekt with Relay-specific rules against baseline
+        run: |
+          java -jar detekt-cli.jar \
+            --input app/src,pc-gateway/src,broker/src,relay-protocol/src,shared/src,composeApp/src,fuzz-jvm/src \
+            --config config/detekt/detekt.yml \
+            --build-upon-default-config \
+            --baseline config/detekt/baseline.xml
