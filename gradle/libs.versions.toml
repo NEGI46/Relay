@@ -27,6 +27,8 @@ workmanager = "2.10.2"
 jazzer = "0.24.0"
 junitJupiter = "5.11.4"
 kotestProperty = "5.9.1"
+pitestPlugin = "1.15.0"
+pitest = "1.17.4"
 desugarJdkLibs = "2.1.5"
 kover = "0.9.1"
 
@@ -95,3 +97,4 @@ kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref 
 compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
 jetbrains-compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
+pitest = { id = "info.solidsoft.pitest", version.ref = "pitestPlugin" }

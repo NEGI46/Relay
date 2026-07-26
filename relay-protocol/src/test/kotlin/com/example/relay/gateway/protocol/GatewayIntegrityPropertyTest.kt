@@ -76,22 +76,36 @@ class GatewayIntegrityPropertyTest {
         }
     }
 
+    // One tamper operation per signed field so mutation testing proves every
+    // canonical field is covered; index-aligned with the Arb.int generator.
+    private val tamperOperations: List<(GatewayMessage) -> GatewayMessage> = listOf(
+        { it.copy(messageId = it.messageId + "x") },
+        { it.copy(messageType = it.messageType + "x") },
+        { it.copy(recordType = it.recordType + "x") },
+        { it.copy(priority = it.priority + "!") },
+        { it.copy(status = it.status + "x") },
+        { it.copy(createdAt = it.createdAt + 1) },
+        { it.copy(expiresAt = it.expiresAt + 1) },
+        { it.copy(lifetimeMs = it.lifetimeMs + 1) },
+        { it.copy(accumulatedAgeMs = it.accumulatedAgeMs + 1) },
+        { it.copy(hopCount = it.hopCount + 1) },
+        { it.copy(hopLimit = it.hopLimit + 1) },
+        { it.copy(originDeviceId = it.originDeviceId + "x") },
+        { it.copy(payload = JsonPrimitive("tampered")) },
+        { it.copy(reportSignature = JsonPrimitive("forged")) },
+        { it.copy(receivedAt = it.receivedAt + 1) },
+    )
+
     @Test
     fun tamperingAnyFieldInvalidatesSignature(): Unit = runBlocking {
         checkAll(
-            PropTestConfig(iterations = 100),
+            PropTestConfig(iterations = 200),
             arbMessage,
             Arb.element(keyPairs),
-            Arb.int(0..4),
+            Arb.int(tamperOperations.indices),
         ) { message, (keyId, pair), fieldIndex ->
             val signed = message.signWith(EcdsaP256GatewayMessageSigner(keyId, pair.private))
-            val tampered = when (fieldIndex) {
-                0 -> signed.copy(messageId = signed.messageId + "x")
-                1 -> signed.copy(hopCount = signed.hopCount + 1)
-                2 -> signed.copy(priority = signed.priority + "!")
-                3 -> signed.copy(payload = JsonPrimitive("tampered"))
-                else -> signed.copy(receivedAt = signed.receivedAt + 1)
-            }
+            val tampered = tamperOperations[fieldIndex](signed)
             assertNotEquals(GatewayVerificationResult.VERIFIED, tampered.verifyWith(verifier))
         }
     }
