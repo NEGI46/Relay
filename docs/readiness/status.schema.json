@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/NEGI46/Relay/docs/readiness/status.schema.json",
+  "title": "Relay readiness status single source of truth",
+  "description": "Machine-readable readiness record. State axes are deliberately separate so that IMPLEMENTED can never be conflated with DEVICE_TESTED. DEVICE_TESTED and FIELD_TESTED additionally require dated external_record evidence (enforced here and cross-checked by tools/readiness/readiness_tool.py).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status_date",
+    "source_commit",
+    "branch",
+    "disclaimer_ja",
+    "disclaimer_en",
+    "features"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "status_date": { "$ref": "#/$defs/isoDate" },
+    "source_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "branch": { "type": "string", "minLength": 1 },
+    "disclaimer_ja": { "type": "string", "minLength": 1 },
+    "disclaimer_en": { "type": "string", "minLength": 1 },
+    "features": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/feature" }
+    }
+  },
+  "$defs": {
+    "isoDate": {
+      "type": "string",
+      "pattern": "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+    },
+    "feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "name_ja",
+        "area",
+        "implementation",
+        "automated_test",
+        "emulator_simulator",
+        "real_device",
+        "field_test",
+        "external_decisions",
+        "evidence",
+        "last_verified",
+        "commit",
+        "notes"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "name": { "type": "string", "minLength": 1 },
+        "name_ja": { "type": "string", "minLength": 1 },
+        "area": {
+          "enum": [
+            "android",
+            "transport",
+            "trust",
+            "gateway",
+            "broker",
+            "verification",
+            "supply-chain",
+            "release",
+            "apple",
+            "integrations",
+            "operations"
+          ]
+        },
+        "implementation": {
+          "enum": ["NOT_IMPLEMENTED", "IMPLEMENTED", "DEPRECATED", "BLOCKED_EXTERNAL"]
+        },
+        "automated_test": {
+          "enum": ["NOT_RUN", "AUTOMATED_TESTED", "BLOCKED_EXTERNAL", "NOT_APPLICABLE"]
+        },
+        "emulator_simulator": {
+          "enum": ["NOT_RUN", "EMULATOR_TESTED", "BLOCKED_EXTERNAL", "NOT_APPLICABLE"]
+        },
+        "real_device": {
+          "enum": ["NOT_RUN", "DEVICE_TESTED", "BLOCKED_EXTERNAL", "NOT_APPLICABLE"]
+        },
+        "field_test": {
+          "enum": ["NOT_RUN", "FIELD_TESTED", "BLOCKED_EXTERNAL", "NOT_APPLICABLE"]
+        },
+        "external_decisions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence" }
+        },
+        "last_verified": { "$ref": "#/$defs/isoDate" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "notes": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "real_device": { "const": "DEVICE_TESTED" } }
+          },
+          "then": { "$ref": "#/$defs/requiresExternalRecord" }
+        },
+        {
+          "if": {
+            "properties": { "field_test": { "const": "FIELD_TESTED" } }
+          },
+          "then": { "$ref": "#/$defs/requiresExternalRecord" }
+        },
+        {
+          "if": {
+            "properties": { "automated_test": { "const": "AUTOMATED_TESTED" } }
+          },
+          "then": {
+            "properties": {
+              "implementation": { "const": "IMPLEMENTED" },
+              "evidence": { "type": "array", "minItems": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": {
+          "enum": ["source", "test", "script", "workflow", "doc", "external_record"]
+        },
+        "ref": { "type": "string", "minLength": 1 },
+        "note": { "type": "string" },
+        "date": { "$ref": "#/$defs/isoDate" },
+        "recorded_by": { "type": "string" }
+      },
+      "if": { "properties": { "kind": { "const": "external_record" } } },
+      "then": { "required": ["kind", "ref", "date", "recorded_by"] }
+    },
+    "requiresExternalRecord": {
+      "properties": {
+        "evidence": {
+          "type": "array",
+          "contains": {
+            "type": "object",
+            "properties": { "kind": { "const": "external_record" } },
+            "required": ["kind", "date", "recorded_by"]
+          }
+        }
+      }
+    }
+  }
+}

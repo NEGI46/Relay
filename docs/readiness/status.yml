@@ -1,0 +1,676 @@
+# Relay readiness single source of truth.
+#
+# This file is the ONLY authoritative machine-readable record of what is
+# implemented, what is automatically tested, and what is still blocked.
+# README summary tables and the generated readiness documents are derived
+# from this file; CI fails when they drift (tools/readiness/readiness_tool.py check).
+#
+# State axes are deliberately separate so that IMPLEMENTED can never be
+# conflated with DEVICE_TESTED:
+#   implementation:     NOT_IMPLEMENTED | IMPLEMENTED | DEPRECATED | BLOCKED_EXTERNAL
+#   automated_test:     NOT_RUN | AUTOMATED_TESTED | BLOCKED_EXTERNAL | NOT_APPLICABLE
+#   emulator_simulator: NOT_RUN | EMULATOR_TESTED | BLOCKED_EXTERNAL | NOT_APPLICABLE
+#   real_device:        NOT_RUN | DEVICE_TESTED | BLOCKED_EXTERNAL | NOT_APPLICABLE
+#   field_test:         NOT_RUN | FIELD_TESTED | BLOCKED_EXTERNAL | NOT_APPLICABLE
+#
+# DEVICE_TESTED / FIELD_TESTED additionally require dated external_record
+# evidence; a code change or automated test can never set them.
+
+schema_version: 1
+status_date: "2026-07-26"
+source_commit: "89e7651"
+branch: "agent/zero-operation-relay"
+disclaimer_ja: >-
+  Relayは119、消防・警察・自治体の公式な緊急連絡手段の代替ではありません。
+  本ファイルのどの状態も、実災害での救助や自治体・消防の承認を保証しません。
+disclaimer_en: >-
+  Relay does not replace 119 or official emergency channels. No state in this
+  file guarantees real-disaster rescue or municipal/fire-service approval.
+
+features:
+  - id: sos-rescue-request
+    name: "SOS / rescue request creation, update, cancel"
+    name_ja: "SOS・救助依頼の作成・更新・取消"
+    area: android
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: app/src/main/java/com/example/relay/ui/RelayApp.kt
+      - kind: test
+        ref: app/src/test/java/com/example/relay
+        note: ":app:testDebugUnitTest in relay-ci.yml unit job"
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "JVM unit tests only; no claim about physical device behavior."
+
+  - id: encrypted-storage
+    name: "Room + SQLCipher encrypted storage with Keystore passphrase"
+    name_ja: "Room + SQLCipher暗号化保存（Keystore保護passphrase）"
+    area: android
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: app/src/main/java/com/example/relay/data/local/SqlCipherPassphraseStore.kt
+      - kind: test
+        ref: app/src/androidTest/java/com/example/relay/data/local/SqlCipherPassphraseStoreTest.kt
+        note: "Instrumentation test exists; requires emulator/device lane to execute"
+      - kind: script
+        ref: scripts/verify-implementation-contracts.ps1
+        note: "Contract check enforces SQLCipher + Keystore usage in CI"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Instrumentation execution is an emulator/device lane, not part of the default PR lane."
+
+  - id: location-update
+    name: "Consent-gated location update"
+    name_ja: "明示同意時のみの位置更新"
+    area: android
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: app/src/test/java/com/example/relay
+        note: "Unit-tested policy; GPS hardware behavior is out of scope"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: ""
+
+  - id: continuous-gps-tracking
+    name: "Continuous background GPS tracking"
+    name_ja: "継続GPS追跡（background location）"
+    area: android
+    implementation: NOT_IMPLEMENTED
+    automated_test: NOT_APPLICABLE
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence: []
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Background location, location FGS, and periodic tracking are deliberately not implemented."
+
+  - id: armed-emergency-state
+    name: "ARMED / EMERGENCY_ACTIVE background relay state machine"
+    name_ja: "ARMED / EMERGENCY背景中継状態管理"
+    area: android
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: app/src/main/java/com/example/relay/background
+      - kind: doc
+        ref: docs/BACKGROUND_RELAY_MODE.md
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Persistent state, degrade/recovery, and communication lease covered by unit tests only."
+
+  - id: auto-disaster-detection
+    name: "Automatic disaster detection triggers"
+    name_ja: "自動災害検知（FCM・気象・Activation Manifest）"
+    area: android
+    implementation: NOT_IMPLEMENTED
+    automated_test: NOT_APPLICABLE
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: doc
+        ref: docs/DISASTER_ACTIVATION_TRIGGERS.md
+        note: "Design document only"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Design only; no code path claims detection."
+
+  - id: nearby-relay
+    name: "Nearby store-carry-forward relay of encrypted envelopes"
+    name_ja: "Nearby暗号化Envelope中継（Store-Carry-Forward）"
+    area: transport
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: BLOCKED_EXTERNAL
+    field_test: NOT_RUN
+    external_decisions:
+      - "Two/three physical Android devices for RF multi-hop validation"
+    evidence:
+      - kind: doc
+        ref: docs/NEARBY_IMPLEMENTATION.md
+      - kind: script
+        ref: scripts/device-test/run-multihop-test.ps1
+        note: "Harness exists; never executed on physical devices"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "RF behavior cannot be proven without physical devices."
+
+  - id: nearby-connection-policy
+    name: "Nearby OPEN / TRUSTED connection policy"
+    name_ja: "Nearby接続ポリシー（OPEN / TRUSTED）"
+    area: transport
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions:
+      - "Allow-list distribution and update operation design"
+    evidence:
+      - kind: test
+        ref: app/src/test/java/com/example/relay
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Fail-closed allow-list enforced in unit tests; distribution operations incomplete."
+
+  - id: gateway-enrollment-core
+    name: "LAN Gateway enrollment token validation, pinning, rotation"
+    name_ja: "LAN Gateway登録（token検証・永続化・rotation）"
+    area: transport
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: app/src/main/java/com/example/relay/gateway/GatewayShelterEnrollment.kt
+      - kind: test
+        ref: app/src/test/java/com/example/relay/gateway/GatewayEnrollmentTrustTest.kt
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "relay-gw:1: token validation, conflicting beacon rejection, manifest pinning."
+
+  - id: gateway-enrollment-ui
+    name: "Gateway enrollment Compose screen with CameraX QR scanner"
+    name_ja: "Gateway登録画面（CameraX QRスキャナ含むCompose UI）"
+    area: transport
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: app/src/main/java/com/example/relay/ui/enrollment/EnrollmentScreen.kt
+      - kind: source
+        ref: app/src/main/java/com/example/relay/ui/enrollment/CameraQrScanner.kt
+      - kind: test
+        ref: app/src/test/java/com/example/relay/ui/enrollment/EnrollmentViewModelTest.kt
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: >-
+      Screen and scanner are implemented (commit de6850a). Camera hardware behavior and
+      real-LAN enrollment remain device work.
+
+  - id: broker-manifest-enrollment
+    name: "Broker manifest self-pin for debug/localDev"
+    name_ja: "Broker Manifest登録（debug/localDev限定）"
+    area: transport
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: app/src/test/java/com/example/relay/rescue/ShelterManifestEnrollmentTest.kt
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Development-only path; disabled in release/pilotRelease."
+
+  - id: ble-gateway-trust-chain
+    name: "BLE Gateway trust chain (Root -> Directory -> Manifest -> fingerprint)"
+    name_ja: "BLE Gateway信頼chain（Root→Directory→Manifest→fingerprint）"
+    area: trust
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: BLOCKED_EXTERNAL
+    field_test: BLOCKED_EXTERNAL
+    external_decisions:
+      - "Formal regional Root and signed shelter Directory issuance by trust authority"
+    evidence:
+      - kind: doc
+        ref: docs/adr/ADR-002-gateway-discovery-trust.md
+      - kind: source
+        ref: shared/src/commonMain/kotlin
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Verification logic tested with fixtures; no formal trust anchors exist."
+
+  - id: pc-gateway-console
+    name: "PC Gateway staff console (accounts, roles, audit, receipts)"
+    name_ja: "PC Gatewayスタッフ画面（アカウント・役割・監査・署名Receipt）"
+    area: gateway
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_APPLICABLE
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway
+      - kind: test
+        ref: pc-gateway/src/test
+        note: ":pc-gateway:test plus Playwright staff-console E2E"
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Windows validation lane runs Gateway build, tests, and /api/health smoke."
+
+  - id: sqlite-write-coordination
+    name: "SQLite write coordinator and lock file"
+    name_ja: "SQLite write coordinatorとlock file"
+    area: gateway
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: pc-gateway/src/test
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: ""
+
+  - id: csv-export-injection-safe
+    name: "CSV export with formula injection neutralization"
+    name_ja: "CSV export（formula injection防止）"
+    area: gateway
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: pc-gateway/src/test
+        note: "Shared encoder for messages and audit exports"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: ""
+
+  - id: https-broker
+    name: "HTTPS Broker (ciphertext store, dedup, TTL, scoped credentials)"
+    name_ja: "HTTPS Broker（暗号文保存・重複排除・TTL・scoped credential）"
+    area: broker
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_RUN
+    external_decisions:
+      - "Production TLS/DNS/reverse proxy/WAF/hosting"
+    evidence:
+      - kind: source
+        ref: broker/src/main/kotlin/com/example/relay/broker
+      - kind: test
+        ref: broker/src/test
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Broker never decrypts rescue bodies; production infrastructure is external."
+
+  - id: broker-observability-minimal
+    name: "Broker security-event logging without secrets"
+    name_ja: "Broker security event記録（秘密情報なし）"
+    area: broker
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: broker/src/test
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Coarse category logging only: auth failures, invalid proofs, rate limits."
+
+  - id: packaged-e2e
+    name: "Packaged Broker-Gateway black-box E2E"
+    name_ja: "Packaged Broker–Gateway E2E（black-box）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: script
+        ref: scripts/e2e/run-packaged-broker-gateway-e2e.ps1
+      - kind: workflow
+        ref: .github/workflows/relay-heavy-tests.yml
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Scheduled heavy lane; loopback processes, not real network topology."
+
+  - id: broker-high-availability
+    name: "Broker high availability, monitoring, disaster recovery"
+    name_ja: "Broker高可用性・監視・災害復旧"
+    area: broker
+    implementation: NOT_IMPLEMENTED
+    automated_test: NOT_APPLICABLE
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions:
+      - "Infrastructure/SRE owner for HA, RTO/RPO, and monitoring design"
+    evidence: []
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Single SQLite instance; no HA claim possible."
+
+  - id: android6-compat
+    name: "Android 6.0 (API 23) compatibility baseline"
+    name_ja: "Android 6.0互換基盤（minSdk 23）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: app/build.gradle.kts
+        note: "minSdk 23 + core library desugaring + API 23 managed device lane"
+      - kind: script
+        ref: scripts/android-test/run-api23-smoke.ps1
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Managed-device lane defined; API 23 emulator execution not part of default PR lane."
+
+  - id: windows-validation
+    name: "Windows batch validation with PASS/FAIL/BLOCKED/NOT_RUN classification"
+    name_ja: "Windows一括検証（PASS/FAIL/BLOCKED/NOT_RUN分類）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: script
+        ref: scripts/validate-windows-development.ps1
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+        note: "windows-validation job"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "0-test results are treated as failure; JUnit XML presence is enforced."
+
+  - id: device-test-harness
+    name: "ADB/Mobly physical-device test harness"
+    name_ja: "実機テスト基盤（ADB・Mobly script）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: BLOCKED_EXTERNAL
+    field_test: BLOCKED_EXTERNAL
+    external_decisions:
+      - "Physical Android devices and approved test network"
+    evidence:
+      - kind: script
+        ref: scripts/device-test/run-device-smoke.ps1
+      - kind: test
+        ref: test-lab/mobly
+        note: "Host contract tests run in CI; device execution never performed"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Script existence does not mean device PASS."
+
+  - id: coverage-kover
+    name: "Kover coverage reporting"
+    name_ja: "Kover coverage report"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: gradle/libs.versions.toml
+        note: "kover plugin applied to JVM modules"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Visualization only; no threshold enforcement yet."
+
+  - id: build-reproducibility
+    name: "APK build reproducibility check"
+    name_ja: "Build再現性（SOURCE_DATE_EPOCH＋APK比較）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: script
+        ref: scripts/verify-build-reproducibility.ps1
+      - kind: workflow
+        ref: .github/workflows/relay-heavy-tests.yml
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Debug APK comparison only; full-artifact reproducibility unproven."
+
+  - id: dependency-security-scan
+    name: "Syft SBOM + OSV + Grype dependency scanning"
+    name_ja: "依存関係scan（Syft・OSV・Grype）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: script
+        ref: scripts/run-syft.ps1
+      - kind: script
+        ref: scripts/run-osv.ps1
+      - kind: script
+        ref: scripts/run-grype.ps1
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+        note: "deps-scan job with completeness enforcement"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "report-only in PR lane; block-high-critical in formal release."
+
+  - id: fuzz-decoders
+    name: "Jazzer decoder fuzzing (regression lane)"
+    name_ja: "Jazzer decoder fuzz（回帰lane）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: fuzz-jvm/build.gradle.kts
+      - kind: script
+        ref: scripts/run-jazzer.ps1
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Deterministic seed-corpus regression on PR; continuous fuzzing opt-in."
+
+  - id: formal-release
+    name: "Formal signed release (Android signing, Authenticode, TUF/cosign)"
+    name_ja: "正式Release（組織署名・Authenticode・TUF/cosign）"
+    area: release
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: BLOCKED_EXTERNAL
+    field_test: BLOCKED_EXTERNAL
+    external_decisions:
+      - "Organization Android signing key"
+      - "Windows Authenticode certificate and timestamp policy"
+      - "cosign/TUF key governance"
+      - "Release approval by responsible organization"
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/publish-release.yml
+      - kind: doc
+        ref: docs/runbooks/VERIFY_FORMAL_RELEASE.md
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: >-
+      The gate exists and fails closed without organization secrets. No formal release
+      has ever been produced; the workflow result is BLOCKED_EXTERNAL until keys exist.
+
+  - id: ios-preview
+    name: "iOS simulator preview build"
+    name_ja: "iOS simulatorプレビュービルド"
+    area: apple
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: EMULATOR_TESTED
+    real_device: BLOCKED_EXTERNAL
+    field_test: BLOCKED_EXTERNAL
+    external_decisions:
+      - "Apple Developer signing and iPhone hardware"
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/ios-ci.yml
+        note: "Unsigned arm64 simulator app built on macOS runner"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Simulator build evidence only; no physical iPhone claim."
+
+  - id: meshtastic-adapter
+    name: "Meshtastic adapter contract boundary"
+    name_ja: "Meshtastic adapter（契約境界）"
+    area: integrations
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: BLOCKED_EXTERNAL
+    field_test: BLOCKED_EXTERNAL
+    external_decisions:
+      - "Physical Meshtastic hardware"
+    evidence:
+      - kind: test
+        ref: gateway-meshtastic-adapter/tests
+      - kind: doc
+        ref: docs/integrations/MESHTASTIC.md
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: ""
+
+  - id: bp7-export
+    name: "BPv7 export boundary"
+    name_ja: "BPv7 export境界"
+    area: integrations
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: gateway-bp7-export
+      - kind: doc
+        ref: docs/integrations/BPV7.md
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: ""
+
+  - id: training-mode
+    name: "Training mode with full data separation"
+    name_ja: "訓練モード（本番データ完全分離）"
+    area: operations
+    implementation: NOT_IMPLEMENTED
+    automated_test: NOT_APPLICABLE
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence: []
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Planned: separate DB/keys/accounts/credentials with mandatory training banner."
+
+  - id: official-info-provenance
+    name: "Official information provenance model (JMA XML / CAP)"
+    name_ja: "公式情報の来歴モデル（JMA XML・CAP）"
+    area: operations
+    implementation: NOT_IMPLEMENTED
+    automated_test: NOT_APPLICABLE
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence: []
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Current JMA warning fetch has no provenance/verification-state model yet."
+
+  - id: dpapi-key-protection
+    name: "Windows DPAPI protection for Gateway private keys"
+    name_ja: "Windows DPAPIによるGateway秘密鍵保護"
+    area: gateway
+    implementation: NOT_IMPLEMENTED
+    automated_test: NOT_APPLICABLE
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence: []
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Current boundary is owner-only file permission verification, deliberately not claimed as DPAPI/HSM/KMS."
+
+  - id: data-retention
+    name: "Retention policy engine for personal/rescue data"
+    name_ja: "個人・救助情報のretention管理"
+    area: operations
+    implementation: NOT_IMPLEMENTED
+    automated_test: NOT_APPLICABLE
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions:
+      - "Privacy/legal owner approval of retention periods"
+    evidence: []
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Terminal-detail 30-day retention exists in Gateway; a general policy engine does not."

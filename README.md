@@ -59,8 +59,19 @@ flowchart LR
 
 ## 現在の状態
 
-**実装確認基準: 2026-07-25 / source baseline `9e7119c`**  
-このREADME更新コミットは文書のみを変更します。
+機械可読な唯一の正は [`docs/readiness/status.yml`](docs/readiness/status.yml) です。以下の生成ブロックと
+[READINESS_TABLE](docs/readiness/READINESS_TABLE.md) はそこから自動生成され、CIが乖離を検出します。
+
+<!-- BEGIN GENERATED: readiness-summary (tools/readiness/readiness_tool.py; edit docs/readiness/status.yml instead) -->
+> [!NOTE]
+> この節は `docs/readiness/status.yml`（唯一の正）から自動生成されます。手で編集しないでください。
+>
+> **status基準: 2026-07-26 / commit `89e7651` / branch `agent/zero-operation-relay`**
+>
+> 管理対象 34機能: 実装済み 27 / 未実装 7 / 自動試験済み 27 / emulator検証済み 1 / **実機検証済み 0 / 現地検証済み 0** / 外部判断待ちを含む 6
+>
+> IMPLEMENTEDやAUTOMATED_TESTEDはDEVICE_TESTED・FIELD_TESTEDを意味しません。全機能の軸別状態は [READINESS_TABLE](docs/readiness/READINESS_TABLE.md)、未完了項目は [OPEN_ITEMS](docs/readiness/OPEN_ITEMS.md)、自治体向け要約は [MUNICIPAL_SUMMARY](docs/readiness/MUNICIPAL_SUMMARY.md) を参照してください。
+<!-- END GENERATED: readiness-summary -->
 
 | 記号 | 意味 |
 |---|---|
@@ -89,7 +100,7 @@ flowchart LR
 | Nearby接続ポリシー | 🧩 | `OPEN` / `TRUSTED`を実装。明示connectを含めallow-listをfail-closedで強制。安全な配布・更新運用は未完成 |
 | LAN Gateway登録 | 🧪 | `relay-gw:1:` tokenの検証・永続化・明示rotation・矛盾beacon拒否・manifest pinningを実装 |
 | 登録確認フロー | 🧪 | scanまたは貼付内容を即登録せず、fingerprint確認後に保存。競合時は明示rotationが必要 |
-| 登録画面 | 🧩 | controllerとsecurity testは実装済み。カメラscanを含む完成したCompose画面は未実装 |
+| 登録画面 | 🧪 | CameraX QRスキャナを含むCompose登録画面とViewModelを実装し、unit testで検証。カメラ実機動作と実LAN登録は未検証 |
 | Broker Manifest登録 | 🧪 | `debug` / `localDev`限定。LAN未接続端末がBrokerから公開鍵を取得するloop testあり |
 | BLE Gateway信頼 | ⚠️ | Root → signed Directory → signed Manifest → advertised/GATT fingerprint。正式な地域Root/Directoryは未提供 |
 
