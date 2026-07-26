@@ -942,3 +942,27 @@ features:
     last_verified: "2026-07-26"
     commit: "c6a191d"
     notes: "ArchUnit 1.4.1 (archunit-junit4) runs inside :pc-gateway:test whose classpath contains all JVM production modules (relay-protocol, shared-jvm, pc-gateway, broker); :pc-gateway:test --rerun-tasks 97 tests 0 failures. Android-only modules (app, composeApp) are outside this JVM import and remain covered only by their own unit tests."
+
+  - id: broker-api-contract
+    name: "Broker OpenAPI 3.1 contract with Schemathesis conformance gate"
+    name_ja: "BrokerのOpenAPI 3.1契約とSchemathesis適合ゲート"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: docs/api/broker-openapi.yaml
+        note: "OpenAPI 3.1 contract for all 8 Broker endpoints written from BrokerServer.kt: every documented status code, kotlinx-accurate schemas (additionalProperties:false matches ignoreUnknownKeys=false), scoped Gateway credential + X-Gateway-Id and device capability token security schemes"
+      - kind: test
+        ref: tools/api-contract/run_schemathesis.py
+        note: "Fail-closed gate boots the real :broker:installDist output (DEVELOPMENT profile, throwaway SQLite, per-run random legacy key never logged) and runs schemathesis conformance checks; local run 745/745 test cases passed across 8/8 operations; negative test: a planted false spec claim (health status const healthy vs actual ok) failed response_schema_conformance with exit 1, then was reverted and re-run green"
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+        note: "api-contract job with SHA-pinned actions and schemathesis==4.24.3 uploads the JUnit evidence artifact; job itself NOT_RUN on GitHub until pushed; actionlint and zizmor exit 0"
+    last_verified: "2026-07-26"
+    commit: "0fca645"
+    notes: "Contract conformance checks only (not_a_server_error, status/content-type/headers/schema conformance); positive_data_acceptance and negative_data_rejection are deliberately excluded because signature-requiring endpoints legitimately answer documented 401s to generated data - positive-path coverage with real ECDSA proofs stays in the Kotlin integration tests. The ~33-route PC Gateway staff/bridge API is not yet specified and remains a follow-up."

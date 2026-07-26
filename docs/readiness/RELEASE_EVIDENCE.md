@@ -232,3 +232,9 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 - **test**: `pc-gateway/src/test/kotlin/com/example/relay/pcgateway/ArchitectureTest.kt` — Six bytecode-level rules: relay-protocol purity, Broker never touches javax.crypto, Cipher confined to the rescue crypto boundary, java.util.Random/kotlin.random banned, java.sql confined to the persistence layer, module dependency direction; negative test: planting kotlin.random back into GatewayStore.createPairingCode failed noWeakRandomnessAnywhere naming the exact method, then was reverted
 - **source**: `pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayStore.kt` — Real finding fixed: bridge pairing codes were generated with kotlin.random; now SecureRandom (same 6-digit space)
 
+## `broker-api-contract` — Broker OpenAPI 3.1 contract with Schemathesis conformance gate
+
+- **source**: `docs/api/broker-openapi.yaml` — OpenAPI 3.1 contract for all 8 Broker endpoints written from BrokerServer.kt: every documented status code, kotlinx-accurate schemas (additionalProperties:false matches ignoreUnknownKeys=false), scoped Gateway credential + X-Gateway-Id and device capability token security schemes
+- **test**: `tools/api-contract/run_schemathesis.py` — Fail-closed gate boots the real :broker:installDist output (DEVELOPMENT profile, throwaway SQLite, per-run random legacy key never logged) and runs schemathesis conformance checks; local run 745/745 test cases passed across 8/8 operations; negative test: a planted false spec claim (health status const healthy vs actual ok) failed response_schema_conformance with exit 1, then was reverted and re-run green
+- **workflow**: `.github/workflows/relay-ci.yml` — api-contract job with SHA-pinned actions and schemathesis==4.24.3 uploads the JUnit evidence artifact; job itself NOT_RUN on GitHub until pushed; actionlint and zizmor exit 0
+
