@@ -7220,6 +7220,9 @@
          </artifact>
       </component>
       <component group="androidx.annotation" name="annotation-iossimulatorarm64" version="1.9.1">
+         <artifact name="annotation.klib">
+            <sha256 value="370abeae251a2f69bc38cdbed2e19ee2fab102c373875386141c34eb8075db8d" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="annotation-iossimulatorarm64-1.9.1.module">
             <sha256 value="3a12ecf17cff9fd846040384666dc09eef112c9f7fe5a9a110cc0a90f294c9fd" origin="Official repository checksum"/>
          </artifact>
@@ -7230,6 +7233,9 @@
          </artifact>
       </component>
       <component group="androidx.collection" name="collection-iossimulatorarm64" version="1.5.0">
+         <artifact name="collection-iosSimulatorArm64Main-1.5.0.klib">
+            <sha256 value="d437ac17cea331234060bb90fe17118e48d58487034c71881fa081c367d7f703" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="collection-iossimulatorarm64-1.5.0.module">
             <sha256 value="9ccb12706a1c80d0f580f2734fab631cbd52d51e7bb916976fe5bce09d5672ac" origin="Official repository checksum"/>
          </artifact>
@@ -7240,6 +7246,9 @@
          </artifact>
       </component>
       <component group="androidx.compose.runtime" name="runtime-annotation-iossimulatorarm64" version="1.11.2">
+         <artifact name="runtime-annotation-iosSimulatorArm64Main-1.11.2.klib">
+            <sha256 value="3bbb7582edb7182298ed6c44809d8f28a6af6160ff84aa4f07413359b93333f1" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="runtime-annotation-iossimulatorarm64-1.11.2.module">
             <sha256 value="138a55f3f7be91774c7844a64061c16f316380b60ddd158ab2015102f9b75fb5" origin="Official repository checksum"/>
          </artifact>
@@ -7250,6 +7259,9 @@
          </artifact>
       </component>
       <component group="androidx.compose.runtime" name="runtime-iossimulatorarm64" version="1.11.2">
+         <artifact name="runtime-iosSimulatorArm64Main-1.11.2.klib">
+            <sha256 value="6ce37da57f5005fcf24d720d58c2f2b0935c4c30b16d55bac02c48471e456653" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="runtime-iossimulatorarm64-1.11.2.module">
             <sha256 value="75ee0a4a78eb16e81eabac787db46e221836c38587179f2d85c58ac21a57ec08" origin="Official repository checksum"/>
          </artifact>
@@ -7260,6 +7272,9 @@
          </artifact>
       </component>
       <component group="androidx.compose.runtime" name="runtime-retain-iossimulatorarm64" version="1.11.2">
+         <artifact name="runtime-retain-iosSimulatorArm64Main-1.11.2.klib">
+            <sha256 value="9ad511a11ea6ba8f86180b4b9c625699b813423fb51b5075638340a749b5288f" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="runtime-retain-iossimulatorarm64-1.11.2.module">
             <sha256 value="7a2ab051e05c06c05f04bf7d653d47827669febb4e7ac4a95e0281036b10d58a" origin="Official repository checksum"/>
          </artifact>
@@ -7270,6 +7285,9 @@
          </artifact>
       </component>
       <component group="androidx.compose.runtime" name="runtime-saveable-iossimulatorarm64" version="1.11.2">
+         <artifact name="runtime-saveable-iosSimulatorArm64Main-1.11.2.klib">
+            <sha256 value="bbbd4272fd2386ee3ce3be40da80eda9048e428a2c30d39c23ad75f58d1254de" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="runtime-saveable-iossimulatorarm64-1.11.2.module">
             <sha256 value="8f79a8ac6238b8634407ca0a09ad267d57a6b3cee26eccb7073f0f43550aee30" origin="Official repository checksum"/>
          </artifact>
@@ -7280,6 +7298,9 @@
          </artifact>
       </component>
       <component group="androidx.lifecycle" name="lifecycle-common-iossimulatorarm64" version="2.9.4">
+         <artifact name="lifecycle-common-iosSimulatorArm64Main-2.9.4.klib">
+            <sha256 value="fa46f5eefd87a45a62adc2983595428ebd26f8b79d79a612b327f9a85b007f4f" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="lifecycle-common-iossimulatorarm64-2.9.4.module">
             <sha256 value="64571b84698b2e36a4748f3e9f00bfe83352111fcbff1cc9d278ff7e3b0ad048" origin="Official repository checksum"/>
          </artifact>
@@ -7290,6 +7311,9 @@
          </artifact>
       </component>
       <component group="androidx.lifecycle" name="lifecycle-runtime-compose-iossimulatorarm64" version="2.9.4">
+         <artifact name="lifecycle-runtime-compose-iosSimulatorArm64Main-2.9.4.klib">
+            <sha256 value="918968d0d1d2d21efd56e52c106165d48ecc84c994b32d5c548cc089eb8f4629" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="lifecycle-runtime-compose-iossimulatorarm64-2.9.4.module">
             <sha256 value="0dd07aced9fba7140962ac81d018cff6df088a368cf24db2c55a0288ea002823" origin="Official repository checksum"/>
          </artifact>
@@ -7300,6 +7324,9 @@
          </artifact>
       </component>
       <component group="androidx.lifecycle" name="lifecycle-runtime-iossimulatorarm64" version="2.9.4">
+         <artifact name="lifecycle-runtime-iosSimulatorArm64Main-2.9.4.klib">
+            <sha256 value="730d3b4a7105b72f63ceb0daa602d1494c074b598deb78a63d5be367d2d34fa8" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="lifecycle-runtime-iossimulatorarm64-2.9.4.module">
             <sha256 value="2bad2012aff42be6f111b3e27f025f7db5d6f65f1abc8782cb3f81bd248ed379" origin="Official repository checksum"/>
          </artifact>
@@ -7310,6 +7337,9 @@
          </artifact>
       </component>
       <component group="androidx.lifecycle" name="lifecycle-viewmodel-iossimulatorarm64" version="2.9.4">
+         <artifact name="lifecycle-viewmodel-iosSimulatorArm64Main-2.9.4.klib">
+            <sha256 value="fc222c52590a67a914a5fd2d8272e83fc2bbd55fe7aaafedf48d21558b10ad19" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="lifecycle-viewmodel-iossimulatorarm64-2.9.4.module">
             <sha256 value="8cf7c2182fd69a5742ca9cc996f9b92a09e4afd654ed5a5ab86cb329db811e6d" origin="Official repository checksum"/>
          </artifact>
@@ -7320,6 +7350,9 @@
          </artifact>
       </component>
       <component group="androidx.lifecycle" name="lifecycle-viewmodel-savedstate-iossimulatorarm64" version="2.9.4">
+         <artifact name="lifecycle-viewmodel-savedstate-iosSimulatorArm64Main-2.9.4.klib">
+            <sha256 value="58fb02f9cf76d7d9344de038cbfe08356c4f2643ef5567e9c6eef4ce7c3d5226" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="lifecycle-viewmodel-savedstate-iossimulatorarm64-2.9.4.module">
             <sha256 value="30ca1d81486bb09238ec806841f2a4a0cd42fd876f6747964091cac3e47966df" origin="Official repository checksum"/>
          </artifact>
@@ -7330,6 +7363,9 @@
          </artifact>
       </component>
       <component group="androidx.navigationevent" name="navigationevent-iossimulatorarm64" version="1.0.1">
+         <artifact name="navigationevent-iosSimulatorArm64Main-1.0.1.klib">
+            <sha256 value="33e6fc6319246c6e404b0a2dcf40bb5013251ad1123bc518aa0b623b0ba36cd2" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="navigationevent-iossimulatorarm64-1.0.1.module">
             <sha256 value="a0bba9ae9550ddba83fa2f28cffedbd1a66c89f68b6ff624920af6f2fef40af9" origin="Official repository checksum"/>
          </artifact>
@@ -7340,6 +7376,9 @@
          </artifact>
       </component>
       <component group="androidx.savedstate" name="savedstate-compose-iossimulatorarm64" version="1.4.0">
+         <artifact name="savedstate-compose-iosSimulatorArm64Main-1.4.0.klib">
+            <sha256 value="0b6f97acfee864c3ca3ed46750d3975738dc28c81eab9ac5953d2f452656b95f" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="savedstate-compose-iossimulatorarm64-1.4.0.module">
             <sha256 value="61f4aa3cd23984c577efce0080b6bf130bef78c9c2e6307d2a024fba39c49f6b" origin="Official repository checksum"/>
          </artifact>
@@ -7350,6 +7389,9 @@
          </artifact>
       </component>
       <component group="androidx.savedstate" name="savedstate-iossimulatorarm64" version="1.4.0">
+         <artifact name="savedstate-iosSimulatorArm64Main-1.4.0.klib">
+            <sha256 value="86d6f55a8a61273c7da2b5fdc813ee88a9fa4c269dd9981fdc4e2940c9be0435" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="savedstate-iossimulatorarm64-1.4.0.module">
             <sha256 value="6b5fa7c473abc9b7abfda436f71f23ebed69f33c6dfb29e479319189aba58bf1" origin="Official repository checksum"/>
          </artifact>
@@ -7585,6 +7627,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.androidx.lifecycle" name="lifecycle-runtime-compose-uikitsimarm64" version="2.9.6">
+         <artifact name="lifecycle-runtime-compose-uikitSimArm64Main-2.9.6.klib">
+            <sha256 value="4880c6df470d1ee3ec4f5b1fa5381892b627f275fce3719a0a9d32b119e8b3b4" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="lifecycle-runtime-compose-uikitsimarm64-2.9.6.module">
             <sha256 value="1b003bfa091315aeae2e2907d464630b0fc51a60d1f6b520ba9faffcc6d42e61" origin="Official repository checksum"/>
          </artifact>
@@ -7595,6 +7640,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.androidx.savedstate" name="savedstate-compose-uikitsimarm64" version="1.3.6">
+         <artifact name="savedstate-compose-uikitSimArm64Main-1.3.6.klib">
+            <sha256 value="ab0ceb3cfa4d34701a03093799e4dee8fa81bf2aa54a97d0ff45fc673581f3a0" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="savedstate-compose-uikitsimarm64-1.3.6.module">
             <sha256 value="fc55f74fef66f2b1fc8cb41e0c6c8b462275535fba804b91ea5975da2f9d1be6" origin="Official repository checksum"/>
          </artifact>
@@ -7605,6 +7653,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.animation" name="animation-core-iossimulatorarm64" version="1.11.1">
+         <artifact name="animation-core-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="9775c579cd25b17d5a011f9f5f6805bd1eff5482a567ce862884c3b3fdc7697f" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="animation-core-iossimulatorarm64-1.11.1.module">
             <sha256 value="026375a182a67ab3f6ca713b30f0a8b8062dd57ed0a6b6593d468efb021e668a" origin="Official repository checksum"/>
          </artifact>
@@ -7625,6 +7676,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.animation" name="animation-iossimulatorarm64" version="1.11.1">
+         <artifact name="animation-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="22d14f89181c676f5b2fa0b4165a71302352a151b958e44b8d31b5428aa29d75" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="animation-iossimulatorarm64-1.11.1.module">
             <sha256 value="14b70a630eda06e286ffbf32e2bf2a5279b41a47df3275e199d69de52183a4ee" origin="Official repository checksum"/>
          </artifact>
@@ -7645,6 +7699,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.foundation" name="foundation-iossimulatorarm64" version="1.11.1">
+         <artifact name="foundation-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="debaa266d689a95192737612fd675607c4f3f32616fedf9f06df2456fbb87fda" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="foundation-iossimulatorarm64-1.11.1.module">
             <sha256 value="6082dde2e23f3f719efc183311518ae93796f0e895a25dfda1b7a8433235e394" origin="Official repository checksum"/>
          </artifact>
@@ -7655,6 +7712,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.foundation" name="foundation-layout-iossimulatorarm64" version="1.11.1">
+         <artifact name="foundation-layout-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="95f700ec0f354825ddeb1c561159f1374eb4cc06fb218825092ad7494431a67d" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="foundation-layout-iossimulatorarm64-1.11.1.module">
             <sha256 value="676cc11625ea4b04c9fbf8e7c2c48bb3f688b11754bab6a73c53f2a2415a593c" origin="Official repository checksum"/>
          </artifact>
@@ -7665,6 +7725,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.material" name="material-ripple-uikitsimarm64" version="1.9.1">
+         <artifact name="material-ripple-uikitSimArm64Main-1.9.1.klib">
+            <sha256 value="4b7eb82e2229e55e1245c21269dfe8383ff8d76b2eea4e4ee4ad77a76ac156f1" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="material-ripple-uikitsimarm64-1.9.1.module">
             <sha256 value="f0631a3a183c97ca9526a69d2448d4358249565524c25b2257e3a06d336723ec" origin="Official repository checksum"/>
          </artifact>
@@ -7675,6 +7738,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.material3" name="material3-uikitsimarm64" version="1.9.0">
+         <artifact name="material3-uikitSimArm64Main-1.9.0.klib">
+            <sha256 value="2be9cb12bd12969a953d4ded412fb81acf658188d35f940eff82b32910536e56" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="material3-uikitsimarm64-1.9.0.module">
             <sha256 value="de99364234e8cf8cc213c802400edb0fb37eec1a7bdb97d87fbe385e54defbaa" origin="Official repository checksum"/>
          </artifact>
@@ -7685,6 +7751,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.runtime" name="runtime-iossimulatorarm64" version="1.11.1">
+         <artifact name="runtime-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="68c128ca3acafe545364b866f9222dde796db8087ced7db1a03cb6014abf3914" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="runtime-iossimulatorarm64-1.11.1.module">
             <sha256 value="f053c37c4115423c7acee03c02f2efc3368b6ad1f4b9d7dea98021fa4b722218" origin="Official repository checksum"/>
          </artifact>
@@ -7695,6 +7764,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.runtime" name="runtime-saveable-iossimulatorarm64" version="1.11.1">
+         <artifact name="runtime-saveable-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="6986b769d3546516bd93b2a88b070b6703b94779b7b43755d17daa8a3778b928" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="runtime-saveable-iossimulatorarm64-1.11.1.module">
             <sha256 value="7513c9d1f6ffe2e9b0466691f23520ee4af850b8ff16a1683a53b381299656c0" origin="Official repository checksum"/>
          </artifact>
@@ -7705,6 +7777,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.ui" name="ui-backhandler-iossimulatorarm64" version="1.11.1">
+         <artifact name="ui-backhandler-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="b55dc6f3f18783d116bccc03e50cb514bb5a03b200a190860948cea45d173676" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="ui-backhandler-iossimulatorarm64-1.11.1.module">
             <sha256 value="d056d46df5856ee6550aa566e635bf2e540dd345b5359f057449139728a88833" origin="Official repository checksum"/>
          </artifact>
@@ -7715,6 +7790,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.ui" name="ui-geometry-iossimulatorarm64" version="1.11.1">
+         <artifact name="ui-geometry-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="63deb24ab1fd3e060287cb4e0244f8344e5f6bfcc90dc1d16c3f0667b253f1e9" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="ui-geometry-iossimulatorarm64-1.11.1.module">
             <sha256 value="bb140f347aee1a4c0b153ba85d7e80bb0654ad21095afc72fa02ae40bfb91e6b" origin="Official repository checksum"/>
          </artifact>
@@ -7725,6 +7803,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.ui" name="ui-graphics-iossimulatorarm64" version="1.11.1">
+         <artifact name="ui-graphics-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="33f2810fe3eb3caae890559f52ed186f0d96cb4ad7334ac190130a0eda4bab86" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="ui-graphics-iossimulatorarm64-1.11.1.module">
             <sha256 value="35addb13ebf46bf9402c65e04607808258be627b2dfd608078f0adf229f699ae" origin="Official repository checksum"/>
          </artifact>
@@ -7735,6 +7816,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.ui" name="ui-iossimulatorarm64" version="1.11.1">
+         <artifact name="ui-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="cfd891ee2e0b593c4b537e8661dbe194ed5b0bf22651fe90e6bf96c0a61adfbc" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="ui-iossimulatorarm64-1.11.1.module">
             <sha256 value="31111d43f1dbd75b00759bd52d0684f9e43851d42faebe521dde115d6afe26ba" origin="Official repository checksum"/>
          </artifact>
@@ -7745,6 +7829,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.ui" name="ui-text-iossimulatorarm64" version="1.11.1">
+         <artifact name="ui-text-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="603a1cc2932f47870a2f49bb4b0b5e403a1a86dc6cce8994b39134971dfd2a38" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="ui-text-iossimulatorarm64-1.11.1.module">
             <sha256 value="f6f7088bc215112d3964e31ad3d3805bf108b65e37840ca6a47dc4e1442df133" origin="Official repository checksum"/>
          </artifact>
@@ -7755,6 +7842,12 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.ui" name="ui-uikit-iossimulatorarm64" version="1.11.1">
+         <artifact name="ui-uikit-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="ea0c8fbb9a7e9e9ae0a36f40c8cffe45027a697195ad56a5e166d7441616dc74" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
+         <artifact name="ui-uikit-iosSimulatorArm64Cinterop-utilsMain-1.11.1.klib">
+            <sha256 value="4e0cb312ea576c780c3117834889ed3651802d3d2a5b4c55cfd64f5b33f71aa6" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="ui-uikit-iossimulatorarm64-1.11.1.module">
             <sha256 value="a56bbb8e97296137e627a50093a73a7ea2cb7387b02d874a538387910aeabe4a" origin="Official repository checksum"/>
          </artifact>
@@ -7765,6 +7858,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.ui" name="ui-unit-iossimulatorarm64" version="1.11.1">
+         <artifact name="ui-unit-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="89b9247437ee18594231416a125cc8e612eee6ee3a7b2cf5cc1568f5deb7bc8d" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="ui-unit-iossimulatorarm64-1.11.1.module">
             <sha256 value="a48c34c7b638c7f2216ca7f8bb8290f8ed0625ab27e0f0ba96925ce6acb327b3" origin="Official repository checksum"/>
          </artifact>
@@ -7775,6 +7871,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.compose.ui" name="ui-util-iossimulatorarm64" version="1.11.1">
+         <artifact name="ui-util-iosSimulatorArm64Main-1.11.1.klib">
+            <sha256 value="8dbfcf94b8e1f5b70de21429c472f3d8eb7c6d5035bcac9002cacd29744daaaf" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="ui-util-iossimulatorarm64-1.11.1.module">
             <sha256 value="734ad005ee1584d25f043ca494b5f88a29f3c25c324291b7c88ea35423ba3a06" origin="Official repository checksum"/>
          </artifact>
@@ -7822,6 +7921,9 @@
          </artifact>
       </component>
       <component group="org.jetbrains.kotlinx" name="kotlinx-datetime-iossimulatorarm64" version="0.7.1">
+         <artifact name="kotlinx-datetime-iosSimulatorArm64Main-0.7.1.klib">
+            <sha256 value="93536c5776c0d4a6a2d49320b3da8723a0ceb7bd120ad07e02d48db85b2d0688" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="kotlinx-datetime-iossimulatorarm64-0.7.1.module">
             <sha256 value="4cb9f893ba69e1abbf8c57e5cd75a2f7bcbaacad87de0b396e2bc7efa3a6dd8a" origin="Downloaded from official repository and hashed locally"/>
          </artifact>
@@ -7920,6 +8022,12 @@
          </artifact>
       </component>
       <component group="org.jetbrains.skiko" name="skiko-iossimulatorarm64" version="0.144.6">
+         <artifact name="skiko-iosSimulatorArm64Main-0.144.6.klib">
+            <sha256 value="e7128eb7d0891a679013028475428ee074744da17199227acdd40ab85c24bd18" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
+         <artifact name="skiko-iosSimulatorArm64Cinterop-uikitMain-0.144.6.klib">
+            <sha256 value="c34567a780531e40b14d7e9a2f32304c99b2fd3c2d6604eddab192f3f269f585" origin="Downloaded from official repository and hashed locally"/>
+         </artifact>
          <artifact name="skiko-iossimulatorarm64-0.144.6.module">
             <sha256 value="5b396bf96ade1f6943981c28b67784bb419ecd8b9a4f815246830603408ebd8d" origin="Official repository checksum"/>
          </artifact>
