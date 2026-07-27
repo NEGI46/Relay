@@ -1,0 +1,703 @@
+# Relay Broker HTTP API contract.
+#
+# Source of truth for behavior: broker/src/main/kotlin/com/example/relay/broker/BrokerServer.kt
+# This document is verified against the running server by Schemathesis
+# (tools/api-contract/run_schemathesis.py); CI fails when spec and behavior drift.
+#
+# Trust model notes encoded here:
+# - The Broker stores and relays ONLY ciphertext envelopes; it never decrypts.
+# - Gateway endpoints use scoped per-Gateway/per-shelter Bearer credentials plus
+#   an X-Gateway-Id header; a leaked credential cannot act for another shelter.
+# - Device receipt polling uses an unguessable capability token as Bearer auth.
+# - The Broker listens on plain HTTP only behind an externally operated TLS
+#   reverse proxy; clients enforce https URLs.
+openapi: 3.1.0
+info:
+  title: Relay Broker API
+  description: >-
+    Store-and-forward relay for encrypted rescue envelopes between Android
+    devices and shelter PC Gateways. All rescue content is end-to-end
+    encrypted; the Broker only ever handles ciphertext and public key
+    material.
+  version: 1.2.0
+servers:
+  - url: http://127.0.0.1:8443
+    description: Local development listener (production sits behind a TLS reverse proxy)
+
+paths:
+  /v1/devices/register:
+    post:
+      operationId: registerDevice
+      summary: Register a device public key and obtain a capability token
+      description: >-
+        Android registers its ECDSA-P256 public key with a self-signed
+        registration proof. Idempotent for the same (deviceKeyId, publicKey)
+        pair; re-registration returns the existing capability token. A caller
+        presenting a different key for an existing deviceKeyId gets 409.
+        Body limit 4096 bytes, checked against Content-Length before reading.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrokerDeviceRegisterRequest'
+      responses:
+        '200':
+          description: Registered (or already registered with the same key)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerDeviceRegisterResponse'
+        '400':
+          $ref: '#/components/responses/ReasonBadRequest'
+        '401':
+          $ref: '#/components/responses/ReasonUnauthorized'
+        '409':
+          $ref: '#/components/responses/ReasonConflict'
+        '411':
+          $ref: '#/components/responses/ReasonLengthRequired'
+        '413':
+          $ref: '#/components/responses/ReasonPayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/ReasonTooManyRequests'
+
+  /v1/rescue/upload:
+    post:
+      operationId: uploadEnvelope
+      summary: Upload an encrypted rescue envelope
+      description: >-
+        Android uploads a ciphertext envelope. The Broker validates structure,
+        verifies the upload signature against the registered device key,
+        rejects expired envelopes, deduplicates by envelopeId, and stores the
+        ciphertext untouched (hopCount is never modified). Body limit 65536
+        bytes. 201 on first store, 200 with the original acknowledgement on
+        duplicate, 409 when the same envelopeId arrives with different
+        ciphertext.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrokerUploadRequest'
+      responses:
+        '200':
+          description: Duplicate upload; original acknowledgement returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerUploadResponse'
+        '201':
+          description: Envelope stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerUploadResponse'
+        '400':
+          $ref: '#/components/responses/ReasonBadRequest'
+        '401':
+          $ref: '#/components/responses/ReasonUnauthorized'
+        '409':
+          description: Same envelopeId with different ciphertext
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reason:
+                    type: string
+                  existing_envelope_id:
+                    type: string
+                required: [reason, existing_envelope_id]
+        '411':
+          $ref: '#/components/responses/ReasonLengthRequired'
+        '413':
+          $ref: '#/components/responses/ReasonPayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/ReasonTooManyRequests'
+
+  /v1/gateways/{shelterId}/pull:
+    get:
+      operationId: pullEnvelopes
+      summary: Pull pending envelopes for a shelter (Gateway only)
+      description: >-
+        PC Gateway pulls pending ciphertext envelopes for its shelter using a
+        composite cursor (stored_at:envelope_id) so restarts neither skip nor
+        duplicate. limit is clamped to 1..100 (default 50); out-of-range or
+        non-numeric values are coerced, never rejected.
+      security:
+        - gatewayCredential: []
+      parameters:
+        - $ref: '#/components/parameters/ShelterId'
+        - $ref: '#/components/parameters/GatewayIdHeader'
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque composite cursor from the previous batch
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Requested batch size; server clamps to 1..100
+      responses:
+        '200':
+          description: Batch of pending envelopes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerEnvelopeBatch'
+        '400':
+          $ref: '#/components/responses/ReasonBadRequest'
+        '401':
+          $ref: '#/components/responses/ReasonUnauthorized'
+        '403':
+          $ref: '#/components/responses/ReasonForbidden'
+        '429':
+          $ref: '#/components/responses/ReasonTooManyRequests'
+
+  /v1/gateways/{shelterId}/receipts:
+    post:
+      operationId: uploadReceipt
+      summary: Upload a signed shelter receipt (Gateway only)
+      description: >-
+        PC Gateway uploads a signed shelter receipt for relay back to the
+        originating device. Idempotent by receiptId (duplicate returns
+        accepted=true with reason "duplicate"). The receipt's shelterId must
+        match the path and the body gatewayId must match the authenticated
+        principal. Body limit 65536 bytes. 422 when the receipt references an
+        envelope the Broker has never stored.
+      security:
+        - gatewayCredential: []
+      parameters:
+        - $ref: '#/components/parameters/ShelterId'
+        - $ref: '#/components/parameters/GatewayIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrokerReceiptUpload'
+      responses:
+        '202':
+          description: Receipt stored (or duplicate)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerReceiptUploadResponse'
+        '400':
+          $ref: '#/components/responses/ReasonBadRequest'
+        '401':
+          $ref: '#/components/responses/ReasonUnauthorized'
+        '403':
+          $ref: '#/components/responses/ReasonForbidden'
+        '411':
+          $ref: '#/components/responses/ReasonLengthRequired'
+        '413':
+          $ref: '#/components/responses/ReasonPayloadTooLarge'
+        '422':
+          description: Receipt references an envelope unknown to this Broker
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReasonResponse'
+        '429':
+          $ref: '#/components/responses/ReasonTooManyRequests'
+
+  /v1/gateways/{shelterId}/manifest:
+    post:
+      operationId: publishShelterManifest
+      summary: Publish the shelter public key manifest (Gateway only)
+      description: >-
+        PC Gateway publishes its public-only key manifest so a phone that has
+        never been on the shelter LAN can fetch the recipient key over mobile
+        data. The manifest shelterId must match the path. Body limit 24576
+        bytes. The body carries only already-public key material.
+      security:
+        - gatewayCredential: []
+      parameters:
+        - $ref: '#/components/parameters/ShelterId'
+        - $ref: '#/components/parameters/GatewayIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShelterPublicKeyManifest'
+      responses:
+        '202':
+          description: Manifest accepted and stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted:
+                    type: boolean
+                required: [accepted]
+        '400':
+          $ref: '#/components/responses/ReasonBadRequest'
+        '401':
+          $ref: '#/components/responses/ReasonUnauthorized'
+        '403':
+          $ref: '#/components/responses/ReasonForbidden'
+        '411':
+          $ref: '#/components/responses/ReasonLengthRequired'
+        '413':
+          $ref: '#/components/responses/ReasonPayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/ReasonTooManyRequests'
+
+  /v1/shelters/{shelterId}/manifest:
+    get:
+      operationId: fetchShelterManifest
+      summary: Fetch the last published shelter manifest (public)
+      description: >-
+        Anonymous but rate-limited. Returns public-only key material; the
+        client must still compare the manifest fingerprint against an
+        independently supplied value before trusting it.
+      parameters:
+        - $ref: '#/components/parameters/ShelterId'
+      responses:
+        '200':
+          description: Last manifest published for this shelter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShelterPublicKeyManifest'
+        '400':
+          $ref: '#/components/responses/ReasonBadRequest'
+        '404':
+          description: No manifest published for this shelter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReasonResponse'
+        '429':
+          $ref: '#/components/responses/ReasonTooManyRequests'
+        '500':
+          description: Stored manifest is corrupt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReasonResponse'
+
+  /v1/receipts:
+    get:
+      operationId: pollReceipts
+      summary: Poll signed shelter receipts (device capability token)
+      description: >-
+        Android polls for signed shelter receipts using the unguessable
+        capability token from registration, carried as Bearer auth so
+        reverse-proxy access logs do not capture it (a transitional ?token=
+        query fallback exists for already-deployed clients). Cursor is the
+        Broker monotonic sequence number, not device time.
+      security:
+        - deviceCapabilityToken: []
+      parameters:
+        - name: sinceSeq
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: Monotonic cursor from the previous batch (default 0)
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+          description: Deprecated transitional fallback for the Bearer capability token
+      responses:
+        '200':
+          description: Receipts newer than sinceSeq
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerReceiptBatch'
+        '400':
+          $ref: '#/components/responses/ReasonBadRequest'
+        '401':
+          $ref: '#/components/responses/ReasonUnauthorized'
+        '429':
+          $ref: '#/components/responses/ReasonTooManyRequests'
+
+  /v1/health:
+    get:
+      operationId: health
+      summary: Operational status
+      description: >-
+        Counts and configuration posture only; never exposes tokens,
+        credentials, personal data, or envelope contents.
+      responses:
+        '200':
+          description: Broker is up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerHealthResponse'
+
+components:
+  securitySchemes:
+    gatewayCredential:
+      type: http
+      scheme: bearer
+      description: >-
+        Scoped per-Gateway/per-shelter credential issued by
+        issue-gateway-credential. Must be presented together with the
+        X-Gateway-Id header; both the Gateway ID and the path shelterId are
+        checked against the credential scope (mismatch is 403).
+    deviceCapabilityToken:
+      type: http
+      scheme: bearer
+      description: Unguessable capability token returned by device registration.
+
+  parameters:
+    ShelterId:
+      name: shelterId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    GatewayIdHeader:
+      name: X-Gateway-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      description: Gateway identity bound to the Bearer credential scope
+
+  responses:
+    ReasonBadRequest:
+      description: Malformed or invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReasonResponse'
+    ReasonUnauthorized:
+      description: Missing or invalid credentials / signature / registration
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReasonResponse'
+    ReasonForbidden:
+      description: Credential scope does not match the requested Gateway/shelter
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReasonResponse'
+    ReasonConflict:
+      description: Conflict with previously registered state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReasonResponse'
+    ReasonLengthRequired:
+      description: Content-Length header is required before the body is read
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReasonResponse'
+    ReasonPayloadTooLarge:
+      description: Body exceeds the documented size limit
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReasonResponse'
+    ReasonTooManyRequests:
+      description: Sliding-window rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReasonResponse'
+
+  schemas:
+    ReasonResponse:
+      type: object
+      properties:
+        reason:
+          type: string
+      required: [reason]
+
+    BrokerDeviceRegisterRequest:
+      type: object
+      # brokerJson uses ignoreUnknownKeys = false: unknown fields are rejected.
+      additionalProperties: false
+      properties:
+        deviceKeyId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        publicKeyBase64:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: Base64 X.509 SubjectPublicKeyInfo of an ECDSA P-256 key
+        registrationSignatureBase64:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: ECDSA-P256 proof over the registration bytes
+      required: [deviceKeyId, publicKeyBase64, registrationSignatureBase64]
+
+    BrokerDeviceRegisterResponse:
+      type: object
+      properties:
+        deviceKeyId:
+          type: string
+        capabilityToken:
+          type: string
+      required: [deviceKeyId, capabilityToken]
+
+    BrokerUploadRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        envelope:
+          $ref: '#/components/schemas/EncryptedRescueEnvelope'
+        deviceKeyId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        uploadSignatureBase64:
+          type: string
+          description: ECDSA-P256 signature over authenticated header bytes + ciphertextSha256Hex
+      required: [envelope, deviceKeyId, uploadSignatureBase64]
+
+    BrokerUploadResponse:
+      type: object
+      properties:
+        brokerReceiptId:
+          type: string
+        envelopeId:
+          type: string
+        status:
+          type: string
+          const: BROKER_STORED
+        storedAtEpochMillis:
+          type: integer
+          format: int64
+      required: [brokerReceiptId, envelopeId, status, storedAtEpochMillis]
+
+    EncryptedRescueEnvelope:
+      type: object
+      description: >-
+        Store-carry-forward ciphertext envelope. hopCount is mutable routing
+        metadata; every other header field is bound to the ciphertext as
+        AES-GCM AAD. The Broker never modifies hopCount.
+      additionalProperties: false
+      properties:
+        protocolVersion:
+          type: integer
+        envelopeId:
+          type: string
+        requestId:
+          type: string
+        requestVersion:
+          type: integer
+        senderDeviceId:
+          type: string
+        destinationShelterId:
+          type: string
+        routingUrgency:
+          type: string
+          enum: [ROUTINE, URGENT, IMMEDIATE]
+        recipientKeyId:
+          type: string
+        createdAtEpochMillis:
+          type: integer
+          format: int64
+        expiresAtEpochMillis:
+          type: integer
+          format: int64
+        maxHopCount:
+          type: integer
+        hopCount:
+          type: integer
+        keyWrapAlgorithm:
+          type: string
+        contentEncryptionAlgorithm:
+          type: string
+        ciphertextSizeBytes:
+          type: integer
+        wrappedContentKeyBase64:
+          type: string
+        nonceBase64:
+          type: string
+        ciphertextBase64:
+          type: string
+        ciphertextSha256Hex:
+          type: string
+      required:
+        - envelopeId
+        - requestId
+        - requestVersion
+        - senderDeviceId
+        - destinationShelterId
+        - routingUrgency
+        - recipientKeyId
+        - createdAtEpochMillis
+        - expiresAtEpochMillis
+        - ciphertextSizeBytes
+        - wrappedContentKeyBase64
+        - nonceBase64
+        - ciphertextBase64
+        - ciphertextSha256Hex
+
+    BrokerEnvelopeBatch:
+      type: object
+      properties:
+        envelopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/EncryptedRescueEnvelope'
+        cursor:
+          type: [string, 'null']
+          description: Opaque composite cursor (stored_at:envelope_id); null when empty
+      required: [envelopes]
+
+    UnsignedShelterReceipt:
+      type: object
+      additionalProperties: false
+      properties:
+        protocolVersion:
+          type: integer
+        receiptId:
+          type: string
+        envelopeId:
+          type: string
+        requestId:
+          type: string
+        requestVersion:
+          type: integer
+        ciphertextSha256Hex:
+          type: string
+        shelterId:
+          type: string
+        receivedAtEpochMillis:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [STORED, ACCEPTED, RESPONDING, COMPLETED, CANCELLED, REJECTED]
+      required:
+        - receiptId
+        - envelopeId
+        - requestId
+        - requestVersion
+        - ciphertextSha256Hex
+        - shelterId
+        - receivedAtEpochMillis
+        - status
+
+    SignedShelterReceipt:
+      type: object
+      additionalProperties: false
+      properties:
+        receipt:
+          $ref: '#/components/schemas/UnsignedShelterReceipt'
+        signerKeyId:
+          type: string
+        signatureAlgorithm:
+          type: string
+        signatureBase64:
+          type: string
+      required: [receipt, signerKeyId, signatureBase64]
+
+    BrokerReceiptUpload:
+      type: object
+      additionalProperties: false
+      properties:
+        receipt:
+          $ref: '#/components/schemas/SignedShelterReceipt'
+        gatewayId:
+          type: string
+      required: [receipt, gatewayId]
+
+    BrokerReceiptUploadResponse:
+      type: object
+      properties:
+        accepted:
+          type: boolean
+        reason:
+          type: [string, 'null']
+      required: [accepted]
+
+    BrokerReceiptBatch:
+      type: object
+      properties:
+        receipts:
+          type: array
+          items:
+            $ref: '#/components/schemas/SignedShelterReceipt'
+        cursor:
+          type: integer
+          format: int64
+          description: Pass as sinceSeq on the next poll
+      required: [receipts, cursor]
+
+    RescuePublicKey:
+      type: object
+      additionalProperties: false
+      description: X.509 SubjectPublicKeyInfo, Base64 encoded. Public material only.
+      properties:
+        keyId:
+          type: string
+        algorithm:
+          type: string
+          enum: [RSA_OAEP_SHA256, ECDSA_P256_SHA256]
+        encodedBase64:
+          type: string
+      required: [keyId, algorithm, encodedBase64]
+
+    ShelterPublicKeyManifest:
+      type: object
+      additionalProperties: false
+      description: >-
+        Public-only key distribution document. Possession does not establish
+        trust; clients compare the fingerprint independently.
+      properties:
+        protocolVersion:
+          type: integer
+        shelterId:
+          type: string
+        recipientPublicKey:
+          $ref: '#/components/schemas/RescuePublicKey'
+        receiptSigningPublicKey:
+          $ref: '#/components/schemas/RescuePublicKey'
+        validFromEpochMillis:
+          type: integer
+          format: int64
+        validUntilEpochMillis:
+          type: integer
+          format: int64
+        generation:
+          type: integer
+      required:
+        - shelterId
+        - recipientPublicKey
+        - receiptSigningPublicKey
+        - validFromEpochMillis
+        - validUntilEpochMillis
+
+    BrokerHealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        pendingEnvelopes:
+          type: integer
+        pendingReceipts:
+          type: integer
+        profile:
+          type: string
+          description: Configuration posture only; no secrets
+        version:
+          type: string
+      required: [status, pendingEnvelopes, pendingReceipts, profile, version]

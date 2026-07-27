@@ -46,6 +46,19 @@
     if (detail) detail.textContent = isDev ? `${label}（正式運用には未対応${anon}）` : label;
     const chip = $("modeLabel");
     if (chip) { chip.textContent = isDev ? label : ""; chip.classList.toggle("dev", isDev); }
+    renderTrainingBanner(health.trainingMode === true);
+  }
+  function renderTrainingBanner(active) {
+    let banner = $("trainingBanner");
+    if (!active) { if (banner) banner.remove(); return; }
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.id = "trainingBanner";
+      banner.className = "training-banner";
+      banner.setAttribute("role", "alert");
+      document.body.prepend(banner);
+    }
+    banner.textContent = "訓練モード — この画面の情報はすべて訓練用です。実際の救助依頼・個人情報は含まれません。";
   }
   function conditionLabel(value) {
     return ({ LIFE_THREATENING: "命の危険", INJURED_OR_UNWELL: "けが・体調不良", MOBILITY_IMPAIRED: "自力移動困難", SUPPORT_NEEDED: "生活・医療支援" })[value] || value;
@@ -343,6 +356,12 @@
   }
   async function prepareMap() { await api("/api/map/prepare", { method: "POST", headers: authHeaders() }); await loadMapStatus(); }
 
+  function provenanceLabel(provenance) {
+    if (!provenance) return "";
+    const verification = { TRANSPORT_TLS_ONLY: "TLS接続のみ検証（内容署名なし）", CACHED_UNVERIFIED: "保存済み・未検証", UNVERIFIED: "未検証・取得不能" }[provenance.verification] || provenance.verification;
+    const fetched = provenance.fetchedAtEpochMillis ? ` / 取得 ${fmtTime(provenance.fetchedAtEpochMillis)}` : "";
+    return ` / 来歴: ${verification}${fetched}`;
+  }
   async function loadReviewQueue() { const rows = await api("/api/review-queue", { headers: authHeaders() }); $("reviewQueue").innerHTML = rows.length ? rows.map((row) => `<article class="request-card"><strong>${escapeHtml(row.subjectToken)} / ${escapeHtml(row.state)}</strong><span>確認優先度: ${escapeHtml(row.priority)} · ${escapeHtml(row.rationale)}</span><span class="fine">${row.manualOverride ? "手動変更あり" : "ルール計算"}${row.profileExpired ? " · 支援情報は期限切れ" : ""}</span><button class="button quiet" data-review-subject="${escapeHtml(row.subjectToken)}" type="button">手動で確認状態を変更</button></article>`).join("") : '<p class="empty">要確認候補はありません。</p>'; $("reviewQueue").querySelectorAll("[data-review-subject]").forEach((button) => button.addEventListener("click", async () => { const stateValue=prompt("状態（確認済み / 再確認対象 / 本人申告あり / 第三者情報あり・要確認 / 端末観測のみ・本人未確認 / 未確認）", "再確認対象"); if(!stateValue)return; const priority=prompt("確認優先度（高 / 中 / 低 / 完了、空欄は自動）", ""); const note=prompt("安全なメモ（氏名・住所・詳細な医療情報は入力しない）", ""); try{await api(`/api/review-queue/${encodeURIComponent(button.dataset.reviewSubject)}`,{method:"POST",headers:authHeaders(true),body:JSON.stringify({subjectToken:button.dataset.reviewSubject,state:stateValue,priority:priority||null,note:note||null})});await loadReviewQueue();}catch(_){alert("手動変更を保存できませんでした。");} })); }
   async function submitObservation(event) { event.preventDefault(); try { await api("/api/observations", { method:"POST", headers:authHeaders(true), body:JSON.stringify({subjectToken:$("observationSubject").value.trim(),observationType:$("observationType").value,locationCell:$("observationCell").value.trim()||null}) }); event.target.reset(); await loadReviewQueue(); } catch (_) { alert("観測を登録できませんでした。"); } }
   async function saveProfile(event) { event.preventDefault(); const due = $("profileDue").value; if (!due) return; const supportFlags=[]; if($("profileMobility").checked)supportFlags.push("MOBILITY");if($("profilePower").checked)supportFlags.push("POWER");if($("profileChildren").checked)supportFlags.push("CHILDREN");try { await api("/api/support-profiles",{method:"POST",headers:authHeaders(true),body:JSON.stringify({subjectToken:$("profileSubject").value.trim(),supportFlags,reviewDueAtEpochMillis:new Date(`${due}T00:00:00Z`).getTime()})});event.target.reset();await loadReviewQueue();}catch(_){alert("支援プロファイルを保存できませんでした。");} }
@@ -353,7 +372,7 @@
     const info = await api("/api/official-info", { headers: authHeaders() });
     $("officialAlert").textContent = info.urgent ? `気象庁: ${info.warningHeadline}` : `公式情報: ${info.warningHeadline}`;
     $("officialAlert").classList.toggle("urgent", info.urgent);
-    $("warningDetail").innerHTML = `<h3>気象庁 警報・注意報</h3><p>${escapeHtml(info.warningHeadline)}</p><ul>${info.warningStatuses.map((value) => `<li>${escapeHtml(value)}</li>`).join("") || "<li>府中町の発表状況なし</li>"}</ul><p class="fine">確認 ${fmtTime(info.checkedAtEpochMillis)}${info.usedCachedWarning ? "（保存済み情報）" : ""}</p>`;
+    $("warningDetail").innerHTML = `<h3>気象庁 警報・注意報</h3><p>${escapeHtml(info.warningHeadline)}</p><ul>${info.warningStatuses.map((value) => `<li>${escapeHtml(value)}</li>`).join("") || "<li>府中町の発表状況なし</li>"}</ul><p class="fine">確認 ${fmtTime(info.checkedAtEpochMillis)}${info.usedCachedWarning ? "（保存済み情報）" : ""}${escapeHtml(provenanceLabel(info.provenance))}</p>`;
     $("officialSources").innerHTML = info.sources.map((source) => `<a class="source-card" href="${escapeHtml(source.url)}" target="_blank" rel="noopener"><strong>${escapeHtml(source.title)}</strong><span>${escapeHtml(source.organization)} 公式サイト</span></a>`).join("");
     if (info.urgent && !state.notifiedWarning && "Notification" in window && Notification.permission === "granted") {
       new Notification("Relay 府中町 公式警報", { body: info.warningHeadline }); state.notifiedWarning = true;

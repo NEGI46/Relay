@@ -45,9 +45,13 @@ dependencies {
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json.client)
     implementation(libs.sqlite.jdbc)
+    // Windows DPAPI (CryptProtectData) for at-rest rescue key protection; inert on other platforms.
+    implementation(libs.jna)
     implementation("org.slf4j:slf4j-simple:2.0.17")
     testImplementation(libs.ktor.server.test.host)
     testImplementation(libs.junit)
+    // Test-only: architecture rules over all JVM modules (this test classpath sees them all).
+    testImplementation(libs.archunit.junit4)
     // Test-only: exercise the real Broker HTTP server in the end-to-end intake flow.
     testImplementation(project(":broker"))
 }

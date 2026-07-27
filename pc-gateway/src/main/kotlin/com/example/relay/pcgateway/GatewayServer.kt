@@ -61,6 +61,8 @@ private const val MAX_CONTROL_BODY_BYTES = 16L * 1024
     val gatewayId: String,
     val database: String,
     val profile: String = "production",
+    /** Defaults to false so older clients that omit the field are treated as production. */
+    val trainingMode: Boolean = false,
     val lanMode: String = "disabled",
     val anonymousIngress: Boolean = true,
     val remoteManagementEnabled: Boolean = false,
@@ -143,6 +145,7 @@ fun Application.gatewayModule(
                     gatewayId = config.gatewayId,
                     database = "ready",
                     profile = config.profile.name.lowercase(),
+                    trainingMode = config.trainingMode,
                     lanMode = config.lanMode.name.lowercase(),
                     anonymousIngress = config.anonymousIngressEnabled,
                     remoteManagementEnabled = config.remoteManagementEnabled,
@@ -242,7 +245,7 @@ fun Application.gatewayModule(
         get("/api/rescue/requests") {
             val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
             val service = rescueIntakeService ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
-            service.purgeExpiredDetails()
+            service.purgeExpiredDetails(config.rescueRetentionMillis)
             val items = service.list(latestOnly = true).mapNotNull { summary ->
                 service.detail(summary.requestId, summary.requestVersion)?.toOperatorRequest()?.let { request ->
                     puerta.ingress(request.requestId).let { provenance ->
@@ -258,7 +261,13 @@ fun Application.gatewayModule(
             )
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
             access.audit(staff, null, "RESCUE_LIST_VIEW", "SUCCESS", call.remoteSource())
-            call.respond(RescueOperatorListResponse(System.currentTimeMillis(), items = items))
+            call.respond(
+                RescueOperatorListResponse(
+                    System.currentTimeMillis(),
+                    retentionDays = config.rescueRetentionDays,
+                    items = items,
+                ),
+            )
         }
         get("/api/rescue/requests/{id}") {
             val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
@@ -700,8 +709,8 @@ data class GatewayRescueKeyStatus(
 ) {
     companion object {
         fun notChecked() = GatewayRescueKeyStatus(storage = "not_checked", status = "not_checked")
-        fun valid(expiresAtEpochMillis: Long, warning: Boolean) = GatewayRescueKeyStatus(
-            storage = "local_file_permission_checked",
+        fun valid(expiresAtEpochMillis: Long, warning: Boolean, dpapiProtected: Boolean = false) = GatewayRescueKeyStatus(
+            storage = if (dpapiProtected) "dpapi_protected_file" else "local_file_permission_checked",
             status = if (warning) "expiring_soon" else "valid",
             expiresAtEpochMillis = expiresAtEpochMillis,
             warningCode = if (warning) "rescue_key_expiring_soon_manual_reprovisioning_required" else null,

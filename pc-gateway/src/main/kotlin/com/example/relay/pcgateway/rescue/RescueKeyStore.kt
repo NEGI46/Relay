@@ -1,5 +1,6 @@
 package com.example.relay.pcgateway.rescue
 
+import com.example.relay.pcgateway.GatewayKeyProtection
 import com.example.relay.rescue.RescueCryptography
 import com.example.relay.rescue.RescueKeyAlgorithm
 import com.example.relay.rescue.RescuePayload
@@ -39,9 +40,16 @@ class RescueKeyStore(
     private val shelterId: String,
     private val clock: RescueClock = RescueClock(System::currentTimeMillis),
     private val json: Json = Json { encodeDefaults = true; ignoreUnknownKeys = false },
+    private val protection: GatewayKeyProtection = GatewayKeyProtection.FILE_PERMISSIONS,
+    private val dpapiAvailable: Boolean = WindowsDpapi.isSupported,
 ) {
     init {
         require(isIdentifier(shelterId)) { "invalid shelter id" }
+        // Fail closed: a DPAPI request on a platform without DPAPI must stop startup instead of
+        // silently keeping the private keys in a plaintext file.
+        require(!(protection == GatewayKeyProtection.DPAPI && !dpapiAvailable)) {
+            "RELAY_KEY_PROTECTION=dpapi requires Windows DPAPI; refusing to fall back to a plaintext key file"
+        }
     }
 
     @Synchronized
@@ -58,16 +66,39 @@ class RescueKeyStore(
         }
         verifyOwnerOnly(path)
         val size = Files.size(path)
-        require(size in 1..MAX_KEY_FILE_BYTES) { "invalid rescue key file size" }
-        val persisted = json.decodeFromString<PersistedRescueKeys>(Files.readString(path, Charsets.UTF_8))
+        require(size in 1..MAX_PROTECTED_FILE_BYTES) { "invalid rescue key file size" }
+        val raw = Files.readString(path, Charsets.UTF_8)
+        val protectedFile = raw.startsWith(DPAPI_HEADER)
+        if (protectedFile) {
+            // Fail closed in both directions: a protected file never opens outside DPAPI mode.
+            require(protection == GatewayKeyProtection.DPAPI) {
+                "rescue key file is DPAPI-protected; set RELAY_KEY_PROTECTION=dpapi to open it"
+            }
+        }
+        val plaintext = if (protectedFile) {
+            val blob = Base64.getDecoder().decode(raw.removePrefix(DPAPI_HEADER).trim())
+            WindowsDpapi.unprotect(blob, DPAPI_ENTROPY).toString(Charsets.UTF_8)
+        } else {
+            raw
+        }
+        require(plaintext.encodeToByteArray().size <= MAX_KEY_FILE_BYTES) { "invalid rescue key file size" }
+        val persisted = json.decodeFromString<PersistedRescueKeys>(plaintext)
         require(persisted.fileVersion == KEY_FILE_VERSION) { "unsupported rescue key file" }
         require(persisted.manifest.shelterId == shelterId) { "rescue key shelter mismatch" }
         require(persisted.manifest.validate(now) == RescueValidationResult.Valid) { "rescue key manifest is invalid" }
-        return RescueGatewayKeys(
+        val keys = RescueGatewayKeys(
             manifest = persisted.manifest,
             recipientPrivateKey = persisted.recipientPrivateKey.import(),
             receiptSigningPrivateKey = persisted.receiptSigningPrivateKey.import(),
         )
+        if (!protectedFile && protection == GatewayKeyProtection.DPAPI) {
+            // One-way migration: rewrite the plaintext file DPAPI-protected and prove it on disk.
+            persist(keys)
+            require(Files.readString(path, Charsets.UTF_8).startsWith(DPAPI_HEADER)) {
+                "DPAPI migration failed to protect the rescue key file"
+            }
+        }
+        return keys
     }
 
     private fun create(now: Long): RescueGatewayKeys {
@@ -101,7 +132,13 @@ class RescueKeyStore(
                 ),
             ).encodeToByteArray()
             require(encoded.size <= MAX_KEY_FILE_BYTES)
-            Files.write(temp, encoded)
+            val stored = if (protection == GatewayKeyProtection.DPAPI) {
+                (DPAPI_HEADER + Base64.getEncoder().encodeToString(WindowsDpapi.protect(encoded, DPAPI_ENTROPY)))
+                    .encodeToByteArray()
+            } else {
+                encoded
+            }
+            Files.write(temp, stored)
             try {
                 Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE)
             } catch (_: AtomicMoveNotSupportedException) {
@@ -237,8 +274,15 @@ class RescueKeyStore(
     private companion object {
         const val KEY_FILE_VERSION = 1
         const val MAX_KEY_FILE_BYTES = 32L * 1024
+        const val MAX_PROTECTED_FILE_BYTES = 64L * 1024
         const val CLOCK_SKEW_ALLOWANCE_MS = 24L * 60 * 60 * 1_000
         const val KEY_VALIDITY_MS = 5L * 366 * 24 * 60 * 60 * 1_000
+
+        /** File marker for a DPAPI-wrapped key file; the blob itself carries the protection. */
+        const val DPAPI_HEADER = "RELAY-DPAPI-KEYS-V1\n"
+
+        /** Fixed application entropy for domain separation only; deliberately not a secret. */
+        val DPAPI_ENTROPY: ByteArray = "relay-rescue-key-store-v1".encodeToByteArray()
 
         fun isIdentifier(value: String): Boolean = value.length in 1..128 &&
             value.all { it.isLetterOrDigit() || it in "-_.:" }

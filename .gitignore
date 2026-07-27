@@ -78,3 +78,6 @@ DerivedData/
 *.p12
 *.p8
 .aicoding-chat-workspace
+
+# Schemathesis local example database
+.schemathesis/

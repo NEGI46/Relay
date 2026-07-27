@@ -46,9 +46,33 @@ enum class GatewayLanMode {
     }
 }
 
+/** At-rest protection applied to the Gateway rescue private key file. */
+enum class GatewayKeyProtection {
+    /** Owner-only filesystem permission verification; deliberately not claimed as DPAPI/HSM/KMS. */
+    FILE_PERMISSIONS,
+
+    /** Windows DPAPI per-user encryption of the key file; refuses to run where DPAPI is absent. */
+    DPAPI;
+
+    companion object {
+        fun fromEnvironment(raw: String? = System.getenv("RELAY_KEY_PROTECTION")): GatewayKeyProtection =
+            when (raw?.trim()?.lowercase()) {
+                null, "", "file-permissions", "file_permissions" -> FILE_PERMISSIONS
+                "dpapi" -> DPAPI
+                else -> throw IllegalArgumentException("RELAY_KEY_PROTECTION must be file-permissions or dpapi")
+            }
+    }
+}
+
 data class GatewayConfig(
     val profile: GatewayProfile = GatewayProfile.fromEnvironment(),
     val lanMode: GatewayLanMode = GatewayLanMode.fromEnvironment(),
+    /**
+     * Drill isolation. When true, every persistent-state default moves under a `training`
+     * directory and non-training paths are rejected fail-closed, so a drill can never read or
+     * write production rescue data, keys, accounts, or credentials.
+     */
+    val trainingMode: Boolean = environmentBoolean("RELAY_TRAINING_MODE", default = false),
     val version: String = System.getProperty("relay.version") ?: System.getenv("RELAY_VERSION") ?: "dev",
     val buildSha: String = System.getenv("GIT_COMMIT") ?: "unknown",
     /**
@@ -66,15 +90,20 @@ data class GatewayConfig(
     // Packaged apps (Windows EXE / macOS app image) may start with a read-only CWD.
     // Keep the default database under the user's writable home profile.
     val dbPath: String = System.getenv("RELAY_GATEWAY_DB")
-        ?: File(System.getProperty("user.home"), ".relay/relay-gateway.db").path,
+        ?: File(System.getProperty("user.home"), if (trainingMode) ".relay/training/relay-gateway.db" else ".relay/relay-gateway.db").path,
     val gatewayId: String = System.getenv("RELAY_GATEWAY_ID") ?: "pc-gateway-local",
     val shelterId: String = System.getenv("RELAY_SHELTER_ID") ?: gatewayId,
     val rescueKeyPath: String = System.getenv("RELAY_RESCUE_KEY_FILE")
-        ?: File(System.getProperty("user.home"), ".relay/rescue-keys.json").path,
+        ?: File(System.getProperty("user.home"), if (trainingMode) ".relay/training/rescue-keys.json" else ".relay/rescue-keys.json").path,
+    /** At-rest protection mode for [rescueKeyPath]; parsing is fail-closed on unknown values. */
+    val keyProtection: GatewayKeyProtection = GatewayKeyProtection.fromEnvironment(),
     val offlineMapPath: String = System.getenv("RELAY_OFFLINE_MAP_DIR")
         ?: File(System.getProperty("user.home"), ".relay/maps/gsi-fuchu").path,
     val officialInfoCachePath: String = System.getenv("RELAY_OFFICIAL_INFO_CACHE")
-        ?: File(System.getProperty("user.home"), ".relay/official/jma-warning-340000.json").path,
+        ?: File(
+            System.getProperty("user.home"),
+            if (trainingMode) ".relay/training/official/jma-warning-340000.json" else ".relay/official/jma-warning-340000.json",
+        ).path,
     /**
      * Public regional root used to verify the shelter's signed BLE identity.
      *
@@ -92,12 +121,20 @@ data class GatewayConfig(
     val rescueManifestFingerprint: String? = System.getenv("RELAY_RESCUE_MANIFEST_FINGERPRINT")?.trim()?.takeIf { it.isNotEmpty() },
     val rescueKeyExpiryWarningMillis: Long = (System.getenv("RELAY_RESCUE_KEY_EXPIRY_WARNING_DAYS") ?: "30")
         .toLongOrNull()?.coerceIn(1, 365)?.times(24L * 60 * 60 * 1_000) ?: 30L * 24 * 60 * 60 * 1_000,
+    /**
+     * Retention period for decrypted terminal rescue details. The 30-day default is a pilot
+     * value pending privacy/legal owner approval. Parsing is strict fail-closed: a malformed or
+     * out-of-range override stops startup instead of silently keeping personal data longer.
+     */
+    val rescueRetentionDays: Int = environmentStrictInt("RELAY_RESCUE_RETENTION_DAYS", default = 30),
+    /** Background sweep cadence so retention holds even when no operator opens the console. */
+    val retentionSweepIntervalMinutes: Int = environmentStrictInt("RELAY_RETENTION_SWEEP_INTERVAL_MINUTES", default = 60),
     /** Separate loopback-only listener used exclusively by the local Windows BLE sidecar. */
     val bleBridgeIngressHost: String = "127.0.0.1",
     val bleBridgeIngressPort: Int = (System.getenv("RELAY_BLE_BRIDGE_PORT") ?: "18081").toIntOrNull()
         ?.takeIf { it in 1..65_535 } ?: 18081,
     /** HMAC secret shared only with the locally installed BLE sidecar. */
-    val bleBridgeSharedSecret: String = resolveBleBridgeSharedSecret(),
+    val bleBridgeSharedSecret: String = resolveBleBridgeSharedSecret(trainingMode),
     val maxBleBridgeRequestBytes: Int = (System.getenv("RELAY_BLE_BRIDGE_MAX_REQUEST_BYTES") ?: "49152").toIntOrNull()
         ?.takeIf { it in 1_024..131_072 } ?: 49_152,
     /**
@@ -106,7 +143,7 @@ data class GatewayConfig(
      */
     val legacyAdminKeyEnabled: Boolean = profile == GatewayProfile.DEVELOPMENT &&
         environmentBoolean("RELAY_GATEWAY_ENABLE_LEGACY_ADMIN_KEY", default = true),
-    val adminKey: String? = if (legacyAdminKeyEnabled) resolveAdminKey() else null,
+    val adminKey: String? = if (legacyAdminKeyEnabled) resolveAdminKey(trainingMode) else null,
     /** First-admin bootstrap inputs. No default username or password is ever generated. */
     val bootstrapUsername: String? = System.getenv("RELAY_GATEWAY_BOOTSTRAP_USERNAME")?.trim()?.takeIf { it.isNotEmpty() },
     val bootstrapSecret: String? = System.getenv("RELAY_GATEWAY_BOOTSTRAP_SECRET")?.takeIf { it.isNotBlank() },
@@ -162,8 +199,12 @@ data class GatewayConfig(
     val brokerPollIntervalMs: Long = (System.getenv("RELAY_BROKER_POLL_INTERVAL_MS") ?: "10000")
         .toLongOrNull()?.takeIf { it in 1_000L..300_000L } ?: 10_000L,
 ) {
+    val rescueRetentionMillis: Long = rescueRetentionDays * 24L * 60 * 60 * 1_000
+    val retentionSweepIntervalMillis: Long = retentionSweepIntervalMinutes * 60_000L
+
     /** Non-sensitive diagnostics surfaced by health; never contains host paths, keys, or tokens. */
     val configurationWarnings: List<String> = buildList {
+        if (trainingMode) add("training_mode_active_production_data_isolated")
         if (profile == GatewayProfile.DEVELOPMENT) add("development_profile_compatibility_enabled")
         if (profile == GatewayProfile.LAB) add("lab_profile_not_for_production_operation")
         if (profile != GatewayProfile.DEVELOPMENT && legacyAdminKeyMaterialConfigured()) {
@@ -182,6 +223,7 @@ data class GatewayConfig(
     /** Non-secret configuration snapshot allowed in an operator audit record. */
     val auditConfigurationTarget: String = listOf(
         "profile=${profile.name.lowercase()}",
+        "training=$trainingMode",
         "lan=${lanMode.name.lowercase()}",
         "anonymous=$anonymousIngressEnabled",
         "discovery=$lanDiscoveryEnabled",
@@ -236,6 +278,25 @@ data class GatewayConfig(
         if (bootstrapSecret != null) require(bootstrapSecret.length >= 16) {
             "RELAY_GATEWAY_BOOTSTRAP_SECRET must contain at least 16 characters"
         }
+        require(rescueRetentionDays in 1..365) {
+            "RELAY_RESCUE_RETENTION_DAYS must be between 1 and 365 days; refusing to run with an unapproved retention period"
+        }
+        require(retentionSweepIntervalMinutes in 5..1_440) {
+            "RELAY_RETENTION_SWEEP_INTERVAL_MINUTES must be between 5 and 1440"
+        }
+        if (trainingMode) {
+            // Fail closed: a training Gateway must never open production state, even when the
+            // operator overrides a path via environment variables.
+            listOf(
+                "RELAY_GATEWAY_DB" to dbPath,
+                "RELAY_RESCUE_KEY_FILE" to rescueKeyPath,
+                "RELAY_OFFICIAL_INFO_CACHE" to officialInfoCachePath,
+            ).forEach { (name, path) ->
+                require(hasTrainingPathSegment(path)) {
+                    "training mode requires $name to point inside a 'training' directory; refusing to reuse production data paths"
+                }
+            }
+        }
     }
 
     /**
@@ -249,6 +310,10 @@ data class GatewayConfig(
     }
 
     companion object {
+        /** True when the path contains a directory segment named `training` (case-insensitive). */
+        fun hasTrainingPathSegment(path: String): Boolean =
+            path.split('/', '\\').any { it.equals("training", ignoreCase = true) }
+
         fun isLoopbackHost(value: String?): Boolean {
             val normalized = value?.trim()?.removePrefix("[")?.removeSuffix("]")?.lowercase() ?: return false
             if (normalized == "localhost" || normalized == "::1" || normalized == "0:0:0:0:0:0:0:1") return true
@@ -271,6 +336,12 @@ data class GatewayConfig(
 private fun environmentBoolean(name: String, default: Boolean): Boolean =
     System.getenv(name)?.trim()?.toBooleanStrictOrNull() ?: default
 
+/** Strict integer parsing: a malformed value throws instead of silently using the default. */
+private fun environmentStrictInt(name: String, default: Int): Int {
+    val raw = System.getenv(name)?.trim()?.takeIf { it.isNotEmpty() } ?: return default
+    return requireNotNull(raw.toIntOrNull()) { "$name must be an integer" }
+}
+
 private fun legacyAdminKeyMaterialConfigured(): Boolean =
     !System.getenv("RELAY_GATEWAY_ADMIN_KEY").isNullOrBlank() || defaultAdminKeyFile().isFile
 
@@ -292,25 +363,27 @@ fun GatewayConfig.bleBridgeEnvironmentFor(manifest: SignedShelterManifest): BleB
     BleBridgeEnvironment(
         signedManifestFingerprintBase64 = Base64.getEncoder().encodeToString(manifest.beaconFingerprintBytes()),
         ingressPort = bleBridgeIngressPort,
-        sharedSecretFile = defaultBleBridgeSecretFile().absolutePath,
+        sharedSecretFile = defaultBleBridgeSecretFile(trainingMode).absolutePath,
     )
 
-fun defaultAdminKeyFile(): File =
-    File(System.getenv("RELAY_GATEWAY_ADMIN_KEY_FILE") ?: File(System.getProperty("user.home"), ".relay/admin.key").path)
+fun defaultAdminKeyFile(trainingMode: Boolean = false): File = File(
+    System.getenv("RELAY_GATEWAY_ADMIN_KEY_FILE")
+        ?: File(System.getProperty("user.home"), if (trainingMode) ".relay/training/admin.key" else ".relay/admin.key").path,
+)
 
 /** Returns only a source descriptor; callers must never print the legacy key itself. */
-fun resolveAdminKeySource(): String {
+fun resolveAdminKeySource(trainingMode: Boolean = false): String {
     val env = System.getenv("RELAY_GATEWAY_ADMIN_KEY")
     if (!env.isNullOrBlank()) return "env:RELAY_GATEWAY_ADMIN_KEY"
-    val file = defaultAdminKeyFile()
+    val file = defaultAdminKeyFile(trainingMode)
     return if (file.isFile) "file:${file.absolutePath}" else "generated-file:${file.absolutePath}"
 }
 
 /** Development-only migration compatibility. Production never calls this function. */
-fun resolveAdminKey(): String {
+fun resolveAdminKey(trainingMode: Boolean = false): String {
     val env = System.getenv("RELAY_GATEWAY_ADMIN_KEY")
     if (!env.isNullOrBlank()) return env.trim()
-    val file = defaultAdminKeyFile()
+    val file = defaultAdminKeyFile(trainingMode)
     if (file.isFile) {
         val existing = file.readText(Charsets.UTF_8).trim()
         if (existing.isNotEmpty()) return existing
@@ -321,20 +394,22 @@ fun resolveAdminKey(): String {
     return generated
 }
 
-fun defaultBleBridgeSecretFile(): File =
-    File(System.getenv("RELAY_BLE_BRIDGE_SECRET_FILE") ?: File(System.getProperty("user.home"), ".relay/ble-bridge.key").path)
+fun defaultBleBridgeSecretFile(trainingMode: Boolean = false): File = File(
+    System.getenv("RELAY_BLE_BRIDGE_SECRET_FILE")
+        ?: File(System.getProperty("user.home"), if (trainingMode) ".relay/training/ble-bridge.key" else ".relay/ble-bridge.key").path,
+)
 
 /**
  * The BLE sidecar runs as the same interactive user and reads this secret locally.
  * It is never returned from an HTTP route or written to diagnostics.
  */
-fun resolveBleBridgeSharedSecret(): String {
+fun resolveBleBridgeSharedSecret(trainingMode: Boolean = false): String {
     val environment = System.getenv("RELAY_BLE_BRIDGE_SECRET")?.trim()
     if (!environment.isNullOrEmpty()) {
         require(environment.length >= 32) { "RELAY_BLE_BRIDGE_SECRET must be at least 32 characters" }
         return environment
     }
-    val file = defaultBleBridgeSecretFile()
+    val file = defaultBleBridgeSecretFile(trainingMode)
     if (file.isFile) {
         val existing = file.readText(Charsets.UTF_8).trim()
         require(existing.length >= 32) { "BLE bridge secret file is too short" }

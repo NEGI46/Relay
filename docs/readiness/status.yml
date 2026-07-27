@@ -1,0 +1,1039 @@
+# Relay readiness single source of truth.
+#
+# This file is the ONLY authoritative machine-readable record of what is
+# implemented, what is automatically tested, and what is still blocked.
+# README summary tables and the generated readiness documents are derived
+# from this file; CI fails when they drift (tools/readiness/readiness_tool.py check).
+#
+# State axes are deliberately separate so that IMPLEMENTED can never be
+# conflated with DEVICE_TESTED:
+#   implementation:     NOT_IMPLEMENTED | IMPLEMENTED | DEPRECATED | BLOCKED_EXTERNAL
+#   automated_test:     NOT_RUN | AUTOMATED_TESTED | BLOCKED_EXTERNAL | NOT_APPLICABLE
+#   emulator_simulator: NOT_RUN | EMULATOR_TESTED | BLOCKED_EXTERNAL | NOT_APPLICABLE
+#   real_device:        NOT_RUN | DEVICE_TESTED | BLOCKED_EXTERNAL | NOT_APPLICABLE
+#   field_test:         NOT_RUN | FIELD_TESTED | BLOCKED_EXTERNAL | NOT_APPLICABLE
+#
+# DEVICE_TESTED / FIELD_TESTED additionally require dated external_record
+# evidence; a code change or automated test can never set them.
+
+schema_version: 1
+status_date: "2026-07-26"
+source_commit: "89e7651"
+branch: "agent/zero-operation-relay"
+disclaimer_ja: >-
+  Relayは119、消防・警察・自治体の公式な緊急連絡手段の代替ではありません。
+  本ファイルのどの状態も、実災害での救助や自治体・消防の承認を保証しません。
+disclaimer_en: >-
+  Relay does not replace 119 or official emergency channels. No state in this
+  file guarantees real-disaster rescue or municipal/fire-service approval.
+
+features:
+  - id: sos-rescue-request
+    name: "SOS / rescue request creation, update, cancel"
+    name_ja: "SOS・救助依頼の作成・更新・取消"
+    area: android
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: app/src/main/java/com/example/relay/ui/RelayApp.kt
+      - kind: test
+        ref: app/src/test/java/com/example/relay
+        note: ":app:testDebugUnitTest in relay-ci.yml unit job"
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "JVM unit tests only; no claim about physical device behavior."
+
+  - id: encrypted-storage
+    name: "Room + SQLCipher encrypted storage with Keystore passphrase"
+    name_ja: "Room + SQLCipher暗号化保存（Keystore保護passphrase）"
+    area: android
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: app/src/main/java/com/example/relay/data/local/SqlCipherPassphraseStore.kt
+      - kind: test
+        ref: app/src/androidTest/java/com/example/relay/data/local/SqlCipherPassphraseStoreTest.kt
+        note: "Instrumentation test exists; requires emulator/device lane to execute"
+      - kind: script
+        ref: scripts/verify-implementation-contracts.ps1
+        note: "Contract check enforces SQLCipher + Keystore usage in CI"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Instrumentation execution is an emulator/device lane, not part of the default PR lane."
+
+  - id: location-update
+    name: "Consent-gated location update"
+    name_ja: "明示同意時のみの位置更新"
+    area: android
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: app/src/test/java/com/example/relay
+        note: "Unit-tested policy; GPS hardware behavior is out of scope"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: ""
+
+  - id: continuous-gps-tracking
+    name: "Continuous background GPS tracking"
+    name_ja: "継続GPS追跡（background location）"
+    area: android
+    implementation: NOT_IMPLEMENTED
+    automated_test: NOT_APPLICABLE
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions:
+      - "BLOCKED_EXTERNAL: municipality/privacy owner approval for background location collection (Play policy: ACCESS_BACKGROUND_LOCATION requires a declared, approved use case)"
+      - "BLOCKED_EXTERNAL: physical Android devices and a field trial are required; background-location behavior cannot be verified on this workstation"
+    evidence: []
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Background location, location FGS, and periodic tracking are deliberately not implemented. Kept NOT_IMPLEMENTED rather than partially coded: shipping unapproved background tracking would violate the privacy boundary this project documents."
+
+  - id: armed-emergency-state
+    name: "ARMED / EMERGENCY_ACTIVE background relay state machine"
+    name_ja: "ARMED / EMERGENCY背景中継状態管理"
+    area: android
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: app/src/main/java/com/example/relay/background
+      - kind: doc
+        ref: docs/BACKGROUND_RELAY_MODE.md
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Persistent state, degrade/recovery, and communication lease covered by unit tests only."
+
+  - id: auto-disaster-detection
+    name: "Automatic disaster detection triggers"
+    name_ja: "自動災害検知（FCM・気象・Activation Manifest）"
+    area: android
+    implementation: NOT_IMPLEMENTED
+    automated_test: NOT_APPLICABLE
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions:
+      - "BLOCKED_EXTERNAL: FCM project/credentials and a signing authority for the Activation Manifest must be provisioned by the operating municipality"
+      - "BLOCKED_EXTERNAL: real devices and live JMA feed access are required to verify detection triggers end-to-end"
+    evidence:
+      - kind: doc
+        ref: docs/DISASTER_ACTIVATION_TRIGGERS.md
+        note: "Design document only"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Design only; no code path claims detection. The Gateway-side official-information provenance pipeline (jma-xml-feed feature) is the code-verifiable part and is tracked separately."
+
+  - id: nearby-relay
+    name: "Nearby store-carry-forward relay of encrypted envelopes"
+    name_ja: "Nearby暗号化Envelope中継（Store-Carry-Forward）"
+    area: transport
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: BLOCKED_EXTERNAL
+    field_test: NOT_RUN
+    external_decisions:
+      - "Two/three physical Android devices for RF multi-hop validation"
+    evidence:
+      - kind: doc
+        ref: docs/NEARBY_IMPLEMENTATION.md
+      - kind: script
+        ref: scripts/device-test/run-multihop-test.ps1
+        note: "Harness exists; never executed on physical devices"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "RF behavior cannot be proven without physical devices."
+
+  - id: nearby-connection-policy
+    name: "Nearby OPEN / TRUSTED connection policy"
+    name_ja: "Nearby接続ポリシー（OPEN / TRUSTED）"
+    area: transport
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions:
+      - "Allow-list distribution and update operation design"
+    evidence:
+      - kind: test
+        ref: app/src/test/java/com/example/relay
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Fail-closed allow-list enforced in unit tests; distribution operations incomplete."
+
+  - id: gateway-enrollment-core
+    name: "LAN Gateway enrollment token validation, pinning, rotation"
+    name_ja: "LAN Gateway登録（token検証・永続化・rotation）"
+    area: transport
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: app/src/main/java/com/example/relay/gateway/GatewayShelterEnrollment.kt
+      - kind: test
+        ref: app/src/test/java/com/example/relay/gateway/GatewayEnrollmentTrustTest.kt
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "relay-gw:1: token validation, conflicting beacon rejection, manifest pinning."
+
+  - id: gateway-enrollment-ui
+    name: "Gateway enrollment Compose screen with CameraX QR scanner"
+    name_ja: "Gateway登録画面（CameraX QRスキャナ含むCompose UI）"
+    area: transport
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: app/src/main/java/com/example/relay/ui/enrollment/EnrollmentScreen.kt
+      - kind: source
+        ref: app/src/main/java/com/example/relay/ui/enrollment/CameraQrScanner.kt
+      - kind: test
+        ref: app/src/test/java/com/example/relay/ui/enrollment/EnrollmentViewModelTest.kt
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: >-
+      Screen and scanner are implemented (commit de6850a). Camera hardware behavior and
+      real-LAN enrollment remain device work.
+
+  - id: broker-manifest-enrollment
+    name: "Broker manifest self-pin for debug/localDev"
+    name_ja: "Broker Manifest登録（debug/localDev限定）"
+    area: transport
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: app/src/test/java/com/example/relay/rescue/ShelterManifestEnrollmentTest.kt
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Development-only path; disabled in release/pilotRelease."
+
+  - id: ble-gateway-trust-chain
+    name: "BLE Gateway trust chain (Root -> Directory -> Manifest -> fingerprint)"
+    name_ja: "BLE Gateway信頼chain（Root→Directory→Manifest→fingerprint）"
+    area: trust
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: BLOCKED_EXTERNAL
+    field_test: BLOCKED_EXTERNAL
+    external_decisions:
+      - "Formal regional Root and signed shelter Directory issuance by trust authority"
+    evidence:
+      - kind: doc
+        ref: docs/adr/ADR-002-gateway-discovery-trust.md
+      - kind: source
+        ref: shared/src/commonMain/kotlin
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Verification logic tested with fixtures; no formal trust anchors exist."
+
+  - id: pc-gateway-console
+    name: "PC Gateway staff console (accounts, roles, audit, receipts)"
+    name_ja: "PC Gatewayスタッフ画面（アカウント・役割・監査・署名Receipt）"
+    area: gateway
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_APPLICABLE
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway
+      - kind: test
+        ref: pc-gateway/src/test
+        note: ":pc-gateway:test plus Playwright staff-console E2E"
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Windows validation lane runs Gateway build, tests, and /api/health smoke."
+
+  - id: sqlite-write-coordination
+    name: "SQLite write coordinator and lock file"
+    name_ja: "SQLite write coordinatorとlock file"
+    area: gateway
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: pc-gateway/src/test
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: ""
+
+  - id: csv-export-injection-safe
+    name: "CSV export with formula injection neutralization"
+    name_ja: "CSV export（formula injection防止）"
+    area: gateway
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: pc-gateway/src/test
+        note: "Shared encoder for messages and audit exports"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: ""
+
+  - id: https-broker
+    name: "HTTPS Broker (ciphertext store, dedup, TTL, scoped credentials)"
+    name_ja: "HTTPS Broker（暗号文保存・重複排除・TTL・scoped credential）"
+    area: broker
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_RUN
+    external_decisions:
+      - "Production TLS/DNS/reverse proxy/WAF/hosting"
+    evidence:
+      - kind: source
+        ref: broker/src/main/kotlin/com/example/relay/broker
+      - kind: test
+        ref: broker/src/test
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Broker never decrypts rescue bodies; production infrastructure is external."
+
+  - id: broker-observability-minimal
+    name: "Broker security-event logging without secrets"
+    name_ja: "Broker security event記録（秘密情報なし）"
+    area: broker
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: broker/src/test
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Coarse category logging only: auth failures, invalid proofs, rate limits."
+
+  - id: packaged-e2e
+    name: "Packaged Broker-Gateway black-box E2E"
+    name_ja: "Packaged Broker–Gateway E2E（black-box）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: script
+        ref: scripts/e2e/run-packaged-broker-gateway-e2e.ps1
+      - kind: workflow
+        ref: .github/workflows/relay-heavy-tests.yml
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Scheduled heavy lane; loopback processes, not real network topology."
+
+  - id: broker-high-availability
+    name: "Broker high availability, monitoring, disaster recovery"
+    name_ja: "Broker高可用性・監視・災害復旧"
+    area: broker
+    implementation: NOT_IMPLEMENTED
+    automated_test: NOT_APPLICABLE
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions:
+      - "Infrastructure/SRE owner for HA, RTO/RPO, and monitoring design"
+      - "BLOCKED_EXTERNAL: multi-node infrastructure, a managed database or replication target, and an on-call/monitoring stack must be provisioned before any HA work can be real; a single-workstation SQLite deployment cannot honestly claim HA"
+    evidence: []
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Single SQLite instance; no HA claim possible. Resilience that IS code-verifiable (crash-safe WAL persistence, exactly-once relay under injected network faults, load behavior) is tracked and tested under broker-resilience/load features instead."
+
+  - id: android6-compat
+    name: "Android 6.0 (API 23) compatibility baseline"
+    name_ja: "Android 6.0互換基盤（minSdk 23）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: NOT_RUN
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: app/build.gradle.kts
+        note: "minSdk 23 + core library desugaring + API 23 managed device lane"
+      - kind: script
+        ref: scripts/android-test/run-api23-smoke.ps1
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Managed-device lane defined; API 23 emulator execution not part of default PR lane."
+
+  - id: windows-validation
+    name: "Windows batch validation with PASS/FAIL/BLOCKED/NOT_RUN classification"
+    name_ja: "Windows一括検証（PASS/FAIL/BLOCKED/NOT_RUN分類）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: script
+        ref: scripts/validate-windows-development.ps1
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+        note: "windows-validation job"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "0-test results are treated as failure; JUnit XML presence is enforced."
+
+  - id: device-test-harness
+    name: "ADB/Mobly physical-device test harness"
+    name_ja: "実機テスト基盤（ADB・Mobly script）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_RUN
+    real_device: BLOCKED_EXTERNAL
+    field_test: BLOCKED_EXTERNAL
+    external_decisions:
+      - "Physical Android devices and approved test network"
+    evidence:
+      - kind: script
+        ref: scripts/device-test/run-device-smoke.ps1
+      - kind: test
+        ref: test-lab/mobly
+        note: "Host contract tests run in CI; device execution never performed"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Script existence does not mean device PASS."
+
+  - id: coverage-kover
+    name: "Kover coverage reporting"
+    name_ja: "Kover coverage report"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: gradle/libs.versions.toml
+        note: "kover plugin applied to JVM modules"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Visualization only; no threshold enforcement yet."
+
+  - id: build-reproducibility
+    name: "APK build reproducibility check"
+    name_ja: "Build再現性（SOURCE_DATE_EPOCH＋APK比較）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: script
+        ref: scripts/verify-build-reproducibility.ps1
+      - kind: workflow
+        ref: .github/workflows/relay-heavy-tests.yml
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Debug APK comparison only; full-artifact reproducibility unproven."
+
+  - id: dependency-security-scan
+    name: "Syft SBOM + OSV + Grype dependency scanning"
+    name_ja: "依存関係scan（Syft・OSV・Grype）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: script
+        ref: scripts/run-syft.ps1
+      - kind: script
+        ref: scripts/run-osv.ps1
+      - kind: script
+        ref: scripts/run-grype.ps1
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+        note: "deps-scan job with completeness enforcement"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "report-only in PR lane; block-high-critical in formal release."
+
+  - id: fuzz-decoders
+    name: "Jazzer decoder fuzzing (regression lane)"
+    name_ja: "Jazzer decoder fuzz（回帰lane）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: fuzz-jvm/build.gradle.kts
+      - kind: script
+        ref: scripts/run-jazzer.ps1
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Deterministic seed-corpus regression on PR; continuous fuzzing opt-in."
+
+  - id: formal-release
+    name: "Formal signed release (Android signing, Authenticode, TUF/cosign)"
+    name_ja: "正式Release（組織署名・Authenticode・TUF/cosign）"
+    area: release
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: BLOCKED_EXTERNAL
+    field_test: BLOCKED_EXTERNAL
+    external_decisions:
+      - "Organization Android signing key"
+      - "Windows Authenticode certificate and timestamp policy"
+      - "cosign/TUF key governance"
+      - "Release approval by responsible organization"
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/publish-release.yml
+      - kind: doc
+        ref: docs/runbooks/VERIFY_FORMAL_RELEASE.md
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: >-
+      The gate exists and fails closed without organization secrets. No formal release
+      has ever been produced; the workflow result is BLOCKED_EXTERNAL until keys exist.
+
+  - id: ios-preview
+    name: "iOS simulator preview build"
+    name_ja: "iOS simulatorプレビュービルド"
+    area: apple
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: EMULATOR_TESTED
+    real_device: BLOCKED_EXTERNAL
+    field_test: BLOCKED_EXTERNAL
+    external_decisions:
+      - "Apple Developer signing and iPhone hardware"
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/ios-ci.yml
+        note: "Unsigned arm64 simulator app built on macOS runner"
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: "Simulator build evidence only; no physical iPhone claim."
+
+  - id: meshtastic-adapter
+    name: "Meshtastic adapter contract boundary"
+    name_ja: "Meshtastic adapter（契約境界）"
+    area: integrations
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: BLOCKED_EXTERNAL
+    field_test: BLOCKED_EXTERNAL
+    external_decisions:
+      - "Physical Meshtastic hardware"
+    evidence:
+      - kind: test
+        ref: gateway-meshtastic-adapter/tests
+      - kind: doc
+        ref: docs/integrations/MESHTASTIC.md
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: ""
+
+  - id: bp7-export
+    name: "BPv7 export boundary"
+    name_ja: "BPv7 export境界"
+    area: integrations
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: gateway-bp7-export
+      - kind: doc
+        ref: docs/integrations/BPV7.md
+    last_verified: "2026-07-26"
+    commit: "89e7651"
+    notes: ""
+
+  - id: training-mode
+    name: "Training mode with full data separation"
+    name_ja: "訓練モード（本番データ完全分離）"
+    area: operations
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayConfig.kt
+        note: "RELAY_TRAINING_MODE moves database, rescue keys, official-info cache, legacy admin key, and BLE bridge secret under ~/.relay/training/; fail-closed init guard rejects env path overrides lacking a 'training' segment; warning code and audit target record the mode"
+      - kind: source
+        ref: broker/src/main/kotlin/com/example/relay/broker/BrokerConfig.kt
+        note: "RELAY_BROKER_TRAINING_MODE ?: RELAY_TRAINING_MODE isolates the Broker store to ./data/training/broker.db with the same fail-closed path guard"
+      - kind: test
+        ref: pc-gateway/src/test/kotlin/com/example/relay/pcgateway/GatewayConfigTrainingModeTest.kt
+        note: "8 tests: isolated defaults, production defaults unchanged, 3 fail-closed override rejections, segment matching, /api/health exposes trainingMode for the mandatory console banner; negative test: disabling the guard made the 3 rejection tests FAIL, reverted exactly"
+      - kind: test
+        ref: broker/src/test/kotlin/com/example/relay/broker/BrokerConfigTrainingModeTest.kt
+        note: "4 tests incl. production-path rejection; negative test: disabling the Broker guard made the rejection test FAIL, reverted exactly; full :pc-gateway:test and :broker:test suites green"
+    last_verified: "2026-07-26"
+    commit: "cf7a798"
+    notes: "Gateway/Broker training isolation is fail-closed and the staff console banner is driven by the server health flag. Android app training mode (device-side banner and store separation) is a documented follow-up; offline map tiles are deliberately shared (public GSI data)."
+
+  - id: official-info-provenance
+    name: "Official information provenance model (JMA XML / CAP)"
+    name_ja: "公式情報の来歴モデル（JMA XML・CAP）"
+    area: operations
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/official/OfficialInfoProvenance.kt
+        note: "Provenance record with an honest verification ceiling: unsigned JMA content is at most TRANSPORT_TLS_ONLY on live fetch, CACHED_UNVERIFIED on cache replay, UNVERIFIED when nothing is available; SHA-256 of the exact raw document"
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/official/CapAlertParser.kt
+        note: "Fail-closed OASIS CAP 1.2 and JMA Atom feed parsers over XXE-hardened XML (DOCTYPE banned, external entities/DTD/XInclude off); CAP status Exercise/Test preserved so drills are never shown as real alerts; XML-DSig only recorded as present, never claimed verified"
+      - kind: test
+        ref: pc-gateway/src/test/kotlin/com/example/relay/pcgateway/official/OfficialXmlParsersTest.kt
+        note: "13 fixture/fail-closed tests incl. 3 XXE gates that assert the DOCTYPE ban specifically; negative test: planted disallow-doctype-decl=false made all 3 XXE gates FAIL, reverted exactly, suite green"
+      - kind: test
+        ref: pc-gateway/src/test/kotlin/com/example/relay/pcgateway/OfficialInformationServiceProvenanceTest.kt
+        note: "5 provenance-state tests: live fetch, cache replay keeping original fetch time via digest-checked sidecar, tampered cache losing its fetch time, nothing available never presented as verified, throttle stability; full :pc-gateway:test suite green"
+    last_verified: "2026-07-26"
+    commit: "e7a67ad"
+    notes: "Provenance is transport-honest only: no trust anchors exist for JMA/CAP publishers, so content authenticity is never claimed; staff console renders the verification state. CAP/Atom parsers are not yet wired to a live polling source (JMA XML feed polling remains a documented future activation trigger)."
+
+  - id: dpapi-key-protection
+    name: "Windows DPAPI protection for Gateway private keys"
+    name_ja: "Windows DPAPIによるGateway秘密鍵保護"
+    area: gateway
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_RUN
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/rescue/WindowsDpapi.kt
+        note: "Direct JNA mapping of crypt32 CryptProtectData/CryptUnprotectData (per-user scope, CRYPTPROTECT_UI_FORBIDDEN); lazy native load so non-Windows platforms never touch it"
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/rescue/RescueKeyStore.kt
+        note: "RELAY_KEY_PROTECTION=dpapi wraps the key file in a DPAPI blob with one-way migration from plaintext; fail-closed both directions (dpapi mode refuses plaintext fallback, protected files refuse non-dpapi mode); owner-only permission checks still run in both modes"
+      - kind: test
+        ref: pc-gateway/src/test/kotlin/com/example/relay/pcgateway/rescue/RescueKeyStoreDpapiTest.kt
+        note: "7/7 on Windows (roundtrip with no plaintext key material on disk, migration, mode mismatch, tampered blob, wrong entropy, fail-closed guards, env parsing); negative proof: disabling both fail-closed guards made 2 tests FAIL, then reverted; Windows-only tests skip via Assume on Linux CI"
+    last_verified: "2026-07-26"
+    commit: "e057024"
+    notes: "Opt-in per-user DPAPI at-rest protection (default remains file-permissions); deliberately not claimed as HSM/TPM/KMS - the blob opens only for the same Windows user on the same machine, and machine-loss recovery requires re-provisioning."
+
+  - id: data-retention
+    name: "Retention policy engine for personal/rescue data"
+    name_ja: "個人・救助情報のretention管理"
+    area: operations
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_RUN
+    external_decisions:
+      - "Privacy/legal owner approval of retention periods"
+    evidence:
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayConfig.kt
+        note: "RELAY_RESCUE_RETENTION_DAYS (default 30, bounds 1..365) and RELAY_RETENTION_SWEEP_INTERVAL_MINUTES (default 60, bounds 5..1440); strict fail-closed parsing rejects malformed or out-of-range values at startup instead of silently defaulting"
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/Main.kt
+        note: "Startup purge plus a daemon retention sweeper enforce the policy even when no operator opens the console; only the purged count is logged"
+      - kind: test
+        ref: pc-gateway/src/test/kotlin/com/example/relay/pcgateway/GatewayRetentionPolicyTest.kt
+        note: "6 tests: pilot defaults, 0/366-day and sweep-interval rejections naming the env var, configured period drives the purge where the default keeps the record, operator list reports the configured retentionDays; negative test: disabling both init guards made 3 tests FAIL, reverted exactly, full :pc-gateway:test suite green"
+    last_verified: "2026-07-26"
+    commit: "e84fe9b"
+    notes: "The engine covers decrypted terminal rescue details (the personal-data store); message/audit stores have their own size bounds. The 30-day default is a pilot value pending privacy/legal owner approval and is now operator-configurable within approved bounds."
+
+  - id: codeql-analysis
+    name: "CodeQL static analysis (java-kotlin / js-ts / actions)"
+    name_ja: "CodeQL静的解析（java-kotlin / js-ts / actions）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: NOT_RUN
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/codeql.yml
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "Workflow linted locally (actionlint/zizmor) but not yet executed on GitHub-hosted runners."
+
+  - id: secret-scanning-gitleaks
+    name: "Secret scanning with Relay-specific gitleaks rules"
+    name_ja: "gitleaks秘密情報スキャン（Relay固有ルール）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/security-baseline.yml
+      - kind: doc
+        ref: .gitleaks.toml
+        note: "Local run: 293 commits clean; negative test with planted fake secrets detected 2 leaks (exit 1)"
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "Scan executed locally with checksum-pinned gitleaks 8.30.1; CI execution on GitHub runners pending first push."
+
+  - id: workflow-lint-zizmor
+    name: "Workflow lint and hardening audit (actionlint + zizmor)"
+    name_ja: "ワークフローlintと堅牢化監査（actionlint + zizmor）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/security-baseline.yml
+        note: "Local run: actionlint exit 0; zizmor 0 findings (30 suppressed via persist-credentials:false)"
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "All checkouts use persist-credentials:false; publish workflows demoted to contents:read with job-level write."
+
+  - id: action-sha-pinning-gate
+    name: "CI gate rejecting non-SHA-pinned GitHub Actions"
+    name_ja: "SHA固定されていないGitHub Actionsを拒否するCIゲート"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/security-baseline.yml
+        note: "Local regex gate run: 0 violations across all workflows"
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: ""
+
+  - id: dependency-review
+    name: "PR dependency review (fail on high severity, license denylist)"
+    name_ja: "PR依存関係レビュー（high以上で失敗・ライセンス拒否リスト）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: NOT_RUN
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/dependency-review.yml
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "Only runs on pull_request events; requires GitHub dependency graph."
+
+  - id: scorecard-monitoring
+    name: "OSSF Scorecard supply-chain posture monitoring"
+    name_ja: "OSSF Scorecardサプライチェーン姿勢モニタリング"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: NOT_RUN
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/scorecard.yml
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "Honestly gated to the default branch; will not produce results until merged there."
+
+  - id: dependabot-updates
+    name: "Dependabot update configuration (gradle/actions/npm/pip)"
+    name_ja: "Dependabot更新設定（gradle/actions/npm/pip）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: NOT_APPLICABLE
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: doc
+        ref: .github/dependabot.yml
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "Configuration only; GitHub activates it server-side once present on the default branch."
+
+  - id: branch-protection
+    name: "Branch protection with required security checks"
+    name_ja: "必須セキュリティチェック付きブランチ保護"
+    area: supply-chain
+    implementation: BLOCKED_EXTERNAL
+    automated_test: BLOCKED_EXTERNAL
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions:
+      - "Repository owner must apply the settings documented in docs/security/BRANCH_PROTECTION.md"
+    evidence:
+      - kind: doc
+        ref: docs/security/BRANCH_PROTECTION.md
+    last_verified: "2026-07-26"
+    commit: "869c77c"
+    notes: "CI cannot verify repository settings; remains blocked until the owner applies and confirms them."
+
+  - id: gradle-dependency-verification
+    name: "Gradle dependency verification (sha256, fail-closed)"
+    name_ja: "Gradle依存関係検証（sha256・fail-closed）"
+    area: supply-chain
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: gradle/verification-metadata.xml
+        note: "935 components / 1632 sha256 hashes; auto-activates by file presence"
+      - kind: doc
+        ref: docs/security/DEPENDENCY_VERIFICATION.md
+        note: "Local negative test: all-checksum tamper fails build (exit 1); positive build passes (exit 0)"
+    last_verified: "2026-07-26"
+    commit: "6ec906a"
+    notes: "Generated on Windows; platform-specific artifacts for ubuntu/macos CI lanes may need additions (fail-closed, documented)."
+
+  - id: release-provenance-attestation
+    name: "Build provenance attestation for formal release artifacts"
+    name_ja: "正式リリース成果物のビルド来歴attestation"
+    area: release
+    implementation: IMPLEMENTED
+    automated_test: NOT_RUN
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: workflow
+        ref: .github/workflows/publish-release.yml
+        note: "attest-build-provenance step blocks publication on failure; linted locally (actionlint/zizmor)"
+    last_verified: "2026-07-26"
+    commit: "398cc1a"
+    notes: "Real attestation requires an actual formal release run on GitHub; not executable locally."
+
+  - id: detekt-static-analysis
+    name: "detekt static analysis with Relay sensitive-logging rules"
+    name_ja: "detekt静的解析（Relay固有の機微ログ禁止ルール）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: config/detekt/detekt.yml
+        note: "ForbiddenImport android.util.Log / java.util.Random; baseline gates only new findings"
+      - kind: workflow
+        ref: .github/workflows/security-baseline.yml
+        note: "Local negative test: planted android.util.Log import detected (exit 2); positive run exit 0"
+    last_verified: "2026-07-26"
+    commit: "ac1ddc2"
+    notes: "1294 existing findings recorded as baseline debt (0 ForbiddenImport); CLI checksum-pinned, no Gradle plugin dependency added."
+
+  - id: property-based-testing
+    name: "Property-based tests for Gateway signing protocol (kotest-property)"
+    name_ja: "Gateway署名プロトコルのプロパティベーステスト（kotest-property）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: relay-protocol/src/test/kotlin/com/example/relay/gateway/protocol/GatewayIntegrityPropertyTest.kt
+        note: "6 properties (1250 randomized cases/run): round-trip, per-field tamper, unknown key, malformed signature crash-freedom, canonical boundary collisions, JSON key-order independence"
+      - kind: test
+        ref: relay-protocol/src/main/kotlin/com/example/relay/gateway/GatewayIntegrity.kt
+        note: "Mutation check: removing length prefix from CanonicalFields.add caused property failure (no false green), then reverted"
+    last_verified: "2026-07-26"
+    commit: "dd381ca"
+    notes: "kotest-property 5.9.1 pinned in verification-metadata.xml (sha256); JUnit4 + runBlocking bridge; :relay-protocol:test green under active dependency verification."
+
+  - id: mutation-testing
+    name: "PIT mutation testing gate for relay-protocol (threshold 95)"
+    name_ja: "relay-protocolのPITミューテーションテストゲート（閾値95）"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: relay-protocol/build.gradle.kts
+        note: "Fail-closed mutationThreshold 95; measured 113/114 killed (99%), 0 NO_COVERAGE; sole survivor is an equivalent mutant (NoOpGatewayMessageSigner.keyId already returns empty string)"
+      - kind: test
+        ref: relay-protocol/src/test/kotlin/com/example/relay/gateway/protocol/GatewayProtocolEdgeCaseTest.kt
+        note: "10 deterministic survivor-killing tests; negative evidence: gate failed closed at 29% and 75% before test-strength fixes"
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+        note: "mutation job runs :relay-protocol:pitest with SHA-pinned actions and uploads the PIT report artifact; job itself NOT_RUN on GitHub until pushed"
+    last_verified: "2026-07-26"
+    commit: "7909e0b"
+    notes: "PIT 1.17.4 via info.solidsoft.pitest 1.15.0, pinned in verification-metadata.xml; targetTests set explicitly because the plugin default silently skipped tests outside the targetClasses package (false NO_COVERAGE); PIT analysis drove the tamper property from 5 to all 15 canonical fields."
+
+  - id: architecture-tests
+    name: "ArchUnit architecture rules for JVM security boundaries"
+    name_ja: "JVMセキュリティ境界のArchUnitアーキテクチャルール"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: pc-gateway/src/test/kotlin/com/example/relay/pcgateway/ArchitectureTest.kt
+        note: "Six bytecode-level rules: relay-protocol purity, Broker never touches javax.crypto, Cipher confined to the rescue crypto boundary, java.util.Random/kotlin.random banned, java.sql confined to the persistence layer, module dependency direction; negative test: planting kotlin.random back into GatewayStore.createPairingCode failed noWeakRandomnessAnywhere naming the exact method, then was reverted"
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayStore.kt
+        note: "Real finding fixed: bridge pairing codes were generated with kotlin.random; now SecureRandom (same 6-digit space)"
+    last_verified: "2026-07-26"
+    commit: "c6a191d"
+    notes: "ArchUnit 1.4.1 (archunit-junit4) runs inside :pc-gateway:test whose classpath contains all JVM production modules (relay-protocol, shared-jvm, pc-gateway, broker); :pc-gateway:test --rerun-tasks 97 tests 0 failures. Android-only modules (app, composeApp) are outside this JVM import and remain covered only by their own unit tests."
+
+  - id: broker-api-contract
+    name: "Broker OpenAPI 3.1 contract with Schemathesis conformance gate"
+    name_ja: "BrokerのOpenAPI 3.1契約とSchemathesis適合ゲート"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: source
+        ref: docs/api/broker-openapi.yaml
+        note: "OpenAPI 3.1 contract for all 8 Broker endpoints written from BrokerServer.kt: every documented status code, kotlinx-accurate schemas (additionalProperties:false matches ignoreUnknownKeys=false), scoped Gateway credential + X-Gateway-Id and device capability token security schemes"
+      - kind: test
+        ref: tools/api-contract/run_schemathesis.py
+        note: "Fail-closed gate boots the real :broker:installDist output (DEVELOPMENT profile, throwaway SQLite, per-run random legacy key never logged) and runs schemathesis conformance checks; local run 745/745 test cases passed across 8/8 operations; negative test: a planted false spec claim (health status const healthy vs actual ok) failed response_schema_conformance with exit 1, then was reverted and re-run green"
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+        note: "api-contract job with SHA-pinned actions and schemathesis==4.24.3 uploads the JUnit evidence artifact; job itself NOT_RUN on GitHub until pushed; actionlint and zizmor exit 0"
+    last_verified: "2026-07-26"
+    commit: "0fca645"
+    notes: "Contract conformance checks only (not_a_server_error, status/content-type/headers/schema conformance); positive_data_acceptance and negative_data_rejection are deliberately excluded because signature-requiring endpoints legitimately answer documented 401s to generated data - positive-path coverage with real ECDSA proofs stays in the Kotlin integration tests. The ~33-route PC Gateway staff/bridge API is not yet specified and remains a follow-up."
+
+  - id: broker-resilience-load
+    name: "Broker network-fault resilience (Toxiproxy) and concurrent load gates"
+    name_ja: "Brokerのネットワーク障害耐性（Toxiproxy）と並行負荷ゲート"
+    area: verification
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
+    emulator_simulator: NOT_APPLICABLE
+    real_device: NOT_APPLICABLE
+    field_test: NOT_APPLICABLE
+    external_decisions: []
+    evidence:
+      - kind: test
+        ref: broker/src/test/kotlin/com/example/relay/broker/BrokerToxiproxyResilienceTest.kt
+        note: "Real Netty Broker (PRODUCTION profile) behind a real Toxiproxy container (ghcr.io/shopify/toxiproxy:2.12.0): 800ms latency toxic with elapsed>=700ms proof, resetPeer then retry stores exactly once, timeout-0 black-hole then retry stores exactly once; 3/3 passed locally against Docker 29.4.3; negative test: latency toxic set to 0ms failed with 'latency toxic must actually delay the response (took 47ms)', then was reverted and re-run green"
+      - kind: test
+        ref: broker/src/test/kotlin/com/example/relay/broker/BrokerConcurrentLoadTest.kt
+        note: "144 signed uploads over 16 threads with the production 30/min per-device rate limiter ACTIVE (429 = failure): 12 devices x 8 unique + 4 retry-storm devices x 12 identical racers; zero errors, exactly one 201 per contended envelope, store count 100; measured requests=144 wall=5257ms throughput=27.4req/s p50=205ms p95=3457ms; negative test: planted idempotency-key regeneration bug failed with 'exactly one racer may win Stored expected:<1> but was:<12>', then was reverted"
+      - kind: workflow
+        ref: .github/workflows/relay-ci.yml
+        note: "RELAY_REQUIRE_DOCKER='true' on the build job makes the Toxiproxy tests FAIL (never silently skip) if the runner loses Docker; locally without Docker they report skipped, never passed; actionlint and zizmor exit 0"
+    last_verified: "2026-07-26"
+    commit: "8fea315"
+    notes: "Required testcontainers 2.0.5: Docker Engine 29 rejects the pre-1.44 API negotiation of testcontainers 1.x with HTTP 400 (1.21.3 verified failing locally, 2.0.5 verified passing). Full :broker:test suite 54 tests / 0 failures. The load test is a correctness-under-load gate with a 10s p95 sanity bound, explicitly NOT a calibrated capacity or SLA benchmark; Toxiproxy tests have not yet executed on a GitHub runner."
