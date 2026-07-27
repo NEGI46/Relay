@@ -100,6 +100,14 @@ data class GatewayConfig(
     val rescueManifestFingerprint: String? = System.getenv("RELAY_RESCUE_MANIFEST_FINGERPRINT")?.trim()?.takeIf { it.isNotEmpty() },
     val rescueKeyExpiryWarningMillis: Long = (System.getenv("RELAY_RESCUE_KEY_EXPIRY_WARNING_DAYS") ?: "30")
         .toLongOrNull()?.coerceIn(1, 365)?.times(24L * 60 * 60 * 1_000) ?: 30L * 24 * 60 * 60 * 1_000,
+    /**
+     * Retention period for decrypted terminal rescue details. The 30-day default is a pilot
+     * value pending privacy/legal owner approval. Parsing is strict fail-closed: a malformed or
+     * out-of-range override stops startup instead of silently keeping personal data longer.
+     */
+    val rescueRetentionDays: Int = environmentStrictInt("RELAY_RESCUE_RETENTION_DAYS", default = 30),
+    /** Background sweep cadence so retention holds even when no operator opens the console. */
+    val retentionSweepIntervalMinutes: Int = environmentStrictInt("RELAY_RETENTION_SWEEP_INTERVAL_MINUTES", default = 60),
     /** Separate loopback-only listener used exclusively by the local Windows BLE sidecar. */
     val bleBridgeIngressHost: String = "127.0.0.1",
     val bleBridgeIngressPort: Int = (System.getenv("RELAY_BLE_BRIDGE_PORT") ?: "18081").toIntOrNull()
@@ -165,6 +173,9 @@ data class GatewayConfig(
     val brokerPollIntervalMs: Long = (System.getenv("RELAY_BROKER_POLL_INTERVAL_MS") ?: "10000")
         .toLongOrNull()?.takeIf { it in 1_000L..300_000L } ?: 10_000L,
 ) {
+    val rescueRetentionMillis: Long = rescueRetentionDays * 24L * 60 * 60 * 1_000
+    val retentionSweepIntervalMillis: Long = retentionSweepIntervalMinutes * 60_000L
+
     /** Non-sensitive diagnostics surfaced by health; never contains host paths, keys, or tokens. */
     val configurationWarnings: List<String> = buildList {
         if (trainingMode) add("training_mode_active_production_data_isolated")
@@ -238,6 +249,12 @@ data class GatewayConfig(
         if (bootstrapSecret != null) require(bootstrapSecret.length >= 16) {
             "RELAY_GATEWAY_BOOTSTRAP_SECRET must contain at least 16 characters"
         }
+        require(rescueRetentionDays in 1..365) {
+            "RELAY_RESCUE_RETENTION_DAYS must be between 1 and 365 days; refusing to run with an unapproved retention period"
+        }
+        require(retentionSweepIntervalMinutes in 5..1_440) {
+            "RELAY_RETENTION_SWEEP_INTERVAL_MINUTES must be between 5 and 1440"
+        }
         if (trainingMode) {
             // Fail closed: a training Gateway must never open production state, even when the
             // operator overrides a path via environment variables.
@@ -289,6 +306,12 @@ data class GatewayConfig(
 
 private fun environmentBoolean(name: String, default: Boolean): Boolean =
     System.getenv(name)?.trim()?.toBooleanStrictOrNull() ?: default
+
+/** Strict integer parsing: a malformed value throws instead of silently using the default. */
+private fun environmentStrictInt(name: String, default: Int): Int {
+    val raw = System.getenv(name)?.trim()?.takeIf { it.isNotEmpty() } ?: return default
+    return requireNotNull(raw.toIntOrNull()) { "$name must be an integer" }
+}
 
 private fun legacyAdminKeyMaterialConfigured(): Boolean =
     !System.getenv("RELAY_GATEWAY_ADMIN_KEY").isNullOrBlank() || defaultAdminKeyFile().isFile

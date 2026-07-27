@@ -17,6 +17,8 @@ import io.ktor.server.netty.Netty
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -85,7 +87,20 @@ fun main(args: Array<String>) {
         persistence = store.rescuePersistence(),
         onReceiptIssued = { receipt -> receiptOutboxRef?.enqueue(receipt) },
     )
-    rescueIntakeService.purgeExpiredDetails()
+    rescueIntakeService.purgeExpiredDetails(config.rescueRetentionMillis)
+    // Retention must not depend on an operator opening the console: a daemon sweep enforces the
+    // configured policy periodically. Only the purged count is ever logged.
+    Executors.newSingleThreadScheduledExecutor { task ->
+        Thread(task, "relay-retention-sweeper").apply { isDaemon = true }
+    }.scheduleWithFixedDelay(
+        {
+            runCatching { rescueIntakeService.purgeExpiredDetails(config.rescueRetentionMillis) }
+                .onSuccess { purged -> if (purged > 0) println("Retention sweep removed $purged expired terminal rescue detail(s)") }
+        },
+        config.retentionSweepIntervalMillis,
+        config.retentionSweepIntervalMillis,
+        TimeUnit.MILLISECONDS,
+    )
     val offlineMap = GsiTileCache(Path.of(config.offlineMapPath))
     val officialInformation = OfficialInformationService(Path.of(config.officialInfoCachePath))
     val rescueIngress = rescueDeliveryReady.let { ready -> if (ready) RescueDeliveryIngress(rescueIntakeService) else null }
@@ -103,6 +118,7 @@ fun main(args: Array<String>) {
         println("Operator authentication: individual local staff accounts with HttpOnly session cookies")
     }
     println("Database: ${config.dbPath}")
+    println("Rescue retention: terminal details kept ${config.rescueRetentionDays} day(s), swept every ${config.retentionSweepIntervalMinutes} minute(s) (pilot defaults pending privacy/legal approval)")
     println("Anonymous ingress: ${config.anonymousIngressEnabled}")
     println("Rescue shelter: ${config.shelterId}")
     GatewayEnrollmentAnnouncement.consoleLines(config, rescueKeys.manifest.fingerprint()).forEach(::println)

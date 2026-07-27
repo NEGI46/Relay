@@ -217,7 +217,10 @@ class RescueIntakeService(
         }
     }
 
-    /** Deletes terminal request plaintext after the v1 30-day retention period. */
+    /**
+     * Deletes terminal request plaintext once the retention period has elapsed. The default
+     * matches the GatewayConfig pilot default; runtime callers pass the configured policy.
+     */
     @Synchronized
     fun purgeExpiredDetails(retentionMillis: Long = 30L * 24 * 60 * 60 * 1_000): Int =
         persistence.transaction { deleteTerminalBefore(clock.nowEpochMillis() - retentionMillis) }

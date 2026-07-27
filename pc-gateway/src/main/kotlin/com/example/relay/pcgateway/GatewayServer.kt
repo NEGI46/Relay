@@ -200,7 +200,7 @@ fun Application.gatewayModule(
         get("/api/rescue/requests") {
             val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
             val service = rescueIntakeService ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
-            service.purgeExpiredDetails()
+            service.purgeExpiredDetails(config.rescueRetentionMillis)
             val items = service.list(latestOnly = true).mapNotNull { summary ->
                 service.detail(summary.requestId, summary.requestVersion)?.toOperatorRequest()
             }.sortedWith(
@@ -212,7 +212,13 @@ fun Application.gatewayModule(
             )
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
             access.audit(staff, null, "RESCUE_LIST_VIEW", "SUCCESS", call.remoteSource())
-            call.respond(RescueOperatorListResponse(System.currentTimeMillis(), items = items))
+            call.respond(
+                RescueOperatorListResponse(
+                    System.currentTimeMillis(),
+                    retentionDays = config.rescueRetentionDays,
+                    items = items,
+                ),
+            )
         }
         get("/api/rescue/requests/{id}") {
             val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
