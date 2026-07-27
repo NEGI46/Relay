@@ -15,9 +15,9 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `sos-rescue-request` | SOS・救助依頼の作成・更新・取消 | Android | IMPLEMENTED | AUTOMATED_TESTED | NOT_RUN | NOT_RUN | NOT_RUN | - |
 | `encrypted-storage` | Room + SQLCipher暗号化保存（Keystore保護passphrase） | Android | IMPLEMENTED | AUTOMATED_TESTED | NOT_RUN | NOT_RUN | NOT_RUN | - |
 | `location-update` | 明示同意時のみの位置更新 | Android | IMPLEMENTED | AUTOMATED_TESTED | NOT_RUN | NOT_RUN | NOT_RUN | - |
-| `continuous-gps-tracking` | 継続GPS追跡（background location） | Android | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | - |
+| `continuous-gps-tracking` | 継続GPS追跡（background location） | Android | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | BLOCKED_EXTERNAL: municipality/privacy owner approval for background location collection (Play policy: ACCESS_BACKGROUND_LOCATION requires a declared, approved use case); BLOCKED_EXTERNAL: physical Android devices and a field trial are required; background-location behavior cannot be verified on this workstation |
 | `armed-emergency-state` | ARMED / EMERGENCY背景中継状態管理 | Android | IMPLEMENTED | AUTOMATED_TESTED | NOT_RUN | NOT_RUN | NOT_RUN | - |
-| `auto-disaster-detection` | 自動災害検知（FCM・気象・Activation Manifest） | Android | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | - |
+| `auto-disaster-detection` | 自動災害検知（FCM・気象・Activation Manifest） | Android | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | BLOCKED_EXTERNAL: FCM project/credentials and a signing authority for the Activation Manifest must be provisioned by the operating municipality; BLOCKED_EXTERNAL: real devices and live JMA feed access are required to verify detection triggers end-to-end |
 | `nearby-relay` | Nearby暗号化Envelope中継（Store-Carry-Forward） | 通信・中継 | IMPLEMENTED | AUTOMATED_TESTED | NOT_RUN | BLOCKED_EXTERNAL | NOT_RUN | Two/three physical Android devices for RF multi-hop validation |
 | `nearby-connection-policy` | Nearby接続ポリシー（OPEN / TRUSTED） | 通信・中継 | IMPLEMENTED | AUTOMATED_TESTED | NOT_RUN | NOT_RUN | NOT_RUN | Allow-list distribution and update operation design |
 | `gateway-enrollment-core` | LAN Gateway登録（token検証・永続化・rotation） | 通信・中継 | IMPLEMENTED | AUTOMATED_TESTED | NOT_RUN | NOT_RUN | NOT_RUN | - |
@@ -30,7 +30,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `https-broker` | HTTPS Broker（暗号文保存・重複排除・TTL・scoped credential） | Broker | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | NOT_RUN | Production TLS/DNS/reverse proxy/WAF/hosting |
 | `broker-observability-minimal` | Broker security event記録（秘密情報なし） | Broker | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `packaged-e2e` | Packaged Broker–Gateway E2E（black-box） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
-| `broker-high-availability` | Broker高可用性・監視・災害復旧 | Broker | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | Infrastructure/SRE owner for HA, RTO/RPO, and monitoring design |
+| `broker-high-availability` | Broker高可用性・監視・災害復旧 | Broker | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | Infrastructure/SRE owner for HA, RTO/RPO, and monitoring design; BLOCKED_EXTERNAL: multi-node infrastructure, a managed database or replication target, and an on-call/monitoring stack must be provisioned before any HA work can be real; a single-workstation SQLite deployment cannot honestly claim HA |
 | `android6-compat` | Android 6.0互換基盤（minSdk 23） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | NOT_RUN | NOT_RUN | NOT_RUN | - |
 | `windows-validation` | Windows一括検証（PASS/FAIL/BLOCKED/NOT_RUN分類） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `device-test-harness` | 実機テスト基盤（ADB・Mobly script） | 検証 | IMPLEMENTED | AUTOMATED_TESTED | NOT_RUN | BLOCKED_EXTERNAL | BLOCKED_EXTERNAL | Physical Android devices and approved test network |
@@ -67,9 +67,9 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 
 - `sos-rescue-request`: JVM unit tests only; no claim about physical device behavior.
 - `encrypted-storage`: Instrumentation execution is an emulator/device lane, not part of the default PR lane.
-- `continuous-gps-tracking`: Background location, location FGS, and periodic tracking are deliberately not implemented.
+- `continuous-gps-tracking`: Background location, location FGS, and periodic tracking are deliberately not implemented. Kept NOT_IMPLEMENTED rather than partially coded: shipping unapproved background tracking would violate the privacy boundary this project documents.
 - `armed-emergency-state`: Persistent state, degrade/recovery, and communication lease covered by unit tests only.
-- `auto-disaster-detection`: Design only; no code path claims detection.
+- `auto-disaster-detection`: Design only; no code path claims detection. The Gateway-side official-information provenance pipeline (jma-xml-feed feature) is the code-verifiable part and is tracked separately.
 - `nearby-relay`: RF behavior cannot be proven without physical devices.
 - `nearby-connection-policy`: Fail-closed allow-list enforced in unit tests; distribution operations incomplete.
 - `gateway-enrollment-core`: relay-gw:1: token validation, conflicting beacon rejection, manifest pinning.
@@ -80,7 +80,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `https-broker`: Broker never decrypts rescue bodies; production infrastructure is external.
 - `broker-observability-minimal`: Coarse category logging only: auth failures, invalid proofs, rate limits.
 - `packaged-e2e`: Scheduled heavy lane; loopback processes, not real network topology.
-- `broker-high-availability`: Single SQLite instance; no HA claim possible.
+- `broker-high-availability`: Single SQLite instance; no HA claim possible. Resilience that IS code-verifiable (crash-safe WAL persistence, exactly-once relay under injected network faults, load behavior) is tracked and tested under broker-resilience/load features instead.
 - `android6-compat`: Managed-device lane defined; API 23 emulator execution not part of default PR lane.
 - `windows-validation`: 0-test results are treated as failure; JUnit XML presence is enforced.
 - `device-test-harness`: Script existence does not mean device PASS.

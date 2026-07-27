@@ -100,11 +100,13 @@ features:
     emulator_simulator: NOT_APPLICABLE
     real_device: NOT_APPLICABLE
     field_test: NOT_APPLICABLE
-    external_decisions: []
+    external_decisions:
+      - "BLOCKED_EXTERNAL: municipality/privacy owner approval for background location collection (Play policy: ACCESS_BACKGROUND_LOCATION requires a declared, approved use case)"
+      - "BLOCKED_EXTERNAL: physical Android devices and a field trial are required; background-location behavior cannot be verified on this workstation"
     evidence: []
     last_verified: "2026-07-26"
     commit: "89e7651"
-    notes: "Background location, location FGS, and periodic tracking are deliberately not implemented."
+    notes: "Background location, location FGS, and periodic tracking are deliberately not implemented. Kept NOT_IMPLEMENTED rather than partially coded: shipping unapproved background tracking would violate the privacy boundary this project documents."
 
   - id: armed-emergency-state
     name: "ARMED / EMERGENCY_ACTIVE background relay state machine"
@@ -134,14 +136,16 @@ features:
     emulator_simulator: NOT_APPLICABLE
     real_device: NOT_APPLICABLE
     field_test: NOT_APPLICABLE
-    external_decisions: []
+    external_decisions:
+      - "BLOCKED_EXTERNAL: FCM project/credentials and a signing authority for the Activation Manifest must be provisioned by the operating municipality"
+      - "BLOCKED_EXTERNAL: real devices and live JMA feed access are required to verify detection triggers end-to-end"
     evidence:
       - kind: doc
         ref: docs/DISASTER_ACTIVATION_TRIGGERS.md
         note: "Design document only"
     last_verified: "2026-07-26"
     commit: "89e7651"
-    notes: "Design only; no code path claims detection."
+    notes: "Design only; no code path claims detection. The Gateway-side official-information provenance pipeline (jma-xml-feed feature) is the code-verifiable part and is tracked separately."
 
   - id: nearby-relay
     name: "Nearby store-carry-forward relay of encrypted envelopes"
@@ -385,10 +389,11 @@ features:
     field_test: NOT_APPLICABLE
     external_decisions:
       - "Infrastructure/SRE owner for HA, RTO/RPO, and monitoring design"
+      - "BLOCKED_EXTERNAL: multi-node infrastructure, a managed database or replication target, and an on-call/monitoring stack must be provisioned before any HA work can be real; a single-workstation SQLite deployment cannot honestly claim HA"
     evidence: []
     last_verified: "2026-07-26"
     commit: "89e7651"
-    notes: "Single SQLite instance; no HA claim possible."
+    notes: "Single SQLite instance; no HA claim possible. Resilience that IS code-verifiable (crash-safe WAL persistence, exactly-once relay under injected network faults, load behavior) is tracked and tested under broker-resilience/load features instead."
 
   - id: android6-compat
     name: "Android 6.0 (API 23) compatibility baseline"

@@ -8,9 +8,9 @@ Status date: **2026-07-26** / commit `89e7651`
 
 ## 未実装・実装不能（外部判断待ち）
 
-- `continuous-gps-tracking` 継続GPS追跡（background location） — NOT_IMPLEMENTED
-- `auto-disaster-detection` 自動災害検知（FCM・気象・Activation Manifest） — NOT_IMPLEMENTED
-- `broker-high-availability` Broker高可用性・監視・災害復旧 — NOT_IMPLEMENTED（外部判断: Infrastructure/SRE owner for HA, RTO/RPO, and monitoring design）
+- `continuous-gps-tracking` 継続GPS追跡（background location） — NOT_IMPLEMENTED（外部判断: BLOCKED_EXTERNAL: municipality/privacy owner approval for background location collection (Play policy: ACCESS_BACKGROUND_LOCATION requires a declared, approved use case); BLOCKED_EXTERNAL: physical Android devices and a field trial are required; background-location behavior cannot be verified on this workstation）
+- `auto-disaster-detection` 自動災害検知（FCM・気象・Activation Manifest） — NOT_IMPLEMENTED（外部判断: BLOCKED_EXTERNAL: FCM project/credentials and a signing authority for the Activation Manifest must be provisioned by the operating municipality; BLOCKED_EXTERNAL: real devices and live JMA feed access are required to verify detection triggers end-to-end）
+- `broker-high-availability` Broker高可用性・監視・災害復旧 — NOT_IMPLEMENTED（外部判断: Infrastructure/SRE owner for HA, RTO/RPO, and monitoring design; BLOCKED_EXTERNAL: multi-node infrastructure, a managed database or replication target, and an on-call/monitoring stack must be provisioned before any HA work can be real; a single-workstation SQLite deployment cannot honestly claim HA）
 - `branch-protection` 必須セキュリティチェック付きブランチ保護 — BLOCKED_EXTERNAL（外部判断: Repository owner must apply the settings documented in docs/security/BRANCH_PROTECTION.md）
 
 ## 実装済みだが実機未検証（DEVICE_TESTEDなし）
@@ -35,11 +35,13 @@ Status date: **2026-07-26** / commit `89e7651`
 
 | ID | 機能 | 外部判断 |
 |---|---|---|
+| `continuous-gps-tracking` | 継続GPS追跡（background location） | BLOCKED_EXTERNAL: municipality/privacy owner approval for background location collection (Play policy: ACCESS_BACKGROUND_LOCATION requires a declared, approved use case); BLOCKED_EXTERNAL: physical Android devices and a field trial are required; background-location behavior cannot be verified on this workstation |
+| `auto-disaster-detection` | 自動災害検知（FCM・気象・Activation Manifest） | BLOCKED_EXTERNAL: FCM project/credentials and a signing authority for the Activation Manifest must be provisioned by the operating municipality; BLOCKED_EXTERNAL: real devices and live JMA feed access are required to verify detection triggers end-to-end |
 | `nearby-relay` | Nearby暗号化Envelope中継（Store-Carry-Forward） | Two/three physical Android devices for RF multi-hop validation |
 | `nearby-connection-policy` | Nearby接続ポリシー（OPEN / TRUSTED） | Allow-list distribution and update operation design |
 | `ble-gateway-trust-chain` | BLE Gateway信頼chain（Root→Directory→Manifest→fingerprint） | Formal regional Root and signed shelter Directory issuance by trust authority |
 | `https-broker` | HTTPS Broker（暗号文保存・重複排除・TTL・scoped credential） | Production TLS/DNS/reverse proxy/WAF/hosting |
-| `broker-high-availability` | Broker高可用性・監視・災害復旧 | Infrastructure/SRE owner for HA, RTO/RPO, and monitoring design |
+| `broker-high-availability` | Broker高可用性・監視・災害復旧 | Infrastructure/SRE owner for HA, RTO/RPO, and monitoring design; BLOCKED_EXTERNAL: multi-node infrastructure, a managed database or replication target, and an on-call/monitoring stack must be provisioned before any HA work can be real; a single-workstation SQLite deployment cannot honestly claim HA |
 | `device-test-harness` | 実機テスト基盤（ADB・Mobly script） | Physical Android devices and approved test network |
 | `formal-release` | 正式Release（組織署名・Authenticode・TUF/cosign） | Organization Android signing key; Windows Authenticode certificate and timestamp policy; cosign/TUF key governance; Release approval by responsible organization |
 | `ios-preview` | iOS simulatorプレビュービルド | Apple Developer signing and iPhone hardware |
