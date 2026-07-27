@@ -27,7 +27,7 @@ workmanager = "2.10.2"
 jazzer = "0.24.0"
 junitJupiter = "5.11.4"
 kotestProperty = "5.9.1"
-pitestPlugin = "1.15.0"
+pitestPlugin = "1.19.0"
 pitest = "1.17.4"
 archunit = "1.4.1"
 # Native access for Windows DPAPI (CryptProtectData); same version already pinned in verification metadata
