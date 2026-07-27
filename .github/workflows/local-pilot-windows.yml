@@ -1,0 +1,52 @@
+name: Local pilot Windows checks
+
+on:
+  pull_request:
+    paths:
+      - 'pc-gateway/**'
+      - 'scripts/Start-Relay-Local-Pilot.ps1'
+      - 'scripts/Stop-Relay-Local-Pilot.ps1'
+      - 'scripts/Test-Relay-Local-Pilot.ps1'
+      - 'scripts/start-pc-gateway-development.ps1'
+      - '.github/workflows/local-pilot-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pilot-contract:
+    name: PUERTA unit and PowerShell syntax
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Parse PowerShell scripts without executing them
+        shell: pwsh
+        run: |
+          $files = @(
+            'scripts/Start-Relay-Local-Pilot.ps1',
+            'scripts/Stop-Relay-Local-Pilot.ps1',
+            'scripts/Test-Relay-Local-Pilot.ps1',
+            'scripts/start-pc-gateway-development.ps1'
+          )
+          foreach ($file in $files) {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) { $errors | Format-List | Out-String | Write-Error; exit 1 }
+          }
+      - name: Run PUERTA Gateway tests
+        shell: pwsh
+        run: .\gradlew.bat :pc-gateway:test --tests com.example.relay.pcgateway.PuertaPilotTest --no-daemon
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: puerta-windows-test-results
+          path: pc-gateway/build/test-results/
+          if-no-files-found: warn

@@ -40,6 +40,7 @@
     <button class="tab active" data-panel="rescue" type="button">救助依頼 <span id="requestCount" class="count">0</span></button>
     <button class="tab" data-panel="map" type="button">地図</button>
     <button class="tab" data-panel="official" type="button">公式情報</button>
+    <button class="tab" data-panel="review" type="button">確認候補</button>
     <button class="tab" data-panel="settings" type="button">初期設定</button>
   </nav>
 
@@ -79,6 +80,13 @@
         <div id="warningDetail" class="warning-detail"></div>
         <div id="officialSources" class="source-list"></div>
       </div>
+    </section>
+
+    <section id="panel-review" class="panel">
+      <div class="wide-card settings-grid">
+        <div><p class="eyebrow">PONTE / ÉCART</p><h2>観測と要確認候補</h2><p class="fine">未確認は安否の確定を意味しません。端末観測と本人確認を区別します。</p><form id="observationForm"><label>対象トークン<input id="observationSubject" required maxlength="128"></label><label>観測種別<select id="observationType"><option>IN_PERSON_CONFIRMED</option><option>SHELTER_CHECKED_IN</option><option>VEHICLE_BOARDED</option><option>SUPPORT_NEEDED</option><option>THIRD_PARTY_REPORT</option><option>DEVICE_OBSERVED</option><option>PLACE_CONFIRMED</option></select></label><label>おおまかな場所セル<input id="observationCell" maxlength="64"></label><button class="button primary" type="submit">観測を登録</button></form></div>
+        <div><h3>CSV（訓練用）</h3><label>種類<select id="csvKind"><option value="baseline">基準対象</option><option value="observation">Observation</option><option value="profile">支援プロファイル</option></select></label><textarea id="csvText" rows="8" maxlength="262144" placeholder="UTF-8 CSVを貼り付け"></textarea><div class="action-row"><button id="csvPreview" class="button" type="button">プレビュー</button><button id="csvImport" class="button primary" type="button">管理者として取込</button></div><p id="csvResult" class="fine"></p></div>
+      </div><div class="wide-card settings-grid"><div><h3>支援プロファイル（訓練用）</h3><form id="profileForm"><label>対象トークン<input id="profileSubject" required maxlength="128"></label><label>確認期限<input id="profileDue" type="date" required></label><label><input id="profileMobility" type="checkbox"> 移動支援</label><label><input id="profilePower" type="checkbox"> 電源配慮</label><label><input id="profileChildren" type="checkbox"> 乳幼児あり</label><button class="button primary" type="submit">登録・更新</button></form><label>撤回する対象トークン<input id="revokeSubject" maxlength="128"></label><button id="revokeProfile" class="button danger-outline" type="button">プロファイルを撤回</button></div><div><h2>要確認候補</h2><div id="reviewQueue" class="request-list"></div></div></div>
     </section>
 
     <section id="panel-settings" class="panel">

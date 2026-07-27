@@ -42,6 +42,9 @@ data class RescueOperatorRequest(
     val assignedNodeId: String?,
     val statusUpdatedAtEpochMillis: Long,
     val uniqueCarrierCount: Int,
+    /** PUERTA provenance is non-identifying metadata, independent of encrypted rescue content. */
+    val sourceChannel: String? = null,
+    val ingressAssurance: String? = null,
 )
 
 @Serializable

@@ -1,6 +1,9 @@
 package com.example.relay.pcgateway.rescue
 
 import com.example.relay.pcgateway.GatewayJson
+import com.example.relay.pcgateway.RouteAttempt
+import com.example.relay.pcgateway.RouteResult
+import com.example.relay.pcgateway.RouteType
 import com.example.relay.rescue.EncryptedRescueEnvelope
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
@@ -15,6 +18,8 @@ import kotlinx.serialization.decodeFromString
 class RescueDeliveryIngress(
     private val intakeService: RescueIntakeService,
     private val maxEnvelopeBytes: Int = DEFAULT_MAX_ENVELOPE_BYTES,
+    private val routeType: RouteType? = null,
+    private val routeAttemptSink: ((RouteAttempt) -> Unit)? = null,
 ) {
     init {
         require(maxEnvelopeBytes in 1..MAX_SUPPORTED_ENVELOPE_BYTES) { "invalid rescue envelope byte cap" }
@@ -35,7 +40,15 @@ class RescueDeliveryIngress(
         } catch (_: IllegalArgumentException) {
             return RescueIngestResult.Rejected(RescueRejectionCode.MALFORMED_SERIALIZATION)
         }
-        return intakeService.ingest(envelope, carrierId, courierDeliveryId)
+        val result = intakeService.ingest(envelope, carrierId, courierDeliveryId)
+        routeType?.let { type -> routeAttemptSink?.invoke(RouteAttempt(
+            id = java.util.UUID.randomUUID().toString(), envelopeId = envelope.envelopeId, routeType = type,
+            attemptedAtEpochMillis = System.currentTimeMillis(), completedAtEpochMillis = System.currentTimeMillis(),
+            result = if (result is RescueIngestResult.Accepted || result is RescueIngestResult.Duplicate) RouteResult.RECEIPT_CONFIRMED else RouteResult.FAILED,
+            safeErrorCode = (result as? RescueIngestResult.Rejected)?.code?.name,
+            receiptId = when (result) { is RescueIngestResult.Accepted -> result.request.receipt.receipt.receiptId; is RescueIngestResult.Duplicate -> result.request.receipt.receipt.receiptId; else -> null },
+        )) }
+        return result
     }
 
     companion object {

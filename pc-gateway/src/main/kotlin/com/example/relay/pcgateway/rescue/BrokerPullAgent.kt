@@ -1,6 +1,9 @@
 package com.example.relay.pcgateway.rescue
 
 import com.example.relay.rescue.EncryptedRescueEnvelope
+import com.example.relay.pcgateway.RouteAttempt
+import com.example.relay.pcgateway.RouteResult
+import com.example.relay.pcgateway.RouteType
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.headers
@@ -42,6 +45,7 @@ class BrokerPullAgent(
     private val cursorPath: Path? = null,
     private val pollIntervalMs: Long = 10_000L,
     private val json: Json = Json { ignoreUnknownKeys = true },
+    private val routeAttemptSink: ((RouteAttempt) -> Unit)? = null,
 ) {
     init {
         require(pollIntervalMs in 1_000L..300_000L) {
@@ -108,6 +112,14 @@ class BrokerPullAgent(
                 carrierId = "broker",
                 courierDeliveryId = "broker:${envelope.envelopeId}",
             )
+            routeAttemptSink?.invoke(RouteAttempt(
+                id = java.util.UUID.randomUUID().toString(), envelopeId = envelope.envelopeId,
+                routeType = RouteType.HTTPS_BROKER, attemptedAtEpochMillis = System.currentTimeMillis(),
+                completedAtEpochMillis = System.currentTimeMillis(),
+                result = if (result is RescueIngestResult.Accepted || result is RescueIngestResult.Duplicate) RouteResult.RECEIPT_CONFIRMED else RouteResult.FAILED,
+                safeErrorCode = (result as? RescueIngestResult.Rejected)?.code?.name,
+                receiptId = when (result) { is RescueIngestResult.Accepted -> result.request.receipt.receipt.receiptId; is RescueIngestResult.Duplicate -> result.request.receipt.receipt.receiptId; else -> null },
+            ))
             when (result) {
                 is RescueIngestResult.Accepted -> ingested++
                 is RescueIngestResult.Duplicate -> { /* already have it */ }

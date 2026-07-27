@@ -36,6 +36,7 @@ import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import java.net.URI
 import java.security.MessageDigest
 import kotlinx.serialization.Serializable
 import io.ktor.server.routing.routing
@@ -80,6 +81,7 @@ private const val MAX_CONTROL_BODY_BYTES = 16L * 1024
     val rescueKeyStorage: String = "not_checked",
     val rescueKeyStatus: String = "not_checked",
     val rescueKeyExpiresAtEpochMillis: Long? = null,
+    val localPilotIngress: Boolean = false,
     val rescueKeyRotationStatus: String = "manual_reprovisioning_required",
 )
 
@@ -121,6 +123,8 @@ fun Application.gatewayModule(
 ) {
     install(ContentNegotiation) { json(GatewayJson) }
     val access = store.accessStore()
+    val puerta = store.puertaStore()
+    val pilotOperations = store.pilotOperationsStore()
     routing {
         // Avoid presenting an operator console through a reverse proxy until remote management
         // has been explicitly enabled. API endpoints enforce the same boundary independently.
@@ -159,6 +163,7 @@ fun Application.gatewayModule(
                     rescueKeyStorage = rescueKeyStatus.storage,
                     rescueKeyStatus = rescueKeyStatus.status,
                     rescueKeyExpiresAtEpochMillis = rescueKeyStatus.expiresAtEpochMillis,
+                    localPilotIngress = config.localPilotIngressEnabled && rescueDeliveryReady && rescueManifest != null,
                 ),
             )
         }
@@ -197,12 +202,56 @@ fun Application.gatewayModule(
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
             call.respond(manifest)
         }
+        // PUERTA Local is a separate general-user page, never the staff console.  Production
+        // returns 404 even if an environment variable was accidentally supplied.
+        get("/local-pilot") {
+            if (!config.localPilotIngressEnabled) return@get call.respond(HttpStatusCode.NotFound)
+            val bytes = this::class.java.classLoader.getResourceAsStream("web/local-pilot.html")?.readBytes()
+                ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
+            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            call.respondBytes(bytes, ContentType.Text.Html)
+        }
+        post("/local-pilot/api/rescue") {
+            if (!config.localPilotIngressEnabled || !rescueDeliveryReady) return@post call.respond(HttpStatusCode.NotFound)
+            // This public, unauthenticated form has no staff cookie.  When a browser sends an
+            // Origin, it must match the request host exactly; arbitrary suffixes are not safe.
+            if (!call.isSameOriginLocalPilotRequest()) {
+                return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "cross_site_request_rejected"))
+            }
+            if (!call.request.headers[HttpHeaders.ContentType]?.substringBefore(';')?.trim().equals("application/json", ignoreCase = true)) {
+                return@post call.respond(HttpStatusCode.UnsupportedMediaType, mapOf("error" to "invalid_content_type"))
+            }
+            if (!call.requireBoundedBody(MAX_CONTROL_BODY_BYTES)) return@post
+            val raw = call.receiveText()
+            if (raw.encodeToByteArray().size > MAX_CONTROL_BODY_BYTES) {
+                return@post call.respond(HttpStatusCode.PayloadTooLarge)
+            }
+            if (!anonymousLimiter.allow(call.request.local.remoteHost, 1, raw.encodeToByteArray().size)) {
+                return@post call.respond(HttpStatusCode.TooManyRequests, mapOf("error" to "local_pilot_rate_limit"))
+            }
+            val input = runCatching { GatewayJson.decodeFromString(LocalWebRescueRequest.serializer(), raw) }.getOrElse {
+                return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_submission"))
+            }
+            val manifest = rescueManifest ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            val service = rescueIntakeService ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            val result = runCatching { PilotIngress(puerta, manifest, RescueDeliveryIngress(service), pilotOperations::recordRouteAttempt).submitWeb(input) }.getOrElse {
+                return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "submission_rejected"))
+            }
+            // Do not retain an IP address or browser identity for public reports.
+            access.audit(null, result.requestId, "PUERTA_LOCAL_WEB_INTAKE", "STORED", null)
+            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            call.respond(HttpStatusCode.Created, result)
+        }
         get("/api/rescue/requests") {
             val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
             val service = rescueIntakeService ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
             service.purgeExpiredDetails(config.rescueRetentionMillis)
             val items = service.list(latestOnly = true).mapNotNull { summary ->
-                service.detail(summary.requestId, summary.requestVersion)?.toOperatorRequest()
+                service.detail(summary.requestId, summary.requestVersion)?.toOperatorRequest()?.let { request ->
+                    puerta.ingress(request.requestId).let { provenance ->
+                        request.copy(sourceChannel = provenance.sourceChannel.name, ingressAssurance = provenance.assurance.name)
+                    }
+                }
             }.sortedWith(
                 compareByDescending<com.example.relay.pcgateway.rescue.RescueOperatorRequest> {
                     it.responseStatus == com.example.relay.pcgateway.rescue.RescueResponseStatus.UNCONFIRMED &&
@@ -228,7 +277,9 @@ fun Application.gatewayModule(
             val detail = service.detail(id, version) ?: return@get call.respond(HttpStatusCode.NotFound)
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
             access.audit(staff, id, "RESCUE_VIEW", "SUCCESS", call.remoteSource())
-            call.respond(detail.toOperatorRequest())
+            val request = detail.toOperatorRequest()
+            val provenance = puerta.ingress(request.requestId)
+            call.respond(request.copy(sourceChannel = provenance.sourceChannel.name, ingressAssurance = provenance.assurance.name))
         }
         post("/api/rescue/requests/{id}/status") {
             val staff = call.requireStaff(config, access, StaffRole.OPERATOR) ?: return@post
@@ -270,6 +321,79 @@ fun Application.gatewayModule(
                     call.respond(HttpStatusCode.Conflict, RescueStatusChangeResponse(false, assignedNodeId = result.assignedNodeId, reason = "assigned_elsewhere"))
                 }
             }
+        }
+        post("/api/observations") {
+            val staff = call.requireStaff(config, access, StaffRole.OPERATOR) ?: return@post
+            if (!call.requireBoundedBody(MAX_CONTROL_BODY_BYTES)) return@post
+            val input = runCatching { call.receive<ObservationInput>() }.getOrElse { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_observation")) }
+            val assurance = when (input.observationType) { ObservationType.THIRD_PARTY_REPORT -> IngressAssurance.THIRD_PARTY_REPORTED; ObservationType.DEVICE_OBSERVED -> IngressAssurance.UNVERIFIED; else -> IngressAssurance.STAFF_CONFIRMED }
+            val observation = runCatching { pilotOperations.addObservation(input, SourceChannel.STAFF_DESK, assurance) }.getOrElse { return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "observation_rejected")) }
+            access.audit(staff, observation.observationId, "PONTE_OBSERVATION_CREATE", "SUCCESS", call.remoteSource())
+            call.respond(HttpStatusCode.Created, observation)
+        }
+        get("/api/observations") {
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
+            access.audit(staff, null, "PONTE_OBSERVATION_LIST", "SUCCESS", call.remoteSource())
+            call.respond(pilotOperations.observations())
+        }
+        post("/api/import/preview") {
+            val staff = call.requireStaff(config, access, StaffRole.OPERATOR) ?: return@post
+            if (!call.requireBoundedBody(PilotOperationsStore.MAX_CSV_BYTES.toLong() + 4096)) return@post
+            val request = runCatching { call.receive<CsvImportRequest>() }.getOrElse { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_csv_request")) }
+            val preview = runCatching { pilotOperations.previewCsv(request.kind, request.csv, true) }.getOrElse { return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "csv_rejected")) }
+            access.audit(staff, null, "PONTE_CSV_PREVIEW", "SUCCESS", call.remoteSource())
+            call.respond(preview)
+        }
+        post("/api/import") {
+            val staff = call.requireStaff(config, access, StaffRole.ADMIN) ?: return@post
+            if (!call.requireBoundedBody(PilotOperationsStore.MAX_CSV_BYTES.toLong() + 4096)) return@post
+            val request = runCatching { call.receive<CsvImportRequest>() }.getOrElse { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_csv_request")) }
+            val result = runCatching { pilotOperations.importCsv(request.copy(dryRun = false)) }.getOrElse { return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "csv_rejected")) }
+            access.audit(staff, null, "PONTE_CSV_IMPORT", if(result.rejectedRows==0) "SUCCESS" else "REJECTED", call.remoteSource())
+            call.respond(result)
+        }
+        post("/api/support-profiles") {
+            val staff = call.requireStaff(config, access, StaffRole.OPERATOR) ?: return@post
+            if (!call.requireBoundedBody(MAX_CONTROL_BODY_BYTES)) return@post
+            val input = runCatching { call.receive<SupportProfileInput>() }.getOrElse { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_profile")) }
+            runCatching { pilotOperations.saveProfile(input) }.getOrElse { return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "profile_rejected")) }
+            access.audit(staff, input.subjectToken, "ANTICIPO_PROFILE_SAVE", "SUCCESS", call.remoteSource())
+            call.respond(HttpStatusCode.NoContent)
+        }
+        get("/api/support-profiles") {
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
+            access.audit(staff, null, "ANTICIPO_PROFILE_LIST", "SUCCESS", call.remoteSource())
+            call.respond(pilotOperations.profiles())
+        }
+        post("/api/support-profiles/{subject}/revoke") {
+            val staff = call.requireStaff(config, access, StaffRole.OPERATOR) ?: return@post
+            val subject = call.parameters["subject"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+            runCatching { pilotOperations.revokeProfile(subject) }.getOrElse { return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "profile_rejected")) }
+            access.audit(staff, subject, "ANTICIPO_PROFILE_REVOKE", "SUCCESS", call.remoteSource())
+            call.respond(HttpStatusCode.NoContent)
+        }
+        get("/api/review-queue") {
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
+            access.audit(staff, null, "ECART_QUEUE_VIEW", "SUCCESS", call.remoteSource())
+            call.respond(pilotOperations.reviewQueue())
+        }
+        post("/api/review-queue/{subject}") {
+            val staff = call.requireStaff(config, access, StaffRole.OPERATOR) ?: return@post
+            if (!call.requireBoundedBody(MAX_CONTROL_BODY_BYTES)) return@post
+            val subject = call.parameters["subject"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val input = runCatching { call.receive<ReviewOverrideInput>() }.getOrElse { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_override")) }
+            if (input.subjectToken != subject) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "subject_mismatch"))
+            runCatching { pilotOperations.saveOverride(input) }.getOrElse { return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "override_rejected")) }
+            access.audit(staff, subject, "ECART_MANUAL_OVERRIDE", "SUCCESS", call.remoteSource())
+            call.respond(HttpStatusCode.NoContent)
+        }
+        get("/api/rescue/requests/{id}/routes") {
+            val staff = call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
+            val id = call.parameters["id"] ?: return@get call.respond(HttpStatusCode.BadRequest)
+            val service = rescueIntakeService ?: return@get call.respond(HttpStatusCode.ServiceUnavailable)
+            val request = service.detail(id) ?: return@get call.respond(HttpStatusCode.NotFound)
+            access.audit(staff, id, "MOSAIK_ROUTE_VIEW", "SUCCESS", call.remoteSource())
+            call.respond(pilotOperations.routeAttempts(request.envelope.envelopeId))
         }
         get("/api/map/status") {
             call.requireStaff(config, access, StaffRole.VIEWER) ?: return@get
@@ -433,7 +557,7 @@ fun Application.gatewayModule(
             if (!anonymousLimiter.allow(source, 1, raw.encodeToByteArray().size)) {
                 return@post call.respond(HttpStatusCode.TooManyRequests, mapOf("error" to "anonymous_rate_limit"))
             }
-            val ingress = RescueDeliveryIngress(service)
+            val ingress = RescueDeliveryIngress(service, routeType = RouteType.LAN_GATEWAY, routeAttemptSink = pilotOperations::recordRouteAttempt)
             when (val result = ingress.ingest(
                 GatewayJson.encodeToString(EncryptedRescueEnvelope.serializer(), request.envelope).encodeToByteArray(),
                 request.carrierId,
@@ -723,6 +847,21 @@ private suspend fun ApplicationCall.requireBoundedBody(maxBytes: Long): Boolean 
         return false
     }
     return true
+}
+
+/**
+ * Local pilot reports have no authenticated browser state.  Reject a browser-originated request
+ * unless the serialized Origin exactly matches the Host that received it; this permits an
+ * explicitly selected development/LAN host without accepting suffix tricks such as evil:8080.
+ */
+private fun ApplicationCall.isSameOriginLocalPilotRequest(): Boolean {
+    val origin = request.headers[HttpHeaders.Origin] ?: return true
+    val host = request.headers[HttpHeaders.Host] ?: return false
+    val parsed = runCatching { URI(origin) }.getOrNull() ?: return false
+    return parsed.scheme in setOf("http", "https") &&
+        parsed.userInfo == null && parsed.query == null && parsed.fragment == null &&
+        (parsed.path.isNullOrEmpty() || parsed.path == "/") &&
+        parsed.rawAuthority?.equals(host, ignoreCase = true) == true
 }
 
 private fun validate(
