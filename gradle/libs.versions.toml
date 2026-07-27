@@ -2,11 +2,11 @@
 agp = "8.13.2"
 kotlin = "2.3.20"
 ksp = "2.3.10"
-composeBom = "2025.08.01"
-activityCompose = "1.11.0"
-lifecycle = "2.9.3"
-navigation = "2.9.3"
-room = "2.8.0"
+composeBom = "2026.06.01"
+activityCompose = "1.13.0"
+lifecycle = "2.11.0"
+navigation = "2.9.8"
+room = "2.8.4"
 coroutines = "1.10.2"
 serialization = "1.9.0"
 nearby = "19.3.0"
@@ -19,11 +19,11 @@ netty = "4.2.15.Final"
 sqlite = "3.50.3.0"
 composeMultiplatform = "1.11.1"
 sqlcipher = "4.15.0"
-androidxSqlite = "2.6.2"
+androidxSqlite = "2.7.0"
 maplibreCompose = "0.13.1"
 zxing = "3.5.4"
-camerax = "1.4.2"
-workmanager = "2.10.2"
+camerax = "1.6.1"
+workmanager = "2.11.2"
 jazzer = "0.24.0"
 junitJupiter = "5.11.4"
 kotestProperty = "5.9.1"
@@ -39,7 +39,7 @@ desugarJdkLibs = "2.1.5"
 kover = "0.9.1"
 
 [libraries]
-androidx-core-ktx = { module = "androidx.core:core-ktx", version = "1.17.0" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version = "1.19.0" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-lifecycle-runtime = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
