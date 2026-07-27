@@ -4,8 +4,6 @@
 
 # Relay
 
-ローカル実証版では、Relayアプリ未導入者向けのブラウザ受付、staff consoleでの受付出所・信頼度の確認、職員によるObservation登録、訓練用CSVインポート、要確認候補キュー、限定的な経路履歴を検証できます。個人開発・避難訓練用であり、119の代替、自治体・消防接続済み、実災害での救助を保証するものではありません。
-
 ### 通信が途切れても、暗号化した救助情報を次の端末・救助拠点へ。
 
 **Android・Nearby・PC Gateway・HTTPS Brokerを組み合わせた、災害時向けローカル優先中継システムです。**
@@ -15,13 +13,13 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.20-7F52FF?logo=kotlin&logoColor=white)](#開発環境)
 [![Status](https://img.shields.io/badge/status-device%20testing%20required-F59E0B)](#現在の状態)
 
-[概要](#relayとは) ・ [現在の状態](#現在の状態) ・ [仕組み](#仕組み) ・ [開発版](#開発版を試す) ・ [検証](#検証) ・ [未完了](#共同実証正式運用までの主な不足) ・ [ドキュメント](#主要ドキュメント)
+[概要](#relayとは) ・ [現在の状態](#現在の状態) ・ [仕組み](#仕組み) ・ [ローカル実証](#ローカル実証機能) ・ [開発版](#開発版を試す) ・ [検証](#検証) ・ [未完了](#共同実証正式運用までの主な不足) ・ [ドキュメント](#主要ドキュメント)
 
 </div>
 
 > [!CAUTION]
 > **Relayは119、消防・警察・自治体の公式な緊急連絡手段を置き換えません。**
-> 現在は、限定区域での訓練・共同実証・技術検証に向けたコード基盤です。端末保存、中継、Broker保管、Gateway受信、署名Receiptは、救助隊の出動や人命救助の完了を保証しません。
+> 現在は、個人開発、避難訓練、限定区域での共同実証、技術検証に向けたコード基盤です。端末保存、中継、Broker保管、Gateway受信、署名Receipt、ブラウザ受付は、救助隊の出動や人命救助の完了を保証しません。
 
 ---
 
@@ -35,6 +33,7 @@ Relayは、携帯回線やインターネットが不安定な状況でも、救
 | **中継端末** | 本文を復号せず、暗号化Envelopeと署名ReceiptをStore–Carry–Forward |
 | **PCスタッフ** | 個人アカウントでログインし、受信・担当・対応・完了を管理 |
 | **HTTPS Broker** | 暗号文、公開Shelter Manifest、署名Receiptを一時中継。救助本文は復号しない |
+| **訓練参加者** | Relayアプリ未導入でも、明示的に有効化されたローカル実証ページから依頼を登録 |
 
 ### 想定する通信経路
 
@@ -44,7 +43,9 @@ flowchart LR
     E --> N[Nearby<br/>端末間中継]
     E --> L[承認済み<br/>LAN Gateway]
     E --> B[任意の<br/>HTTPS Broker]
-    N --> G[PC Gateway]
+    W[訓練用<br/>ブラウザ受付] --> P[PC内で検証・暗号化]
+    P --> G[PC Gateway]
+    N --> G
     L --> G
     B --> G
     G --> R[署名Receipt]
@@ -55,20 +56,21 @@ flowchart LR
 - **オフライン:** Nearbyで周囲の端末へ暗号文を中継
 - **同一LAN:** 承認済みPC Gatewayへ直接配送
 - **モバイル回線:** HTTPS Brokerへ預け、PC Gatewayがoutboundで取得
+- **ローカル実証:** ブラウザ入力を既存の救助Envelopeへ変換し、PC Gateway内の通常取込経路へ投入
 - **確認:** 救助拠点が署名したReceiptだけを、受信済み・対応中・完了の根拠に使用
 
 ---
 
 ## 現在の状態
 
-**実装確認基準: 2026-07-25 / source baseline `9e7119c`**  
+**実装確認基準: 2026-07-26 / source baseline `741d09d`**  
 このREADME更新コミットは文書のみを変更します。
 
 | 記号 | 意味 |
 |---|---|
 | ✅ | 実装済み |
 | 🧪 | 自動試験・シミュレータなどの検証あり |
-| 🧩 | 基盤はあるが、製品統合または実機検証が未完了 |
+| 🧩 | 基盤はあるが、最新実行確認または実機検証が未完了 |
 | ⚠️ | 外部準備・正式鍵・現地検証が必要 |
 | ⛔ | 未実装、または正式運用を主張できない |
 
@@ -90,37 +92,53 @@ flowchart LR
 | Nearby救助中継 | ✅ | 暗号化Envelopeと署名ReceiptをStore–Carry–Forward。受信端末も再配送を開始 |
 | Nearby接続ポリシー | 🧩 | `OPEN` / `TRUSTED`を実装。明示connectを含めallow-listをfail-closedで強制。安全な配布・更新運用は未完成 |
 | LAN Gateway登録 | 🧪 | `relay-gw:1:` tokenの検証・永続化・明示rotation・矛盾beacon拒否・manifest pinningを実装 |
-| 登録確認フロー | 🧪 | scanまたは貼付内容を即登録せず、fingerprint確認後に保存。競合時は明示rotationが必要 |
-| 登録画面 | 🧩 | controllerとsecurity testは実装済み。カメラscanを含む完成したCompose画面は未実装 |
+| Gateway登録画面 | 🧪 | Compose画面、CameraX QR scan、貼付入力、fingerprint確認、競合時の二段階rotation、削除確認を実装 |
+| カメラ権限拒否 | 🧪 | QRを強制せず、貼付入力へ安全にfallback。読み取り内容を即登録しない |
 | Broker Manifest登録 | 🧪 | `debug` / `localDev`限定。LAN未接続端末がBrokerから公開鍵を取得するloop testあり |
 | BLE Gateway信頼 | ⚠️ | Root → signed Directory → signed Manifest → advertised/GATT fingerprint。正式な地域Root/Directoryは未提供 |
+
+### ローカル実証
+
+| 領域 | 状態 | 現在の境界 |
+|---|---:|---|
+| ブラウザ受付（PUERTA） | 🧪 | 訓練用ページから入力し、既存の`RescueDeliveryIngress` / `RescueIntakeService`を通して暗号化保存 |
+| 受付出所 | 🧪 | `LOCAL_WEB`、assurance、時刻など最小metadataだけを暗号本文外へ保存。名前・住所・IP・本文は保存しない |
+| Observation / CSV（PONTE） | 🧪 | 職員Observation、訓練用CSV preview・一括import、opaque subject tokenを実装 |
+| 要確認キュー（ÉCART） | 🧪 | 未確認・情報不足・確認優先度をルール化。行方不明、負傷、死亡、出動を自動判定しない |
+| 支援profile（ANTICIPO Lite） | 🧪 | 移動・電源など限定flagだけを扱い、診断、薬、住所、公的番号などを除外 |
+| 経路履歴（MOSAIK） | 🧪 | Local Web、LAN、Nearby/BLE、Broker、Receiptの各段階を区別。暗号文と個人情報は履歴へ出さない |
+| 本番profile | ✅ | ローカル実証ページとAPIは常に404。環境変数だけでは有効化できない |
+| LAN公開 | ⚠️ | 既定はloopback。`-AllowLan`による明示操作と、訓練LAN・Firewallの手動制限が必要 |
 
 ### PC Gateway・Broker
 
 | 領域 | 状態 | 現在の境界 |
 |---|---:|---|
 | PC Gateway | ✅ | 個人staffアカウント、役割、監査、地図、公式情報、救助状態管理、署名Receipt |
-| SQLite競合対策 | ✅ | DB単位のwrite coordinatorとlock fileでwriter競合を抑制 |
+| SQLite競合・migration | ✅ | journal設定をmigration前に行い、DB write coordinatorとlock fileを使用。migration失敗時は起動停止し、DBを作り直さない |
 | CSV export | ✅ | messages/audit共通encoderでformula injectionを防止 |
 | HTTPS Broker | ✅ | 暗号文保存、重複排除、TTL、scoped credential、Manifest・Receipt中継 |
 | Broker observability | 🧪 | 認証失敗・無効proof・rate limitなどを秘密情報なしの粗いcategoryだけで記録 |
-| Packaged Broker–Gateway E2E | 🧪 | 実BrokerとGatewayをloopbackで起動するblack-box testを追加 |
 | Broker高可用性 | ⛔ | 単一SQLite instance。HA、監視、災害復旧、RTO/RPOは未設計 |
 
 ### 検証・配布
 
 | 領域 | 状態 | 現在の境界 |
 |---|---:|---|
-| Android 6.0互換基盤 | 🧩 | minSdk 23、core library desugaring、API 23 Managed Device laneあり。実行環境と実端末確認は未完了 |
-| Windows一括検証 | 🧪 | protocol、unit test、lint、instrumentation、PlaywrightなどをPASS / FAIL / BLOCKED / NOT_RUNで分類 |
-| 実機テスト基盤 | 🧩 | ADB/Mobly用script、reboot、Bluetooth、Doze、permission、battery収集を追加。実端末では未実行 |
-| Coverage | 🧪 | Kover reportを追加。現時点では可視化のみで閾値強制なし |
-| Build再現性 | 🧩 | `SOURCE_DATE_EPOCH`対応とAPK比較scriptあり。全artifactの再現可能性は未証明 |
+| Windows一括検証 | 🧪 | JUnit XMLの時刻・件数・failureを検査し、0件・古い結果・BLOCKEDをPASSへ誤分類しない |
+| Android 6.0検証 | 🧩 | minSdk 23、desugaring、classic API 23 AVD scriptあり。system imageと実端末確認は未完了 |
+| API 36検証 | 🧩 | Gradle Managed Device laneあり。最新HEADでの実行確認は未実施 |
+| 実機テスト基盤 | 🧩 | ADB端末を動的検出し、reboot、Bluetooth、Doze、permission、package replacement、battery、multi-hopを検証可能。実端末PASSは未確認 |
+| Packaged E2E | 🧩 | BrokerとGatewayを別OS process・random port・一時DBで起動するblack-box harnessあり。最新PASSは未確認 |
+| Heavy CI | 🧩 | Packaged E2EとAPK再現性を月・木および手動で実行するworkflowあり。最新runは未確認 |
+| Coverage | 🧪 | Kover reportあり。現時点では可視化のみで閾値強制なし |
+| Build再現性 | 🧩 | stale APK除外、Gradle exit code、ZIP entry SHA-256、metadata差異を検査。全artifactの再現可能性は未証明 |
+| Repository hygiene | ✅ | 生成APK、EXE、MSIX、distribution、`bin` / `obj`など560件超を追跡対象から削除し、CIまたはlocal buildで再生成 |
 | 正式Release | ⛔ | 組織署名、Authenticode、正式TLS、地域trust artifact、法務・運用承認が必要 |
 
 > [!IMPORTANT]
-> **IMPLEMENTED、AUTOMATED_TESTED、DEVICE_TESTED、FIELD_READYは同じ意味ではありません。**
-> 自動試験の成功は、実端末、電波環境、停電、回線混雑、避難所運用の検証を意味しません。
+> **IMPLEMENTED、AUTOMATED_TESTED、EMULATOR_TESTED、DEVICE_TESTED、FIELD_READYは同じ意味ではありません。**
+> 自動試験や検証scriptの存在は、実端末、電波環境、停電、回線混雑、避難所運用の検証を意味しません。
 
 ---
 
@@ -193,7 +211,41 @@ PC Gateway → Brokerからpull・復号・署名Receiptを返送
 | `CANCELLED` | 取り消し済みです | 取消を確認 |
 | `SHELTER_REJECTED` | 確認が必要です | 救助拠点側で確認が必要 |
 
-Nearby転送完了、peer ACK、HTTP 2xx、`BROKER_STORED`だけでは、救助拠点の受信や救助開始を意味しません。
+Nearby転送完了、peer ACK、HTTP 2xx、`BROKER_STORED`、ブラウザ受付完了だけでは、救助拠点の受領や救助開始を意味しません。
+
+---
+
+## ローカル実証機能
+
+ローカル実証機能は、Relayアプリ未導入者を含む避難訓練で、受付・観察・確認作業を検証するための機能群です。
+
+### PUERTA Local — ブラウザ受付
+
+- staff consoleとは別の一般参加者向けページです。
+- 入力を既存の`RescuePayload`へ変換し、救助拠点公開鍵で暗号化します。
+- 救助recordをSQLiteへ直接INSERTせず、既存のTTL・重複排除・durable-before-receipt境界を再利用します。
+- 成功画面が示すのは「このPCへ保存した」ことだけです。staff受領、出動、救助開始は意味しません。
+- production profileではページとAPIを常に404にします。
+
+### PONTE — Observationと訓練CSV
+
+- `OPERATOR`がObservationを登録し、`VIEWER`は最小metadataだけを参照できます。
+- subject tokenには名前ではなく、不透明な識別子を使用します。
+- UTF-8 / BOM付きUTF-8、最大256 KiB、最大5,000行のCSVをpreviewしてからimportします。
+- 1行でも不正な場合は全件を変更しません。
+- CSVが高いassuranceを主張しても、import結果は`CSV_IMPORT / UNVERIFIED`として保存します。
+
+### ÉCART / ANTICIPO Lite — 要確認と支援flag
+
+- ÉCARTは「未確認」「情報不足」「要確認候補」「確認優先度」を表示します。
+- 人が行方不明、負傷、死亡したとは判定せず、出動判断も行いません。
+- ANTICIPO Liteは移動支援、電源支援、子どもの同伴など限定的なflagだけを扱います。
+- 診断、薬、住所、国民識別番号、保険、家族詳細は保存対象外です。
+- 期限切れ・取消済みprofileを現在の事実として表示しません。
+
+### MOSAIK — 経路履歴
+
+接続、API受付、payload転送、peer ACK、Broker保管、Gateway保存、署名Receiptを別の段階として記録します。transport成功とGateway受領を混同せず、暗号文や個人情報をUI/API履歴へ出しません。
 
 ---
 
@@ -222,9 +274,21 @@ Nearby転送完了、peer ACK、HTTP 2xx、`BROKER_STORED`だけでは、救助�
 </details>
 
 <details>
+<summary><strong>ローカル実証</strong></summary>
+
+- productionでは常に無効です。
+- browserが`Origin`を送る場合はsame-Originを要求します。
+- JSON、body size、enum、payload、有効期限を検査し、既存のanonymous rate limiterを使用します。
+- `LOCAL_WEB` metadataにはrequest ID、source、assurance、時刻だけを保存します。
+- 名前、住所、GPS、本文、暗号文、browser identity、token、IP addressをprovenance tableへ保存しません。
+- migration失敗時は起動を停止し、既存DBの削除や破壊的再作成を行いません。
+
+</details>
+
+<details>
 <summary><strong>PC GatewayとBroker</strong></summary>
 
-PC Gatewayのproduction profileは、既定でloopback bind、anonymous ingress無効、UDP discovery無効、remote management無効、legacy admin key拒否です。
+PC Gatewayはすべてのprofileでloopback bindを既定とし、LAN公開は明示操作に限定します。
 
 - staff accountは`ADMIN` / `OPERATOR` / `VIEWER`へ分離
 - passwordはPBKDF2-HMAC-SHA-256
@@ -241,9 +305,47 @@ PC Gatewayのproduction profileは、既定でloopback bind、anonymous ingress�
 ## 開発版を試す
 
 > [!WARNING]
-> 以下は**個人開発・動作確認専用**です。debug/localDev APK、unsigned Windows installer、無料tunnelを共同実証の正式配布物や緊急運用へ使わないでください。
+> 以下は**個人開発・避難訓練・動作確認専用**です。debug/localDev APK、unsigned Windows installer、無料tunnel、ローカル実証ページを正式配布物や緊急運用へ使わないでください。
 
-### 最短: モバイル通信経路
+### ローカル実証を起動する
+
+```powershell
+.\scripts\Start-Relay-Local-Pilot.ps1
+```
+
+起動後に次を開きます。
+
+```text
+http://127.0.0.1:8080/local-pilot
+```
+
+staff console:
+
+```text
+http://127.0.0.1:8080/
+```
+
+契約確認:
+
+```powershell
+.\scripts\Test-Relay-Local-Pilot.ps1
+```
+
+停止:
+
+```powershell
+.\scripts\Stop-Relay-Local-Pilot.ps1
+```
+
+LAN内の訓練端末から接続する場合だけ、明示的に次を使用します。
+
+```powershell
+.\scripts\Start-Relay-Local-Pilot.ps1 -AllowLan
+```
+
+RelayはWindows Firewallを自動変更しません。訓練LANを限定し、終了後は必ず停止してください。
+
+### モバイル通信経路を試す
 
 必要なもの:
 
@@ -251,15 +353,6 @@ PC Gatewayのproduction profileは、既定でloopback bind、anonymous ingress�
 - 無料ngrokアカウントとauthtoken
 - development previewのAndroid APK
 - Windows previewのinstaller、Broker tunnel launcher、`relay-broker-bundle.zip`
-
-手順:
-
-1. Windows previewをインストールします。
-2. Androidへdevelopment preview APKをインストールします。
-3. launcherと`relay-broker-bundle.zip`を同じfolderへ置きます。
-4. `Start-Relay-Broker-Tunnel-Development.cmd`を実行します。
-5. localhost staff consoleへログインします。
-6. GatewayがManifestをpublishすると、AndroidはLANなしで受信先公開鍵を取得できます。
 
 ```powershell
 Start-Relay-Broker-Tunnel-Development.cmd
@@ -287,6 +380,7 @@ Start-Relay-Broker-Tunnel-Development.cmd -Down
 - 初回に管理者ユーザー名と12文字以上のpasswordを入力
 - dataは`%LOCALAPPDATA%\Relay\development`へ隔離
 - staff console: `http://127.0.0.1:8080/`
+- 既定bindはloopback。LAN公開は明示設定が必要
 
 ### Sourceからbuildする
 
@@ -330,6 +424,8 @@ Broker endpointを埋め込む場合:
 
 endpointはHTTPS・host必須・embedded credential禁止です。空の場合はBroker配送を無効化します。
 
+生成APK、EXE、MSIX、distribution packageはリポジトリへcommitせず、CIまたはlocal buildで作成します。
+
 ---
 
 ## 検証
@@ -358,36 +454,52 @@ artifacts/windows-validation-report.json
 .\scripts\validate-windows-development.ps1 -Only relay-protocol-test,pc-gateway-test,broker-test
 ```
 
-### 2026-07-25の実装監査記録
+validationは次を防止します。
+
+- Gradle成功だがtestが0件
+- 古いJUnit XMLの再利用
+- failure / errorの見落とし
+- stale APKの再利用
+- `BLOCKED`やmock-only結果のPASS扱い
+- processが生存しただけのreboot / Doze成功扱い
+
+### 記録済みの検証境界
+
+2026-07-25のfalse-green監査では、次を記録しています。
 
 | Check | 記録 |
 |---|---|
-| shared JVM test | PASS |
-| relay protocol test | PASS |
-| Android unit test | PASS |
-| PC Gateway test | PASS |
-| Broker test | PASS |
-| Packaged Broker–Gateway E2E | PASS |
-| Kover report | PASS、閾値強制なし |
-| Android lint | BLOCKED、実行環境不足 |
-| API 23 / API 36 instrumentation | BLOCKED、system image未導入 |
-| Playwright | BLOCKED、Chromium未導入 |
-| 実Android端末 | `BLOCKED_NO_DEVICE` |
+| shared JVM | 88 tests / PASS |
+| relay protocol | 45 tests / PASS |
+| Android unit | 194+ tests / PASS |
+| API 23 AVD | BLOCKED、system image未導入 |
+| API 36 Managed Device | NOT_RUN |
+| Playwright | NOT_RUN |
+| Packaged E2E | NOT_RUN |
+| APK再現性 | NOT_RUN |
+| 実Android端末 | BLOCKED |
 
-これは監査時点の記録です。このREADME更新では、最新HEADの全workflowを再実行してgreenを確認したとは主張しません。
+ローカル実証向けには、PowerShell構文確認と`PuertaPilotTest`をWindowsで実行するworkflowが追加されています。このREADME更新では、最新HEADの全workflowがgreenであることを独自に再実行・確認したとは主張しません。
 
 ### 主な手動コマンド
 
-Android unit / protocol / Gateway / Broker:
+JVM / Android unit / Gateway / Broker:
 
 ```powershell
 .\gradlew.bat :shared:jvmTest :relay-protocol:test :app:testDebugUnitTest :pc-gateway:test :broker:test
 ```
 
-API 23 / API 36 Managed Device:
+API 23 classic AVD:
 
 ```powershell
-.\gradlew.bat :app:mediumPhoneApi23DebugAndroidTest
+.\scripts\android-test\run-api23-smoke.ps1
+```
+
+API 23はGradle Managed Devicesの対応範囲外であるため、`sdkmanager`、`avdmanager`、`emulator`を使います。成功してもAndroid 6実機検証とはみなしません。
+
+API 36 Managed Device:
+
+```powershell
 .\gradlew.bat :app:mediumPhoneApi36DebugAndroidTest
 ```
 
@@ -411,16 +523,16 @@ APK再現性確認:
 `scripts/device-test/`には、次の検証基盤があります。
 
 - install・launch・no-crash smoke test
-- reboot後のARMED状態確認
-- Bluetooth OFF / ON recovery
+- reboot後の保存状態確認
+- Bluetooth OFF / ONと`DEGRADED`・lease重複確認
 - permission denial時のdegraded動作
-- Doze mode
+- Doze中の状態保持とNearby非起動確認
 - package replacement
 - Nearby multi-hop
 - battery / thermal evidence収集
-- Mobly orchestrator
+- ADB端末を動的検出するMobly orchestrator
 
-scriptが存在することは、実端末でPASSしたことを意味しません。
+端末数に応じて1台、2台、3台のroleを割り当て、mock-onlyとreal-device結果を区別します。scriptが存在することは、実端末でPASSしたことを意味しません。
 
 ---
 
@@ -429,18 +541,20 @@ scriptが存在することは、実端末でPASSしたことを意味しませ�
 1. Android 2台・3台によるNearby多段中継の実機確認
 2. reboot、Bluetooth復元、Doze、OEM省電力、force-stopの代表端末検証
 3. ARMED / EMERGENCY_ACTIVEのbattery・thermal測定
-4. カメラscanを含むGateway登録画面と実LAN検証
-5. 正式なRegional Root bundleとRoot署名済みShelter Directory
-6. Gatewayの正式recipient key・receipt-signing keyとfingerprint確認
-7. Android組織署名、Windows Authenticode、artifact provenance
-8. TLS、DNS、reverse proxy、firewall、WAF、hosting、monitoring
-9. Broker HA、backup、alert、RTO/RPO、障害訓練
-10. 個人情報の保存期間、閲覧、削除、漏えい対応
-11. 自治体・消防・避難所による責任分界、運用時間、停止条件、連絡計画
-12. 法務、保険、通信制度、OSS notice、プロジェクトlicense
-13. 実スタッフと実networkによるField acceptance test
+4. API 23 AVDとAndroid 6実端末での互換性確認
+5. Gateway登録QR cameraと実LANの端末検証
+6. ローカル実証の参加者導線、誤入力、同意、訓練LAN、Firewall、staff運用の現地確認
+7. ローカル実証dataの保存期間、削除、privacy、鍵管理、責任分界の承認
+8. 正式なRegional Root bundleとRoot署名済みShelter Directory
+9. Gatewayの正式recipient key・receipt-signing keyとfingerprint確認
+10. Android組織署名、Windows Authenticode、artifact provenance
+11. TLS、DNS、reverse proxy、firewall、WAF、hosting、monitoring
+12. Broker HA、backup、alert、RTO/RPO、障害訓練
+13. 自治体・消防・避難所による運用時間、停止条件、連絡計画
+14. 法務、保険、通信制度、OSS notice、プロジェクトlicense
+15. 実スタッフと実networkによるField acceptance test
 
-**現在の総合判断:** `READY_FOR_DEVICE_TEST_WITH_TRUST_ARTIFACT_BLOCKER`
+**現在の総合判断:** 自動試験とローカル実証基盤は進んでいますが、`DEVICE_TESTED`、`FIELD_READY`、`PILOT_READY`、`PRODUCTION_READY`ではありません。
 
 ---
 
@@ -450,7 +564,7 @@ scriptが存在することは、実端末でPASSしたことを意味しませ�
 app/                         Androidアプリ
 shared/                      共通model・暗号・trust contract
 relay-protocol/              Gateway wire protocol
-pc-gateway/                  救助拠点PC Gateway
+pc-gateway/                  救助拠点PC Gateway・ローカル実証機能
 broker/                      HTTPS暗号文・Manifest・Receipt Broker
 deployment/broker/           Docker Compose + Caddy構成
 composeApp/                  Compose Multiplatform preview
@@ -460,39 +574,49 @@ staff-console-e2e/           Playwright browser E2E
 gateway-meshtastic-adapter/  Meshtastic adapter
 gateway-bp7-export/          BPv7 export boundary
 test-lab/                    host・fault・simulator test
-scripts/device-test/         ADB・Mobly実機検証script
+scripts/android-test/        API 23 classic AVD検証
+scripts/device-test/         ADB・Mobly実機検証
 scripts/                     build・起動・検証・release tool
 docs/                        architecture・audit・runbook
+examples/                    訓練用CSV sample
 ```
 
 ---
 
 ## 主要ドキュメント
 
-| 目的 | ドキュメント |
-|---|---|
-| 最新のWindows実装監査 | [Windows implementation audit](docs/audits/WINDOWS_IMPLEMENTATION_AUDIT_2026-07.md) |
-| Windowsで次に行う作業 | [Windows next-work audit](docs/audits/WINDOWS_NEXT_WORK_AUDIT_2026-07.md) |
-| リポジトリ容量監査 | [Repository size audit](docs/audits/REPOSITORY_SIZE_AUDIT_2026-07.md) |
-| 総合debug監査 | [Full debug audit](docs/audits/FULL_DEBUG_AUDIT_2026-07-24.md) |
-| 背景中継 | [Background relay mode](docs/BACKGROUND_RELAY_MODE.md) |
-| 背景中継テスト計画 | [Background relay test plan](docs/BACKGROUND_RELAY_TEST_PLAN.md) |
-| 自動災害trigger設計 | [Disaster activation triggers](docs/DISASTER_ACTIVATION_TRIGGERS.md) |
-| バッテリー検証 | [Battery validation](docs/BATTERY_VALIDATION.md) |
-| Nearby実装 | [Nearby implementation](docs/NEARBY_IMPLEMENTATION.md) |
-| 共同実証readiness | [Municipal pilot readiness](docs/readiness/MUNICIPAL_PILOT_READINESS.md) |
-| 外部判断が必要な項目 | [Blocked by external decisions](docs/readiness/BLOCKED_BY_EXTERNAL_DECISIONS.md) |
-| Android emulator既定値 | [Emulator validation defaults](docs/EMULATOR_VALIDATION_DEFAULTS.md) |
-| PC Gateway開発setup | [PC Gateway setup](docs/PC_GATEWAY_SETUP.md) |
-| PC Gateway本番配置 | [Production Gateway deployment](docs/runbooks/PRODUCTION_GATEWAY_DEPLOYMENT.md) |
-| PC Gateway security | [PC Gateway security](docs/PC_GATEWAY_SECURITY.md) |
-| Windows自動起動 | [PC Gateway autostart](docs/runbooks/PC_GATEWAY_AUTOSTART.md) |
-| Broker設計 | [Broker architecture](docs/BROKER_ARCHITECTURE.md) |
-| Broker配置 | [HTTPS Broker deployment](deployment/broker/README.md) |
-| 現地受入試験 | [Field acceptance test](docs/runbooks/FIELD_ACCEPTANCE_TEST.md) |
-| Backup | [Gateway backup](docs/runbooks/GATEWAY_BACKUP.md) |
-| 正式Release検証 | [Formal release verification](docs/runbooks/VERIFY_FORMAL_RELEASE.md) |
-| Security reporting | [Security policy](SECURITY.md) |
+### ローカル実証
+
+- [Local pilot ingress / PUERTA Core](docs/LOCAL_PILOT_INGRESS.md)
+- [PUERTA Local browser page](docs/PUERTA_LOCAL.md)
+- [PONTE observations and CSV](docs/PONTE_OBSERVATIONS.md)
+- [ÉCART review queue](docs/ECART_REVIEW_QUEUE.md)
+- [ANTICIPO Lite](docs/ANTICIPO_LITE.md)
+- [MOSAIK route history](docs/MOSAIK_ROUTE_HISTORY.md)
+
+### 検証・監査
+
+- [Windows false-green and productization audit](docs/audits/WINDOWS_FALSE_GREEN_AND_PRODUCTIZATION_AUDIT_2026-07.md)
+- [Windows implementation audit](docs/audits/WINDOWS_IMPLEMENTATION_AUDIT_2026-07.md)
+- [Windows next-work audit](docs/audits/WINDOWS_NEXT_WORK_AUDIT_2026-07.md)
+- [Repository size audit](docs/audits/REPOSITORY_SIZE_AUDIT_2026-07.md)
+- [Full debug audit](docs/audits/FULL_DEBUG_AUDIT_2026-07-24.md)
+
+### 通信・運用
+
+- [Background relay mode](docs/BACKGROUND_RELAY_MODE.md)
+- [Background relay test plan](docs/BACKGROUND_RELAY_TEST_PLAN.md)
+- [Disaster activation triggers](docs/DISASTER_ACTIVATION_TRIGGERS.md)
+- [Battery validation](docs/BATTERY_VALIDATION.md)
+- [Nearby implementation](docs/NEARBY_IMPLEMENTATION.md)
+- [Municipal pilot readiness](docs/readiness/MUNICIPAL_PILOT_READINESS.md)
+- [Blocked by external decisions](docs/readiness/BLOCKED_BY_EXTERNAL_DECISIONS.md)
+- [PC Gateway setup](docs/PC_GATEWAY_SETUP.md)
+- [Production Gateway deployment](docs/runbooks/PRODUCTION_GATEWAY_DEPLOYMENT.md)
+- [PC Gateway security](docs/PC_GATEWAY_SECURITY.md)
+- [HTTPS Broker deployment](deployment/broker/README.md)
+- [Field acceptance test](docs/runbooks/FIELD_ACCEPTANCE_TEST.md)
+- [Security policy](SECURITY.md)
 
 ---
 
@@ -515,9 +639,11 @@ Relay is a local-first encrypted rescue-information relay for outages and interm
 - Nearby devices carry ciphertext without receiving the shelter private key.
 - PC Gateway decrypts at the shelter boundary and returns signed receipts.
 - An optional HTTPS Broker stores ciphertext, public manifests, and signed receipts without decrypting the rescue body.
-- Gateway enrollment uses fail-closed validation, persistent pinning, fingerprint confirmation, and explicit rotation.
-- ARMED persists readiness but does not keep the process, Nearby, or a foreground service running.
-- Automated tests, device-test scripts, and CI jobs do not replace physical RF, battery, reboot, power-policy, or field validation.
+- Gateway enrollment includes a CameraX QR screen, paste fallback, fingerprint confirmation, persistent pinning, and explicit rotation.
+- A development/lab-only local pilot page can accept browser submissions through the existing encrypted ingress path; production always returns 404.
+- Pilot observations, CSV imports, review candidates, limited support flags, and route history are training tools, not identity verification or dispatch decisions.
+- Windows validation rejects stale results, zero-test runs, blocked prerequisites, and mock-only evidence instead of reporting false success.
+- Automated tests and device-test scripts do not replace physical RF, battery, reboot, power-policy, privacy, operational, or field validation.
 
 Relay is not an emergency-dispatch service, not a 119 replacement, and not production-ready.
 
