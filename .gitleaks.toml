@@ -70,4 +70,7 @@ paths = [
 regexes = [
     '''^[A-Za-z]+(/[A-Za-z-]+){1,4}$''',
     '''^[A-Za-z]{1,6}$''',
+    # Public on-disk file-format header for the DPAPI-protected key store;
+    # a format marker, not key material.
+    '''RELAY-DPAPI-KEYS-V1''',
 ]

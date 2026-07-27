@@ -25,6 +25,7 @@
     <ID>CyclomaticComplexMethod:ActiveRescueSessionCoordinator.kt$ActiveRescueSessionCoordinator$suspend fun create(draft: RescueRequestDraft): RescueSessionOperationResult</ID>
     <ID>CyclomaticComplexMethod:ApplicationExitInterpreter.kt$ApplicationExitInterpreter$private fun label(reason: Int): String</ID>
     <ID>CyclomaticComplexMethod:BleBridgeIngressServer.kt$fun Application.bleBridgeIngressModule( config: GatewayConfig, ingress: RescueDeliveryIngress, replayGuard: BleBridgeReplayGuard = BleBridgeReplayGuard(), )</ID>
+    <ID>CyclomaticComplexMethod:BrokerPullAgent.kt$BrokerPullAgent$suspend fun pullOnce(): Int</ID>
     <ID>CyclomaticComplexMethod:BrokerRescueDelivery.kt$BrokerRescueDelivery$suspend fun deliver(envelope: EncryptedRescueEnvelope): BrokerDeliveryResult</ID>
     <ID>CyclomaticComplexMethod:BrokerServer.kt$fun Application.brokerModule( store: BrokerStore, config: BrokerConfig = BrokerConfig(), uploadRateLimiter: SlidingWindowRateLimiter = SlidingWindowRateLimiter(maxRequests = 30, windowMillis = 60_000), pullRateLimiter: SlidingWindowRateLimiter = SlidingWindowRateLimiter(maxRequests = 120, windowMillis = 60_000), observability: BrokerObservability = BrokerObservability.None, )</ID>
     <ID>CyclomaticComplexMethod:GatewayLanDiscovery.kt$UdpGatewayDiscovery$private suspend fun discoverMatching( timeoutMs: Int, accepts: (AndroidGatewayLanAnnouncement) -&gt; Boolean, ): DiscoveredGateway?</ID>
@@ -38,6 +39,7 @@
     <ID>CyclomaticComplexMethod:MessagePolicy.kt$MessagePolicy$private fun validatePayload(message: RelayMessage): MessageValidation</ID>
     <ID>CyclomaticComplexMethod:PacketCodec.kt$PacketCodec$fun decode(bytes: ByteArray): DecodeResult</ID>
     <ID>CyclomaticComplexMethod:PacketCodec.kt$PacketCodec$private fun validateBody(body: PacketBody, senderDeviceId: String): String?</ID>
+    <ID>CyclomaticComplexMethod:PilotOperations.kt$PilotOperationsStore$private fun csv(input:String):List&lt;List&lt;String&gt;&gt;</ID>
     <ID>CyclomaticComplexMethod:QrTransferCodec.kt$QrTransferCodec$fun assemble( frames: Collection&lt;QrTransferFrame&gt;, nowEpochMillis: Long, ): QrTransferDecodeResult</ID>
     <ID>CyclomaticComplexMethod:RelayApp.kt$@Composable fun RelayApp(viewModel: RelayViewModel, rescueViewModel: RescueViewModel, enrollmentViewModel: EnrollmentViewModel)</ID>
     <ID>CyclomaticComplexMethod:RelayApp.kt$@Composable fun RelaySharedApp( store: InMemoryMessageStore = remember { InMemoryMessageStore() }, deviceId: String = remember { randomUuid() }, gatewayHostOverride: String? = null, gatewayPortOverride: Int = 8080, offlineMapPack: VerifiedOfflineMapPack? = null, )</ID>
@@ -49,6 +51,17 @@
     <ID>CyclomaticComplexMethod:SyncCoordinator.kt$SyncCoordinator$private suspend fun handle(peerId: String, bytes: ByteArray)</ID>
     <ID>CyclomaticComplexMethod:SyncCoordinator.kt$SyncCoordinator$private suspend fun send( peerId: String, body: com.example.relay.protocol.PacketBody, packetId: String = java.util.UUID.randomUUID().toString(), ): String</ID>
     <ID>DestructuringDeclarationWithTooManyEntries:GatewayEnrollment.kt$GatewayEnrollmentCodec$val (scheme, versionText, inner, providedChecksum) = parts</ID>
+    <ID>EmptyElseBlock:PilotOperations.kt$PilotOperationsStore$if(!seen.add(key)) return@forEach</ID>
+    <ID>EmptyElseBlock:PilotOperations.kt$PilotOperationsStore$if(c=='\r'&amp;&amp;i+1&lt;raw.length&amp;&amp;raw[i+1]=='\n')i++</ID>
+    <ID>EmptyElseBlock:PilotOperations.kt$PilotOperationsStore$if(cell.isNotEmpty()||row.isNotEmpty()){row+=cell.toString();out+=row}</ID>
+    <ID>EmptyElseBlock:PilotOperations.kt$PilotOperationsStore$if(csvBoolean(map,"support_mobility"))add(SupportFlag.MOBILITY)</ID>
+    <ID>EmptyElseBlock:PilotOperations.kt$PilotOperationsStore$if(csvBoolean(map,"support_power"))add(SupportFlag.POWER)</ID>
+    <ID>EmptyElseBlock:PilotOperations.kt$PilotOperationsStore$if(quoted)throw IllegalArgumentException("unterminated_quote")</ID>
+    <ID>EmptyElseBlock:PilotOperations.kt$PilotOperationsStore$if(request.dryRun || preview.rejectedRows &gt; 0) return preview</ID>
+    <ID>EmptyElseBlock:PilotOperations.kt$PilotOperationsStore$if(row.any{it.isNotEmpty()})out+=row</ID>
+    <ID>EmptyElseBlock:PuertaPilot.kt$PilotIngress$if(input.injured) add(RescueCondition.INJURED_OR_UNWELL)</ID>
+    <ID>EmptyElseBlock:PuertaPilot.kt$PilotIngress$if(input.mobilityImpaired) add(RescueCondition.MOBILITY_IMPAIRED)</ID>
+    <ID>EmptyElseBlock:PuertaPilot.kt$PilotIngress$if(input.trapped||input.fireOrCollapseRisk) add(RescueCondition.LIFE_THREATENING)</ID>
     <ID>FunctionNaming:CameraQrScanner.kt$@Composable fun CameraQrScanner( onQrDetected: (String) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>FunctionNaming:EnrollmentScreen.kt$@Composable fun EnrollmentScreen( viewModel: EnrollmentViewModel, onBack: () -&gt; Unit, )</ID>
     <ID>FunctionNaming:EnrollmentScreen.kt$@Composable private fun DetailRow(label: String, value: String)</ID>
@@ -131,7 +144,7 @@
     <ID>LongParameterList:ActiveRescueSessionCoordinatorTest.kt$ActiveRescueSessionCoordinatorTest.Fixture$( val store: FakeSessionStore, private val cipher: RecoveryPayloadCipher, val keys: ShelterPublicKeys, val recipientPrivateKey: RescuePrivateKey, var now: Long, private val lifetimeMillis: Long, keysAvailable: Boolean, private val locationProvider: LocationProvider? = null, )</ID>
     <ID>LongParameterList:ActiveRescueSessionEntity.kt$ActiveRescueSessionDao$( requestId: String, expectedVersion: Int, nextVersion: Int, sealedRecoveryPayload: ByteArray, recoveryNonce: ByteArray, trackingMode: String, latestSubmissionStatus: String, updatedAtEpochMillis: Long, expiresAtEpochMillis: Long, terminalStatus: String?, )</ID>
     <ID>LongParameterList:ActiveRescueSessionEntity.kt$ActiveRescueSessionDao$( requestId: String, expectedVersion: Int, sealedRecoveryPayload: ByteArray, recoveryNonce: ByteArray, trackingMode: String, latestSubmissionStatus: String, updatedAtEpochMillis: Long, expiresAtEpochMillis: Long, )</ID>
-    <ID>LongParameterList:BrokerPullAgent.kt$BrokerPullAgent$( private val brokerUrl: String, private val shelterId: String, private val gatewayId: String, private val intakeService: RescueIntakeService, private val httpClient: HttpClient, /** Per-Gateway, per-shelter Broker credential; never persisted in the cursor file. */ private val gatewayCredential: String? = null, private val cursorPath: Path? = null, private val pollIntervalMs: Long = 10_000L, private val json: Json = Json { ignoreUnknownKeys = true }, )</ID>
+    <ID>LongParameterList:BrokerPullAgent.kt$BrokerPullAgent$( private val brokerUrl: String, private val shelterId: String, private val gatewayId: String, private val intakeService: RescueIntakeService, private val httpClient: HttpClient, /** Per-Gateway, per-shelter Broker credential; never persisted in the cursor file. */ private val gatewayCredential: String? = null, private val cursorPath: Path? = null, private val pollIntervalMs: Long = 10_000L, private val json: Json = Json { ignoreUnknownKeys = true }, private val routeAttemptSink: ((RouteAttempt) -&gt; Unit)? = null, )</ID>
     <ID>LongParameterList:BrokerRoutesTest.kt$BrokerRoutesTest$( envelopeId: String = "env-001", requestId: String = "req-001", requestVersion: Int = 1, shelterId: String = "fuchu-01", ciphertextHash: String = "a".repeat(64), createdAt: Long = System.currentTimeMillis(), expiresAt: Long = System.currentTimeMillis() + 3_600_000, )</ID>
     <ID>LongParameterList:BrokerStoreTest.kt$BrokerStoreTest$( envelopeId: String = "env-001", requestId: String = "req-001", requestVersion: Int = 1, shelterId: String = "fuchu-01", ciphertextHash: String = "a".repeat(64), expiresAt: Long = System.currentTimeMillis() + 3_600_000, )</ID>
     <ID>LongParameterList:BrokerStoreTest.kt$BrokerStoreTest$( receiptId: String = "rcpt-001", envelopeId: String = "env-001", requestId: String = "req-001", requestVersion: Int = 1, ciphertextHash: String = "a".repeat(64), shelterId: String = "fuchu-01", receivedAt: Long = System.currentTimeMillis(), )</ID>
@@ -154,6 +167,7 @@
     <ID>LongParameterList:MessageUseCases.kt$CreateSupplyMessageUseCase$( private val repository: MessageRepository, private val policy: MessagePolicy, private val clock: Clock, private val originDeviceId: String, private val idGenerator: MessageIdGenerator = UuidMessageIdGenerator, private val defaultTtlMillis: Long = 24L * 60 * 60 * 1_000, private val defaultMaxHopCount: Int = 8, private val reportSigner: ReportSigner? = null, )</ID>
     <ID>LongParameterList:NearbyConnectionsTransport.kt$NearbyConnectionsTransport$( private val localDeviceId: String, private val platform: NearbyPlatform, private val permissionGate: NearbyPermissionGate, private val scope: CoroutineScope, private val connectionPolicy: NearbyConnectionPolicy = NearbyConnectionPolicy(), private val maxPayloadBytes: Int = 32 * 1024, private val transferTimeoutMs: Long = 30_000, private val connectionAttemptTimeoutMs: Long = 30_000, private val reconnectBaseDelayMs: Long = 1_000, private val reconnectMaxDelayMs: Long = 30_000, )</ID>
     <ID>LongParameterList:PersistentGatewayEnrollmentStoreTest.kt$PersistentGatewayEnrollmentStoreTest$( gatewayId: String = "pc-gateway-fuchu-01", shelterId: String = "shelter-fuchu-01", host: String = "192.168.50.20", port: Int = 8443, scheme: String = "https", manifestFingerprint: String = fingerprint, )</ID>
+    <ID>LongParameterList:PilotOperations.kt$PilotOperationsStore$(table:String, token:String, group:String?, values:Set&lt;SupportFlag&gt;, due:Long, revoked:Boolean)</ID>
     <ID>LongParameterList:ReceiptOutbox.kt$ReceiptOutbox$( private val persistence: SqliteRescuePersistence, private val brokerUrl: String, private val shelterId: String, private val gatewayId: String, private val httpClient: HttpClient, /** Per-Gateway, per-shelter Broker credential; never stored in the outbox database. */ private val gatewayCredential: String? = null, private val flushIntervalMs: Long = 5_000L, private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true }, )</ID>
     <ID>LongParameterList:RegionalMessageSelectionTest.kt$RegionalMessageSelectionTest$( id: String, target: String, status: ReportStatus, createdAt: Long, eventId: String = id, origin: String = "device-A", createdBy: String = origin, )</ID>
     <ID>LongParameterList:RegionalShelterTrustTest.kt$RegionalShelterTrustTest$( regionId: String, shelterId: String, recipient: RescueKeyPair, receipt: RescueKeyPair, generation: Int, rootKey: RescuePrivateKey, )</ID>
@@ -271,6 +285,7 @@
     <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$1_000</ID>
     <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$1_000L</ID>
     <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$1_024</ID>
+    <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$1_440</ID>
     <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$24</ID>
     <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$24L</ID>
     <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$256</ID>
@@ -282,6 +297,7 @@
     <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$5</ID>
     <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$60</ID>
     <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$60_000</ID>
+    <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$60_000L</ID>
     <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$64</ID>
     <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$65_535</ID>
     <ID>MagicNumber:GatewayConfig.kt$GatewayConfig$8080</ID>
@@ -306,6 +322,7 @@
     <ID>MagicNumber:GatewayLanDiscovery.kt$UdpGatewayDiscovery$8192</ID>
     <ID>MagicNumber:GatewayServer.kt$300</ID>
     <ID>MagicNumber:GatewayServer.kt$32</ID>
+    <ID>MagicNumber:GatewayServer.kt$4096</ID>
     <ID>MagicNumber:GatewayServer.kt$5_000</ID>
     <ID>MagicNumber:GatewayServer.kt$604_800_000L</ID>
     <ID>MagicNumber:GatewayServer.kt$64</ID>
@@ -315,7 +332,6 @@
     <ID>MagicNumber:GatewaySettingsStore.kt$GatewaySettingsStore$80</ID>
     <ID>MagicNumber:GatewaySettingsStore.kt$GatewaySettingsStore$8080</ID>
     <ID>MagicNumber:GatewayStore.kt$GatewayStore$10</ID>
-    <ID>MagicNumber:GatewayStore.kt$GatewayStore$100000</ID>
     <ID>MagicNumber:GatewayStore.kt$GatewayStore$11</ID>
     <ID>MagicNumber:GatewayStore.kt$GatewayStore$12</ID>
     <ID>MagicNumber:GatewayStore.kt$GatewayStore$13</ID>
@@ -340,7 +356,6 @@
     <ID>MagicNumber:GatewayStore.kt$GatewayStore$80</ID>
     <ID>MagicNumber:GatewayStore.kt$GatewayStore$8_192</ID>
     <ID>MagicNumber:GatewayStore.kt$GatewayStore$9</ID>
-    <ID>MagicNumber:GatewayStore.kt$GatewayStore$999999</ID>
     <ID>MagicNumber:GatewaySyncEngine.kt$255</ID>
     <ID>MagicNumber:GatewaySyncEngine.kt$4</ID>
     <ID>MagicNumber:GatewaySyncEngine.kt$GatewaySyncEngine$128</ID>
@@ -396,12 +411,21 @@
     <ID>MagicNumber:NearbyPermissionPolicy.kt$NearbyPermissionPolicy$33</ID>
     <ID>MagicNumber:NearbyPrerequisiteChecker.kt$NearbyPrerequisiteChecker$28</ID>
     <ID>MagicNumber:NearbyPrerequisiteChecker.kt$NearbyPrerequisiteChecker$31</ID>
-    <ID>MagicNumber:OfficialInformationService.kt$OfficialInformationService$10</ID>
-    <ID>MagicNumber:OfficialInformationService.kt$OfficialInformationService$200</ID>
     <ID>MagicNumber:OfficialInformationService.kt$OfficialInformationService$5</ID>
     <ID>MagicNumber:OfficialInformationService.kt$OfficialInformationService$60_000</ID>
     <ID>MagicNumber:PacketCodec.kt$PacketCodec$32</ID>
     <ID>MagicNumber:PacketCodec.kt$PacketCodec$64</ID>
+    <ID>MagicNumber:PilotOperations.kt$PilotOperationsStore$100</ID>
+    <ID>MagicNumber:PilotOperations.kt$PilotOperationsStore$128</ID>
+    <ID>MagicNumber:PilotOperations.kt$PilotOperationsStore$256</ID>
+    <ID>MagicNumber:PilotOperations.kt$PilotOperationsStore$3</ID>
+    <ID>MagicNumber:PilotOperations.kt$PilotOperationsStore$4</ID>
+    <ID>MagicNumber:PilotOperations.kt$PilotOperationsStore$5</ID>
+    <ID>MagicNumber:PilotOperations.kt$PilotOperationsStore$6</ID>
+    <ID>MagicNumber:PilotOperations.kt$PilotOperationsStore$64</ID>
+    <ID>MagicNumber:PilotOperations.kt$PilotOperationsStore$7</ID>
+    <ID>MagicNumber:PilotOperations.kt$PilotOperationsStore$8</ID>
+    <ID>MagicNumber:PilotOperations.kt$PilotOperationsStore$80</ID>
     <ID>MagicNumber:Platform.ios.kt$1000.0</ID>
     <ID>MagicNumber:Platform.jvm.kt$1_000_000L</ID>
     <ID>MagicNumber:PriorityFeed.kt$HttpsPriorityMessageSource$200</ID>
@@ -411,6 +435,11 @@
     <ID>MagicNumber:PriorityFeed.kt$UrlConnectionPriorityFeedTransport$299</ID>
     <ID>MagicNumber:ProtocolModels.kt$ProtocolLimits$1024</ID>
     <ID>MagicNumber:ProtocolModels.kt$ProtocolLimits$64</ID>
+    <ID>MagicNumber:PuertaPilot.kt$PilotIngress$1000</ID>
+    <ID>MagicNumber:PuertaPilot.kt$PilotIngress$2000</ID>
+    <ID>MagicNumber:PuertaPilot.kt$PilotIngress$256</ID>
+    <ID>MagicNumber:PuertaPilot.kt$PuertaStore$3</ID>
+    <ID>MagicNumber:PuertaPilot.kt$PuertaStore$4</ID>
     <ID>MagicNumber:QrTransferCodec.kt$QrTransferCodec$0xff</ID>
     <ID>MagicNumber:QrTransferCodec.kt$QrTransferCodec$128</ID>
     <ID>MagicNumber:QrTransferCodec.kt$QrTransferCodec$16</ID>
@@ -697,6 +726,8 @@
     <ID>MaxLineLength:BrokerManifestRouteTest.kt$BrokerManifestRouteTest$val credential = store.issueGatewayCredential("dev-gw", "development-pc-gateway", System.currentTimeMillis() + 60_000)</ID>
     <ID>MaxLineLength:BrokerObservabilityTest.kt$BrokerObservabilityTest$application { brokerModule(store, BrokerConfig(profile = BrokerProfile.PRODUCTION), observability = observability) }</ID>
     <ID>MaxLineLength:BrokerPullAgent.kt$BrokerPullAgent$System.err.println("[BrokerPullAgent] pull failed (attempt $consecutiveFailures; ${e.javaClass.simpleName})")</ID>
+    <ID>MaxLineLength:BrokerPullAgent.kt$BrokerPullAgent$receiptId = when (result) { is RescueIngestResult.Accepted -&gt; result.request.receipt.receipt.receiptId; is RescueIngestResult.Duplicate -&gt; result.request.receipt.receipt.receiptId; else -&gt; null }</ID>
+    <ID>MaxLineLength:BrokerPullAgent.kt$BrokerPullAgent$result = if (result is RescueIngestResult.Accepted || result is RescueIngestResult.Duplicate) RouteResult.RECEIPT_CONFIRMED else RouteResult.FAILED</ID>
     <ID>MaxLineLength:BrokerRoutesTest.kt$BrokerRoutesTest$val credential = store.issueGatewayCredential("gateway-unknown", "unknown-shelter", System.currentTimeMillis() + 60_000)</ID>
     <ID>MaxLineLength:BrokerRoutesTest.kt$BrokerRoutesTest$val credential = store.issueGatewayCredential("health-gateway", "health-shelter", System.currentTimeMillis() + 60_000)</ID>
     <ID>MaxLineLength:BrokerServer.kt$private fun bearerToken(value: String?): String?</ID>
@@ -766,9 +797,12 @@
     <ID>MaxLineLength:GatewayBridgeClient.kt$HttpGatewayBridgeClient$val request = SyncMessagesRequest(bridgeId = settings.bridgeId, bridgeName = settings.gatewayName, messages = messages.map(::toGatewayMessage))</ID>
     <ID>MaxLineLength:GatewayBridgeClient.kt$PairRequest</ID>
     <ID>MaxLineLength:GatewayBridgeClient.kt$PairResponse</ID>
-    <ID>MaxLineLength:GatewayConfig.kt$File(System.getenv("RELAY_BLE_BRIDGE_SECRET_FILE") ?: File(System.getProperty("user.home"), ".relay/ble-bridge.key").path)</ID>
-    <ID>MaxLineLength:GatewayConfig.kt$File(System.getenv("RELAY_GATEWAY_ADMIN_KEY_FILE") ?: File(System.getProperty("user.home"), ".relay/admin.key").path)</ID>
+    <ID>MaxLineLength:GatewayConfig.kt$?:</ID>
     <ID>MaxLineLength:GatewayConfig.kt$GatewayConfig$"RELAY_BROKER_API_KEY / RELAY_BROKER_GATEWAY_API_KEY are development-only legacy credentials; use RELAY_BROKER_CREDENTIAL"</ID>
+    <ID>MaxLineLength:GatewayConfig.kt$GatewayConfig$"RELAY_RESCUE_RETENTION_DAYS must be between 1 and 365 days; refusing to run with an unapproved retention period"</ID>
+    <ID>MaxLineLength:GatewayConfig.kt$GatewayConfig$"training mode requires $name to point inside a 'training' directory; refusing to reuse production data paths"</ID>
+    <ID>MaxLineLength:GatewayConfig.kt$GatewayConfig$?:</ID>
+    <ID>MaxLineLength:GatewayConfig.kt$GatewayConfig$if (trainingMode) ".relay/training/official/jma-warning-340000.json" else ".relay/official/jma-warning-340000.json"</ID>
     <ID>MaxLineLength:GatewayConfig.kt$GatewayConfig$require</ID>
     <ID>MaxLineLength:GatewayConfig.kt$GatewayConfig$val</ID>
     <ID>MaxLineLength:GatewayConfig.kt$GatewayConfig$val rescueManifestFingerprint: String? = System.getenv("RELAY_RESCUE_MANIFEST_FINGERPRINT")?.trim()?.takeIf { it.isNotEmpty() }</ID>
@@ -806,6 +840,8 @@
     <ID>MaxLineLength:GatewayRoutesTest.kt$GatewayRoutesTest$val config = GatewayConfig(profile = GatewayProfile.DEVELOPMENT, dbPath = Files.createTempFile("relay-route", ".db").toString(), adminKey = "admin")</ID>
     <ID>MaxLineLength:GatewayRoutesTest.kt$GatewayRoutesTest$val config = GatewayConfig(profile = GatewayProfile.DEVELOPMENT, dbPath = Files.createTempFile("relay-route-batch", ".db").toString(), adminKey = "admin")</ID>
     <ID>MaxLineLength:GatewayRoutesTest.kt$GatewayRoutesTest$val config = GatewayConfig(profile = GatewayProfile.DEVELOPMENT, dbPath = db, gatewayId = "gateway", adminKey = "admin")</ID>
+    <ID>MaxLineLength:GatewayServer.kt$GatewayRescueKeyStatus.Companion$fun</ID>
+    <ID>MaxLineLength:GatewayServer.kt$access.audit(staff, null, "PONTE_CSV_IMPORT", if(result.rejectedRows==0) "SUCCESS" else "REJECTED", call.remoteSource())</ID>
     <ID>MaxLineLength:GatewayServer.kt$access.audit(staff, request.bridgeId, "PAIR_APPROVE", if (token == null) "REJECTED" else "SUCCESS", call.remoteSource())</ID>
     <ID>MaxLineLength:GatewayServer.kt$access.audit(staff, request.bridgeId, "PAIR_REJECT", if (ok) "SUCCESS" else "NOT_FOUND", call.remoteSource())</ID>
     <ID>MaxLineLength:GatewayServer.kt$call.respond(HttpStatusCode.Conflict, RescueStatusChangeResponse(false, assignedNodeId = result.assignedNodeId, reason = "assigned_elsewhere"))</ID>
@@ -813,18 +849,36 @@
     <ID>MaxLineLength:GatewayServer.kt$call.respond(StaffSessionResponse(result.staff.username, result.staff.role, result.session.expiresAtEpochMillis))</ID>
     <ID>MaxLineLength:GatewayServer.kt$call.respond(if (created) HttpStatusCode.Created else HttpStatusCode.UnprocessableEntity, mapOf("created" to created))</ID>
     <ID>MaxLineLength:GatewayServer.kt$call.respond(if (token == null) PairResponse(false, reason = "pairing_failed") else PairResponse(true, token))</ID>
+    <ID>MaxLineLength:GatewayServer.kt$call.respond(request.copy(sourceChannel = provenance.sourceChannel.name, ingressAssurance = provenance.assurance.name))</ID>
     <ID>MaxLineLength:GatewayServer.kt$if</ID>
     <ID>MaxLineLength:GatewayServer.kt$if (!config.anonymousIngressEnabled || !rescueDeliveryReady) return@post call.respond(HttpStatusCode.NotFound)</ID>
+    <ID>MaxLineLength:GatewayServer.kt$if (!config.localPilotIngressEnabled || !rescueDeliveryReady) return@post call.respond(HttpStatusCode.NotFound)</ID>
+    <ID>MaxLineLength:GatewayServer.kt$if (input.subjectToken != subject) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "subject_mismatch"))</ID>
     <ID>MaxLineLength:GatewayServer.kt$if (message.accumulatedAgeMs &gt;= message.lifetimeMs || message.createdAt &gt; now + 86_400_000L) return "expired_or_future"</ID>
     <ID>MaxLineLength:GatewayServer.kt$if (message.lifetimeMs !in 1..604_800_000L || message.accumulatedAgeMs !in 0..message.lifetimeMs) return "invalid_ttl"</ID>
     <ID>MaxLineLength:GatewayServer.kt$is RescueIngestResult.Accepted -&gt; call.respond(HttpStatusCode.OK, PublicRescueDeliveryResponse("accepted", receipt = result.request.receipt))</ID>
     <ID>MaxLineLength:GatewayServer.kt$is RescueIngestResult.Duplicate -&gt; call.respond(HttpStatusCode.OK, PublicRescueDeliveryResponse("duplicate", receipt = result.request.receipt))</ID>
     <ID>MaxLineLength:GatewayServer.kt$is RescueIngestResult.Quarantined -&gt; call.respond(HttpStatusCode.Conflict, PublicRescueDeliveryResponse("quarantined"))</ID>
     <ID>MaxLineLength:GatewayServer.kt$is RescueIngestResult.Rejected -&gt; call.respond(HttpStatusCode.UnprocessableEntity, PublicRescueDeliveryResponse("rejected", result.code.name))</ID>
+    <ID>MaxLineLength:GatewayServer.kt$localPilotIngress = config.localPilotIngressEnabled &amp;&amp; rescueDeliveryReady &amp;&amp; rescueManifest != null</ID>
     <ID>MaxLineLength:GatewayServer.kt$private</ID>
+    <ID>MaxLineLength:GatewayServer.kt$request.copy(sourceChannel = provenance.sourceChannel.name, ingressAssurance = provenance.assurance.name)</ID>
     <ID>MaxLineLength:GatewayServer.kt$rescueIngressReady = rescueIntakeService != null &amp;&amp; rescueDeliveryReady &amp;&amp; config.anonymousIngressEnabled</ID>
+    <ID>MaxLineLength:GatewayServer.kt$runCatching { pilotOperations.revokeProfile(subject) }.getOrElse { return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "profile_rejected")) }</ID>
+    <ID>MaxLineLength:GatewayServer.kt$runCatching { pilotOperations.saveOverride(input) }.getOrElse { return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "override_rejected")) }</ID>
+    <ID>MaxLineLength:GatewayServer.kt$runCatching { pilotOperations.saveProfile(input) }.getOrElse { return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "profile_rejected")) }</ID>
+    <ID>MaxLineLength:GatewayServer.kt$val</ID>
+    <ID>MaxLineLength:GatewayServer.kt$val assurance = when (input.observationType) { ObservationType.THIRD_PARTY_REPORT -&gt; IngressAssurance.THIRD_PARTY_REPORTED; ObservationType.DEVICE_OBSERVED -&gt; IngressAssurance.UNVERIFIED; else -&gt; IngressAssurance.STAFF_CONFIRMED }</ID>
     <ID>MaxLineLength:GatewayServer.kt$val created = access.createAccount(staff, request.username, request.password, request.role, call.remoteSource())</ID>
+    <ID>MaxLineLength:GatewayServer.kt$val ingress = RescueDeliveryIngress(service, routeType = RouteType.LAN_GATEWAY, routeAttemptSink = pilotOperations::recordRouteAttempt)</ID>
+    <ID>MaxLineLength:GatewayServer.kt$val input = runCatching { call.receive&lt;ObservationInput&gt;() }.getOrElse { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_observation")) }</ID>
+    <ID>MaxLineLength:GatewayServer.kt$val input = runCatching { call.receive&lt;ReviewOverrideInput&gt;() }.getOrElse { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_override")) }</ID>
+    <ID>MaxLineLength:GatewayServer.kt$val input = runCatching { call.receive&lt;SupportProfileInput&gt;() }.getOrElse { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_profile")) }</ID>
+    <ID>MaxLineLength:GatewayServer.kt$val observation = runCatching { pilotOperations.addObservation(input, SourceChannel.STAFF_DESK, assurance) }.getOrElse { return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "observation_rejected")) }</ID>
+    <ID>MaxLineLength:GatewayServer.kt$val preview = runCatching { pilotOperations.previewCsv(request.kind, request.csv, true) }.getOrElse { return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "csv_rejected")) }</ID>
     <ID>MaxLineLength:GatewayServer.kt$val rejected = all.filter { it.second != null }.map { GatewayRejection(it.first.messageId, it.second!!.reason!!) }</ID>
+    <ID>MaxLineLength:GatewayServer.kt$val request = runCatching { call.receive&lt;CsvImportRequest&gt;() }.getOrElse { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_csv_request")) }</ID>
+    <ID>MaxLineLength:GatewayServer.kt$val result = runCatching { pilotOperations.importCsv(request.copy(dryRun = false)) }.getOrElse { return@post call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to "csv_rejected")) }</ID>
     <ID>MaxLineLength:GatewayServer.kt$when</ID>
     <ID>MaxLineLength:GatewaySettingsStore.kt$GatewaySettingsStore$override fun record(result: String, connectedAt: Long)</ID>
     <ID>MaxLineLength:GatewaySettingsStore.kt$GatewaySettingsStore$override fun recordDelivery(result: String)</ID>
@@ -860,17 +914,19 @@
     <ID>MaxLineLength:Main.kt$"Bootstrap was not applied. An account already exists or the local username/password policy was not met."</ID>
     <ID>MaxLineLength:Main.kt$"No interactive console is available. Set RELAY_GATEWAY_BOOTSTRAP_CLI_SECRET for this one command; do not pass a password as an argument."</ID>
     <ID>MaxLineLength:Main.kt$"Use RELAY_GATEWAY_BOOTSTRAP_CLI_SECRET or an interactive console; never pass a password as an argument."</ID>
+    <ID>MaxLineLength:Main.kt$.</ID>
     <ID>MaxLineLength:Main.kt$System.err.println("Gateway operator access is unavailable until a one-time bootstrap administrator is configured.")</ID>
     <ID>MaxLineLength:Main.kt$System.err.println("Rescue BLE trust verification failed; automatic rescue delivery remains disabled (${error.javaClass.simpleName})")</ID>
     <ID>MaxLineLength:Main.kt$System.err.println("Rescue key expiry is approaching; manual key rotation and re-provisioning are required before pilot use.")</ID>
     <ID>MaxLineLength:Main.kt$println("BLE sidecar ingress: http://${config.bleBridgeIngressHost}:${config.bleBridgeIngressPort} (loopback only; secret is not printed)")</ID>
-    <ID>MaxLineLength:Main.kt$println("Legacy X-Admin-Key source: ${resolveAdminKeySource()} (development compatibility only; value is not printed)")</ID>
+    <ID>MaxLineLength:Main.kt$println("Legacy X-Admin-Key source: ${resolveAdminKeySource(config.trainingMode)} (development compatibility only; value is not printed)")</ID>
     <ID>MaxLineLength:Main.kt$println("Rescue BLE signed-manifest fingerprint base64: ${bleBridgeEnvironment?.signedManifestFingerprintBase64}")</ID>
     <ID>MaxLineLength:Main.kt$println("Rescue BLE trust: not ready; automatic rescue delivery is disabled (legacy manifest remains maintenance-only)")</ID>
+    <ID>MaxLineLength:Main.kt$println("Rescue retention: terminal details kept ${config.rescueRetentionDays} day(s), swept every ${config.retentionSweepIntervalMinutes} minute(s) (pilot defaults pending privacy/legal approval)")</ID>
     <ID>MaxLineLength:Main.kt$println(if (created) "Initial Gateway administrator bootstrap completed." else "Initial administrator bootstrap was not applied (already initialized or invalid input).")</ID>
     <ID>MaxLineLength:Main.kt$println(if (revoked) "credential_revoked=$credentialId" else "credential_not_found_or_already_revoked=$credentialId")</ID>
     <ID>MaxLineLength:Main.kt$val created = access.bootstrapAdmin(config.bootstrapUsername, config.bootstrapSecret, source = "local_bootstrap")</ID>
-    <ID>MaxLineLength:Main.kt$val rescueIngress = rescueDeliveryReady.let { ready -&gt; if (ready) RescueDeliveryIngress(rescueIntakeService) else null }</ID>
+    <ID>MaxLineLength:Main.kt$val rescueIngress = rescueDeliveryReady.let { ready -&gt; if (ready) RescueDeliveryIngress(rescueIntakeService, routeType = RouteType.NEARBY, routeAttemptSink = store.pilotOperationsStore()::recordRouteAttempt) else null }</ID>
     <ID>MaxLineLength:MessageEntity.kt$DeliveryReceiptEntity$@Entity(tableName = "delivery_receipts", indices = [Index(value = ["messageId", "receiptType", "actorId"], unique = true), Index("messageId")])</ID>
     <ID>MaxLineLength:MessagePolicy.kt$MessagePolicy$if</ID>
     <ID>MaxLineLength:MessagePolicyRepositoryTest.kt$MessagePolicyRepositoryTest$repository.insertReceipt(DeliveryReceipt("receipt-3", "message-1", ReceiptType.PEER_RECEIVED, "peer-D", NOW))</ID>
@@ -898,7 +954,95 @@
     <ID>MaxLineLength:PacketCodec.kt$PacketCodec$body.entries.any { !validId(it.messageId) || it.hopCount &lt; 0 || it.maxHopCount &lt; 1 || it.hopCount &gt; it.maxHopCount } -&gt; "invalid manifest entry"</ID>
     <ID>MaxLineLength:PacketCodec.kt$PacketCodec$is ErrorBody -&gt; if (body.code.length in 1..32 &amp;&amp; body.detail.length &lt;= limits.maxErrorDetailChars) null else "invalid error"</ID>
     <ID>MaxLineLength:PacketCodecTest.kt$PacketCodecTest$(manifestCodec.decode(manifestCodec.encode("device-A", NOW, ManifestBody(List(513) { entry.copy(messageId = "id-$it") }))) as DecodeResult.Failure).error</ID>
+    <ID>MaxLineLength:PilotOperations.kt$BaselineSubjectInput</ID>
+    <ID>MaxLineLength:PilotOperations.kt$CsvPreview</ID>
+    <ID>MaxLineLength:PilotOperations.kt$ObservationInput</ID>
+    <ID>MaxLineLength:PilotOperations.kt$ObservationRecord</ID>
+    <ID>MaxLineLength:PilotOperations.kt$ObservationType</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$Companion</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$connection.createStatement().executeQuery("SELECT subject_token,flags,review_due_at FROM pilot_baseline_subjects").use { r -&gt; while(r.next()) subjects[r.getString(1)] = flags(r.getString(2)) to (r.getLong(3) &lt; now) }</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$connection.createStatement().executeQuery("SELECT subject_token,flags,review_due_at,revoked_at FROM pilot_support_profiles").use { r -&gt; while(r.next()) if(r.getLong(4).let{r.wasNull()}) { val old=subjects[r.getString(1)] ?: (emptySet&lt;SupportFlag&gt;() to false); val expired=r.getLong(3)&lt;now; subjects[r.getString(1)] = (if(expired) old.first else old.first + flags(r.getString(2))) to (old.second || expired) } }</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$connection.prepareStatement("SELECT DISTINCT subject_token FROM pilot_observations WHERE expires_at &gt; ?").use { s -&gt; s.setLong(1, now); s.executeQuery().use { r -&gt; while(r.next()) subjects.putIfAbsent(r.getString(1), emptySet&lt;SupportFlag&gt;() to false) } }</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$connection.prepareStatement(sql).use { s -&gt; subjectToken?.let { s.setString(1,it) }; s.executeQuery().use { r -&gt; buildList { while(r.next()) add(ObservationRecord(r.getString(1),r.getString(2),ObservationType.valueOf(r.getString(3)),SourceChannel.valueOf(r.getString(4)),IngressAssurance.valueOf(r.getString(5)),r.getLong(6),r.getString(7),r.getLong(8))) } } }</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$fun</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$fun importCsv(request: CsvImportRequest): CsvPreview</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$fun profiles(): List&lt;SupportProfileRecord&gt;</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$fun recordRouteAttempt(attempt: RouteAttempt)</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$fun revokeProfile(subject: String, now: Long = System.currentTimeMillis())</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$fun routeAttempts(envelopeId: String): List&lt;RouteAttempt&gt;</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$fun saveBaseline(input: BaselineSubjectInput)</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$fun saveOverride(input: ReviewOverrideInput)</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$fun saveProfile(input: SupportProfileInput)</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$init { File(dbPath).parentFile?.mkdirs(); connection = DriverManager.getConnection("jdbc:sqlite:$dbPath"); migrate() }</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$private fun &lt;T&gt; transaction(block:()-&gt;T):T</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$private fun candidate(subject: String, flags: Set&lt;SupportFlag&gt;, expired: Boolean, now: Long): ReviewCandidate</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$private fun csv(input:String):List&lt;List&lt;String&gt;&gt;</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$private fun csvBoolean(row:Map&lt;String,String&gt;, field:String):Boolean</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$private fun insertObservationInTransaction(map:Map&lt;String,String&gt;)</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$private fun parseTime(value:String)</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$private fun saveSubject(table:String, token:String, group:String?, values:Set&lt;SupportFlag&gt;, due:Long, revoked:Boolean)</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$private fun saveSubjectInTransaction(table:String,map:Map&lt;String,String&gt;)</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$require(subjectToken(input.subjectToken))</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$s.execute("CREATE INDEX IF NOT EXISTS idx_pilot_observations_subject ON pilot_observations(subject_token,observed_at DESC)")</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$s.execute("CREATE INDEX IF NOT EXISTS idx_pilot_routes_envelope ON pilot_route_attempts(envelope_id,attempted_at DESC)")</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$s.execute("CREATE TABLE IF NOT EXISTS pilot_baseline_subjects(subject_token TEXT PRIMARY KEY,group_id TEXT,flags TEXT NOT NULL,review_due_at INTEGER NOT NULL,revoked_at INTEGER)")</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$s.execute("CREATE TABLE IF NOT EXISTS pilot_observations(observation_id TEXT PRIMARY KEY,subject_token TEXT NOT NULL,observation_type TEXT NOT NULL,source_channel TEXT NOT NULL,assurance TEXT NOT NULL,observed_at INTEGER NOT NULL,location_cell TEXT,expires_at INTEGER NOT NULL)")</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$s.execute("CREATE TABLE IF NOT EXISTS pilot_operations_schema_migrations(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)")</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$s.execute("CREATE TABLE IF NOT EXISTS pilot_review_overrides(subject_token TEXT PRIMARY KEY,state TEXT NOT NULL,priority TEXT,note TEXT,updated_at INTEGER NOT NULL)")</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$s.execute("CREATE TABLE IF NOT EXISTS pilot_route_attempts(id TEXT PRIMARY KEY,envelope_id TEXT NOT NULL,route_type TEXT NOT NULL,attempted_at INTEGER NOT NULL,completed_at INTEGER,result TEXT NOT NULL,safe_error_code TEXT,receipt_id TEXT)")</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$s.execute("CREATE TABLE IF NOT EXISTS pilot_support_profiles(subject_token TEXT PRIMARY KEY,group_id TEXT,flags TEXT NOT NULL,review_due_at INTEGER NOT NULL,revoked_at INTEGER)")</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$s.execute("INSERT OR IGNORE INTO pilot_operations_schema_migrations VALUES(1,${System.currentTimeMillis()})")</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$s.setString(1,row.observationId); s.setString(2,row.subjectToken); s.setString(3,row.observationType.name); s.setString(4,row.sourceChannel.name); s.setString(5,row.assurance.name); s.setLong(6,row.observedAtEpochMillis); s.setString(7,row.locationCell); s.setLong(8,row.expiresAtEpochMillis); s.executeUpdate()</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$subjects.map { (subject, profile) -&gt; candidate(subject, profile.first, profile.second, now) }.sortedByDescending { priorityWeight(it.priority) }</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$val key = when(kind) { "baseline", "profile" -&gt; map.getValue("subject_token"); else -&gt; "${map.getValue("subject_token")}:${map.getValue("observed_at")}" }</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$val required = when (kind) { "baseline", "profile" -&gt; setOf("subject_token", "review_due_at"); "observation" -&gt; setOf("subject_token", "observation_type", "observed_at"); else -&gt; throw IllegalArgumentException("kind") }</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$val row = ObservationRecord(UUID.randomUUID().toString(), input.subjectToken, input.observationType, source, assurance, now, input.locationCell, now + OBSERVATION_TTL)</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$val sql = if (subjectToken == null) "SELECT * FROM pilot_observations ORDER BY observed_at DESC" else "SELECT * FROM pilot_observations WHERE subject_token=? ORDER BY observed_at DESC"</ID>
+    <ID>MaxLineLength:PilotOperations.kt$PilotOperationsStore$when(kind) { "baseline", "profile" -&gt; { parseTime(map.getValue("review_due_at")); CSV_BOOLEAN_FIELDS.forEach { field -&gt; map[field]?.let { require(it in setOf("true", "false")) { "invalid_boolean" } } } }; "observation" -&gt; { ObservationType.valueOf(map.getValue("observation_type")); parseTime(map.getValue("observed_at")) } }</ID>
+    <ID>MaxLineLength:PilotOperations.kt$ReviewCandidate</ID>
+    <ID>MaxLineLength:PilotOperations.kt$ReviewOverrideInput</ID>
+    <ID>MaxLineLength:PilotOperations.kt$RouteAttempt</ID>
+    <ID>MaxLineLength:PilotOperations.kt$RouteResult</ID>
+    <ID>MaxLineLength:PilotOperations.kt$SupportProfileInput</ID>
+    <ID>MaxLineLength:PilotOperations.kt$SupportProfileRecord</ID>
+    <ID>MaxLineLength:PilotOperationsTest.kt$PilotOperationsTest$assertEquals(setOf(RouteResult.BROKER_STORED, RouteResult.RECEIPT_CONFIRMED), store.routeAttempts("env-a").map { it.result }.toSet())</ID>
+    <ID>MaxLineLength:PilotOperationsTest.kt$PilotOperationsTest$store.addObservation(ObservationInput("demo-a", ObservationType.DEVICE_OBSERVED), SourceChannel.NEARBY, IngressAssurance.UNVERIFIED, 100)</ID>
+    <ID>MaxLineLength:PilotOperationsTest.kt$PilotOperationsTest$store.addObservation(ObservationInput("new-token", ObservationType.THIRD_PARTY_REPORT), SourceChannel.STAFF_DESK, IngressAssurance.UNVERIFIED, 100)</ID>
+    <ID>MaxLineLength:PilotOperationsTest.kt$PilotOperationsTest$store.recordRouteAttempt(RouteAttempt("b", "env-a", RouteType.LAN_GATEWAY, 3, 4, RouteResult.RECEIPT_CONFIRMED, receiptId = "receipt-a"))</ID>
+    <ID>MaxLineLength:PilotOperationsTest.kt$PilotOperationsTest$store.saveBaseline(BaselineSubjectInput("demo-a", supportFlags = setOf(SupportFlag.MOBILITY), reviewDueAtEpochMillis = Long.MAX_VALUE))</ID>
+    <ID>MaxLineLength:PilotOperationsTest.kt$PilotOperationsTest$store.saveProfile(SupportProfileInput("demo-a", supportFlags = setOf(SupportFlag.POWER), reviewDueAtEpochMillis = 10))</ID>
+    <ID>MaxLineLength:PilotOperationsTest.kt$PilotOperationsTest$val csv = "subject_token,group_id,support_mobility,support_power,children_present,review_due_at\ndemo-a,g,treu,false,false,2026-12-31\n"</ID>
+    <ID>MaxLineLength:PilotOperationsTest.kt$PilotOperationsTest$val invalid = "subject_token,group_id,support_mobility,support_power,children_present,review_due_at\ndemo-b,g,true,false,false,not-a-date\n"</ID>
+    <ID>MaxLineLength:PilotOperationsTest.kt$PilotOperationsTest$val valid = "subject_token,group_id,support_mobility,support_power,children_present,review_due_at\ndemo-a,g,true,false,false,2026-12-31\n"</ID>
     <ID>MaxLineLength:ProtocolModels.kt$AckBody$data</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$IngressAssurance</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PilotIngress$class</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PilotIngress$routeAttemptSink?.invoke(RouteAttempt(UUID.randomUUID().toString(), envelope.envelopeId, RouteType.LOCAL_WEB, time, time, RouteResult.RECEIPT_CONFIRMED, receiptId = request.receipt.receipt.receiptId))</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PilotIngress$store.recordIngress(id,SourceChannel.LOCAL_WEB,if(input.thirdParty) IngressAssurance.THIRD_PARTY_REPORTED else IngressAssurance.SELF_REPORTED,time)</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PilotIngress$val id="web-${UUID.randomUUID()}"</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PilotIngress$val request=when(result){is RescueIngestResult.Accepted-&gt;result.request;is RescueIngestResult.Duplicate-&gt;result.request;else-&gt;throw IllegalArgumentException("delivery_rejected")}</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PilotIngress$val result=delivery.ingest(GatewayJson.encodeToString(EncryptedRescueEnvelope.serializer(),envelope).encodeToByteArray(),"local-web","local-web-$id")</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PilotIngress$val urgency=runCatching{RescueUrgency.valueOf(input.urgency)}.getOrElse{throw IllegalArgumentException("invalid_urgency")}</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PuertaStore$fun ingress(requestId: String): IngressMetadata</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PuertaStore$fun recordIngress(requestId: String, source: SourceChannel, assurance: IngressAssurance, now: Long)</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PuertaStore$fun schemaVersion(): Int</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PuertaStore$init</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PuertaStore$s.execute("CREATE TABLE IF NOT EXISTS puerta_ingress(request_id TEXT PRIMARY KEY, source_channel TEXT NOT NULL, assurance TEXT NOT NULL, recorded_at INTEGER NOT NULL)")</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PuertaStore$s.execute("CREATE TABLE IF NOT EXISTS puerta_schema_migrations(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)")</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PuertaStore$s.execute("INSERT OR IGNORE INTO puerta_schema_migrations(version,applied_at) VALUES(1,${System.currentTimeMillis()})")</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PuertaStore$s.execute("PRAGMA busy_timeout=5000")</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$PuertaStore.Companion$fun legacyMetadata(requestId: String)</ID>
+    <ID>MaxLineLength:PuertaPilot.kt$SourceChannel$@Serializable enum</ID>
+    <ID>MaxLineLength:PuertaPilotTest.kt$PuertaPilotTest$GatewayStore(config)</ID>
+    <ID>MaxLineLength:PuertaPilotTest.kt$PuertaPilotTest$GatewayStore(config).use { store -&gt; application { gatewayModule(config, store) }; assertEquals(HttpStatusCode.NotFound, client.get("/local-pilot").status) }</ID>
+    <ID>MaxLineLength:PuertaPilotTest.kt$PuertaPilotTest$connection.createStatement().executeQuery("SELECT value FROM legacy_marker").use { result -&gt; assertTrue(result.next()); assertEquals("kept", result.getString(1)) }</ID>
+    <ID>MaxLineLength:PuertaPilotTest.kt$PuertaPilotTest$connection.createStatement().use { it.execute("CREATE TABLE legacy_marker(value TEXT NOT NULL)"); it.execute("INSERT INTO legacy_marker VALUES('kept')") }</ID>
+    <ID>MaxLineLength:PuertaPilotTest.kt$PuertaPilotTest$val config = GatewayConfig(profile = GatewayProfile.DEVELOPMENT, localPilotIngressEnabled = true, dbPath = Files.createTempFile("relay-puerta", ".db").toString(), shelterId = "pilot-shelter")</ID>
+    <ID>MaxLineLength:PuertaPilotTest.kt$PuertaPilotTest$val config = GatewayConfig(profile = GatewayProfile.PRODUCTION, dbPath = Files.createTempFile("relay-puerta-prod", ".db").toString())</ID>
+    <ID>MaxLineLength:PuertaPilotTest.kt$PuertaPilotTest$val intake = RescueIntakeService(config.shelterId, recipient.privateKey, signer.privateKey, InMemoryRescuePersistence())</ID>
+    <ID>MaxLineLength:PuertaPilotTest.kt$PuertaPilotTest$val manifest = ShelterPublicKeyManifest(shelterId = config.shelterId, recipientPublicKey = recipient.publicKey, receiptSigningPublicKey = signer.publicKey, validFromEpochMillis = 1, validUntilEpochMillis = System.currentTimeMillis() + 86_400_000)</ID>
+    <ID>MaxLineLength:PuertaPilotTest.kt$PuertaPilotTest$val recipient = RescueCryptography.generateRecipientKeyPair()</ID>
+    <ID>MaxLineLength:PuertaPilotTest.kt$PuertaPilotTest$val response = client.post("/local-pilot/api/rescue") { contentType(ContentType.Application.Json); setBody("""{"urgency":"URGENT","personCount":1,"thirdParty":false,"locationDescription":"training-zone"}""") }</ID>
     <ID>MaxLineLength:QrTransferCodec.kt$QrTransferCodec$fun encodeForQr(frame: QrTransferFrame): ByteArray</ID>
     <ID>MaxLineLength:QrTransferCodec.kt$QrTransferCodec$if</ID>
     <ID>MaxLineLength:QrTransferCodec.kt$QrTransferCodec$if (first.schemaVersion != CURRENT_SCHEMA_VERSION) return QrTransferDecodeResult.Rejected(QrTransferRejection.UNSUPPORTED_VERSION)</ID>
@@ -1025,6 +1169,8 @@
     <ID>MaxLineLength:RescueCryptography.kt$RescueCryptography$fun verifyTrustDocument(canonicalBytes: ByteArray, signature: TrustDocumentSignature, regionalSigningPublicKey: RescuePublicKey): Boolean</ID>
     <ID>MaxLineLength:RescueDao.kt$RescueDao$@Query("SELECT * FROM rescue_envelopes WHERE requestId = :requestId AND requestVersion &lt; :requestVersion ORDER BY requestId, requestVersion")</ID>
     <ID>MaxLineLength:RescueDao.kt$RescueDao$@Query("SELECT EXISTS(SELECT 1 FROM rescue_envelopes WHERE requestId = :requestId AND requestVersion &gt; :requestVersion)")</ID>
+    <ID>MaxLineLength:RescueDeliveryIngress.kt$RescueDeliveryIngress$receiptId = when (result) { is RescueIngestResult.Accepted -&gt; result.request.receipt.receipt.receiptId; is RescueIngestResult.Duplicate -&gt; result.request.receipt.receipt.receiptId; else -&gt; null }</ID>
+    <ID>MaxLineLength:RescueDeliveryIngress.kt$RescueDeliveryIngress$result = if (result is RescueIngestResult.Accepted || result is RescueIngestResult.Duplicate) RouteResult.RECEIPT_CONFIRMED else RouteResult.FAILED</ID>
     <ID>MaxLineLength:RescueDeliveryService.kt$RescueDeliveryService$app.diagnostics.record(if (result.retryable) "broker_retryable_failure" else "broker_nonretryable_failure")</ID>
     <ID>MaxLineLength:RescueDeliveryService.kt$RescueDeliveryService$createNotificationChannel(NotificationChannel(STATUS_CHANNEL_ID, "救助要請の対応状況", NotificationManager.IMPORTANCE_HIGH))</ID>
     <ID>MaxLineLength:RescueDeliveryService.kt$RescueDeliveryService$deliveryIds.idFor(RescueRequestKey(candidate.envelope.requestId, candidate.envelope.requestVersion))</ID>
@@ -1173,13 +1319,14 @@
     <ID>ReturnCount:GatewayAccessStore.kt$GatewayAccessStore$private fun findAccountInternal(username: String): AccountRow?</ID>
     <ID>ReturnCount:GatewayAccessStore.kt$GatewayAccessStore.Companion$fun verifyPassword(password: String, encoded: String): Boolean</ID>
     <ID>ReturnCount:GatewayConfig.kt$GatewayConfig.Companion$fun isLoopbackHost(value: String?): Boolean</ID>
-    <ID>ReturnCount:GatewayConfig.kt$fun resolveAdminKey(): String</ID>
-    <ID>ReturnCount:GatewayConfig.kt$fun resolveBleBridgeSharedSecret(): String</ID>
+    <ID>ReturnCount:GatewayConfig.kt$fun resolveAdminKey(trainingMode: Boolean = false): String</ID>
+    <ID>ReturnCount:GatewayConfig.kt$fun resolveBleBridgeSharedSecret(trainingMode: Boolean = false): String</ID>
     <ID>ReturnCount:GatewayEnrollment.kt$GatewayEnrollmentCodec$fun decodeQrPayload(payload: String): GatewayEnrollmentResult</ID>
     <ID>ReturnCount:GatewayEnrollment.kt$GatewayEnrollmentCodec$private fun validate(token: GatewayEnrollmentToken): GatewayEnrollmentToken?</ID>
     <ID>ReturnCount:GatewayEnrollment.kt$fun GatewayEnrollmentToken.trustDecisionFor(discovered: DiscoveredGateway): GatewayTrustDecision</ID>
     <ID>ReturnCount:GatewayIntegrity.kt$EcdsaP256GatewayMessageVerifier$override fun verify( canonicalMessage: ByteArray, integrity: GatewayIntegrity?, ): GatewayVerificationResult</ID>
     <ID>ReturnCount:GatewayIntegrity.kt$fun GatewayMessage.signWith(signer: GatewayMessageSigner): GatewayMessage</ID>
+    <ID>ReturnCount:GatewayServer.kt$private fun ApplicationCall.isSameOriginLocalPilotRequest(): Boolean</ID>
     <ID>ReturnCount:GatewayServer.kt$private fun validate( message: com.example.relay.gateway.protocol.GatewayMessage, maxBytes: Int, now: Long, ): String?</ID>
     <ID>ReturnCount:GatewayServer.kt$private suspend fun ApplicationCall.requireBoundedBody(maxBytes: Long): Boolean</ID>
     <ID>ReturnCount:GatewayServer.kt$private suspend fun io.ktor.server.application.ApplicationCall.requireStaff( config: GatewayConfig, access: GatewayAccessStore, requiredRole: StaffRole, ): AuthenticatedStaff?</ID>
@@ -1218,6 +1365,8 @@
     <ID>ReturnCount:SyncCoordinator.kt$SyncCoordinator$private suspend fun send( peerId: String, body: com.example.relay.protocol.PacketBody, packetId: String = java.util.UUID.randomUUID().toString(), ): String</ID>
     <ID>SpreadOperator:RegionalShelterTrust.kt$UnsignedRegionalShelterDirectory$( protocolVersion.toString(), "regional-directory", regionId, generation.toString(), issuedAtEpochMillis.toString(), validUntilEpochMillis.toString(), shelters.size.toString(), *shelters.map { RescueCryptography.sha256Hex(it.directoryEntryBytes()) }.toTypedArray(), )</ID>
     <ID>ThrowsCount:AndroidShelterBleClient.kt$AndroidGattShelterBleSession$private suspend fun subscribeToResults()</ID>
+    <ID>ThrowsCount:CapAlertParser.kt$CapAlertParser$fun parse(xml: String): CapAlert</ID>
+    <ID>ThrowsCount:HardenedXml.kt$HardenedXml$fun parse(xml: String): Document</ID>
     <ID>ThrowsCount:MessageUseCases.kt$private suspend fun persistCreatedMessage( repository: MessageRepository, policy: MessagePolicy, message: RelayMessage, ): RelayMessage</ID>
     <ID>TooGenericExceptionCaught:AndroidShelterBleClient.kt$AndroidGattShelterBleSession$failure: Exception</ID>
     <ID>TooGenericExceptionCaught:AndroidShelterBleClient.kt$AndroidGattShelterBleSession.Companion$error: Throwable</ID>
@@ -1228,9 +1377,11 @@
     <ID>TooGenericExceptionCaught:GatewayStore.kt$GatewayStore$error: Exception</ID>
     <ID>TooGenericExceptionCaught:GatewaySyncEngine.kt$GatewaySyncEngine$error: Exception</ID>
     <ID>TooGenericExceptionCaught:GsiTileCache.kt$GsiTileCache$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:HardenedXml.kt$HardenedXml$cause: Exception</ID>
     <ID>TooGenericExceptionCaught:InternetPrioritySync.kt$InternetPrioritySync$failure: Exception</ID>
     <ID>TooGenericExceptionCaught:InternetPrioritySyncScheduler.kt$InternetPrioritySyncScheduler$failure: Throwable</ID>
     <ID>TooGenericExceptionCaught:NearbyConnectionsTransport.kt$NearbyConnectionsTransport$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:PilotOperations.kt$PilotOperationsStore$e:Throwable</ID>
     <ID>TooGenericExceptionCaught:PlaintextDatabaseMigration.kt$PlaintextDatabaseMigration$error: Exception</ID>
     <ID>TooGenericExceptionCaught:PriorityFeed.kt$HttpsPriorityMessageSource$error: Exception</ID>
     <ID>TooGenericExceptionCaught:ReceiptOutbox.kt$ReceiptOutbox$error: Exception</ID>
@@ -1257,6 +1408,7 @@
     <ID>TooManyFunctions:GatewayStore.kt$GatewayStore : AutoCloseable</ID>
     <ID>TooManyFunctions:MessageRepository.kt$InMemoryMessageRepository : MessageRepository</ID>
     <ID>TooManyFunctions:NearbyConnectionsTransport.kt$NearbyConnectionsTransport : OfflineTransport</ID>
+    <ID>TooManyFunctions:PilotOperations.kt$PilotOperationsStore : AutoCloseable</ID>
     <ID>TooManyFunctions:PlaintextDatabaseMigration.kt$PlaintextDatabaseMigration</ID>
     <ID>TooManyFunctions:RegionalShelterTrust.kt$com.example.relay.rescue.RegionalShelterTrust.kt</ID>
     <ID>TooManyFunctions:RegionalTrustProvisioningCli.kt$RegionalTrustProvisioningCli</ID>
@@ -1296,5 +1448,6 @@
     <ID>UseCheckOrError:FakeOfflineTransport.kt$FakeNetwork$throw IllegalStateException("peer is offline")</ID>
     <ID>UseCheckOrError:FakeOfflineTransport.kt$FakeNetwork$throw IllegalStateException("source is not started")</ID>
     <ID>UseCheckOrError:RoomRescueEnvelopeRepository.kt$RoomRescueEnvelopeRepository$throw IllegalStateException("No eligible rescue envelope is available for pruning")</ID>
+    <ID>UseRequire:PilotOperations.kt$PilotOperationsStore$throw IllegalArgumentException("unterminated_quote")</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -55,15 +55,21 @@ class GatewayConfigTrainingModeTest {
     }
 
     @Test fun `training mode rejects a production database path override`() {
-        assertTrainingGuardRejects("RELAY_GATEWAY_DB") { config(trainingMode = true, dbPath = "C:/relay/relay-gateway.db") }
+        assertTrainingGuardRejects("RELAY_GATEWAY_DB") {
+            config(trainingMode = true, dbPath = "C:/relay/relay-gateway.db")
+        }
     }
 
     @Test fun `training mode rejects a production rescue key path override`() {
-        assertTrainingGuardRejects("RELAY_RESCUE_KEY_FILE") { config(trainingMode = true, rescueKeyPath = "/home/op/.relay/rescue-keys.json") }
+        assertTrainingGuardRejects("RELAY_RESCUE_KEY_FILE") {
+            config(trainingMode = true, rescueKeyPath = "/home/op/.relay/rescue-keys.json")
+        }
     }
 
     @Test fun `training mode rejects a production official cache path override`() {
-        assertTrainingGuardRejects("RELAY_OFFICIAL_INFO_CACHE") { config(trainingMode = true, officialInfoCachePath = ".relay/official/jma.json") }
+        assertTrainingGuardRejects("RELAY_OFFICIAL_INFO_CACHE") {
+            config(trainingMode = true, officialInfoCachePath = ".relay/official/jma.json")
+        }
     }
 
     private fun assertTrainingGuardRejects(expectedVariable: String, build: () -> GatewayConfig) {

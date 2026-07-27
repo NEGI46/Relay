@@ -51,7 +51,8 @@ data class BrokerConfig(
             // Fail closed: a training Broker must never open the production store, even when the
             // operator overrides the path via RELAY_BROKER_DB_PATH.
             require(hasTrainingPathSegment(dbPath)) {
-                "training mode requires RELAY_BROKER_DB_PATH to point inside a 'training' directory; refusing to reuse the production database"
+                "training mode requires RELAY_BROKER_DB_PATH to point inside a 'training' directory; " +
+                    "refusing to reuse the production database"
             }
         }
     }

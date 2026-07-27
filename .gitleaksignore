@@ -1,0 +1,10 @@
+# Gitleaks false-positive fingerprints (full-history scan).
+# Each entry is commit:path:rule:line and MUST have a justification here.
+#
+# RELAY-DPAPI-KEYS-V1 is the public on-disk file-format header for the
+# DPAPI-protected rescue key store - a format marker, not a secret.
+e05702429b6b077c09af52e897d8ea5acc04f255:pc-gateway/src/test/kotlin/com/example/relay/pcgateway/rescue/RescueKeyStoreDpapiTest.kt:generic-api-key:131
+e05702429b6b077c09af52e897d8ea5acc04f255:pc-gateway/src/main/kotlin/com/example/relay/pcgateway/rescue/RescueKeyStore.kt:generic-api-key:282
+# Deliberately fake hex pattern ("0123456789abcdef" repeated) injected as a
+# unit-test config secret so tests never touch real key files; not a live secret.
+cf7a7988d62b762187b5d30993d7a507e3ce84bd:pc-gateway/src/test/kotlin/com/example/relay/pcgateway/GatewayConfigTrainingModeTest.kt:generic-api-key:16

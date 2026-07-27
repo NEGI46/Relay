@@ -77,7 +77,10 @@ class BrokerToxiproxyResilienceTest {
                 check(System.getenv("RELAY_REQUIRE_DOCKER") != "true") {
                     "RELAY_REQUIRE_DOCKER=true but the Docker daemon is unavailable - failing instead of skipping"
                 }
-                Assume.assumeTrue("Docker unavailable; Toxiproxy resilience tests skipped (reported as skipped, not passed)", false)
+                Assume.assumeTrue(
+                    "Docker unavailable; Toxiproxy resilience tests skipped (reported as skipped, not passed)",
+                    false,
+                )
             }
 
             dbFile = File.createTempFile("broker-toxiproxy-test", ".db").apply { deleteOnExit() }
@@ -233,7 +236,10 @@ class BrokerToxiproxyResilienceTest {
 
         proxy.toxics().get("reset-upstream").remove()
         val retry = upload(body)
-        assertTrue("retry after reset must be accepted (was ${retry.statusCode()})", retry.statusCode() in setOf(200, 201))
+        assertTrue(
+            "retry after reset must be accepted (was ${retry.statusCode()})",
+            retry.statusCode() in setOf(200, 201),
+        )
         val secondRetry = upload(body)
         assertEquals("second retry must be the idempotent duplicate", 200, secondRetry.statusCode())
         assertEquals("exactly one envelope stored despite fault + retries", 1, storedCount("resilience-reset-001"))
@@ -255,7 +261,10 @@ class BrokerToxiproxyResilienceTest {
 
         proxy.toxics().get("black-hole").remove()
         val retry = upload(body)
-        assertTrue("retry after timeout must be accepted (was ${retry.statusCode()})", retry.statusCode() in setOf(200, 201))
+        assertTrue(
+            "retry after timeout must be accepted (was ${retry.statusCode()})",
+            retry.statusCode() in setOf(200, 201),
+        )
         assertEquals("exactly one envelope stored despite fault + retry", 1, storedCount("resilience-timeout-001"))
     }
 }

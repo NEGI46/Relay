@@ -110,8 +110,8 @@ jobs:
       - name: Cleanup processes
         if: always()
         run: |
-          [ -n "$BROKER_PID" ] && kill "$BROKER_PID" 2>/dev/null || true
-          [ -n "$GATEWAY_PID" ] && kill "$GATEWAY_PID" 2>/dev/null || true
+          if [ -n "$BROKER_PID" ]; then kill "$BROKER_PID" 2>/dev/null || true; fi
+          if [ -n "$GATEWAY_PID" ]; then kill "$GATEWAY_PID" 2>/dev/null || true; fi
 
   build-reproducibility:
     name: APK build reproducibility

@@ -67,10 +67,10 @@ jobs:
         shell: bash
         run: |
           total=0
-          for xml in $(find . -path '*/test-results/testDebugUnitTest/*.xml' -o -path '*/test-results/test/*.xml' -o -path '*/test-results/jvmTest/*.xml'); do
+          while IFS= read -r xml; do
             count=$(grep -c '<testcase' "$xml" 2>/dev/null || echo 0)
             total=$((total + count))
-          done
+          done < <(find . -path '*/test-results/testDebugUnitTest/*.xml' -o -path '*/test-results/test/*.xml' -o -path '*/test-results/jvmTest/*.xml')
           echo "Total test cases found in JUnit XML: $total"
           if [ "$total" -eq 0 ]; then
             echo "::error::No test cases found in JUnit XML results. This indicates tests did not run."

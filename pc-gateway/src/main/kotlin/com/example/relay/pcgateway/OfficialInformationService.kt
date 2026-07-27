@@ -142,19 +142,23 @@ class OfficialInformationService(
         const val FUCHU_TOWN_CODE = "3430200"
         const val JMA_WARNING_URL = "https://www.jma.go.jp/bosai/warning/data/warning/340000.json"
 
+        private const val CONNECT_TIMEOUT_SECONDS = 5L
+        private const val REQUEST_TIMEOUT_SECONDS = 10L
+        private const val HTTP_OK = 200
+
         fun sha256Hex(content: String): String =
             MessageDigest.getInstance("SHA-256").digest(content.toByteArray(Charsets.UTF_8))
                 .joinToString("") { "%02x".format(it) }
 
         fun defaultFetcher(): () -> String {
-            val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
+            val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS)).build()
             return {
                 val request = HttpRequest.newBuilder(URI(JMA_WARNING_URL))
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS))
                     .header("User-Agent", "Relay/1.0 disaster-response-pilot")
                     .build()
                 val response = http.send(request, HttpResponse.BodyHandlers.ofString(Charsets.UTF_8))
-                require(response.statusCode() == 200) { "JMA warning HTTP ${response.statusCode()}" }
+                require(response.statusCode() == HTTP_OK) { "JMA warning HTTP ${response.statusCode()}" }
                 response.body()
             }
         }

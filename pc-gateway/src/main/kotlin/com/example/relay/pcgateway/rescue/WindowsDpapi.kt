@@ -87,9 +87,13 @@ internal object WindowsDpapi {
         val entropyBlob = DataBlob(entropy)
         val dataOut = DataBlob()
         val ok = if (protecting) {
-            Crypt32.INSTANCE.CryptProtectData(dataIn, null, entropyBlob, null, null, CRYPTPROTECT_UI_FORBIDDEN, dataOut)
+            Crypt32.INSTANCE.CryptProtectData(
+                dataIn, null, entropyBlob, null, null, CRYPTPROTECT_UI_FORBIDDEN, dataOut,
+            )
         } else {
-            Crypt32.INSTANCE.CryptUnprotectData(dataIn, null, entropyBlob, null, null, CRYPTPROTECT_UI_FORBIDDEN, dataOut)
+            Crypt32.INSTANCE.CryptUnprotectData(
+                dataIn, null, entropyBlob, null, null, CRYPTPROTECT_UI_FORBIDDEN, dataOut,
+            )
         }
         check(ok) {
             if (protecting) {
