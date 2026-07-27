@@ -173,7 +173,9 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 
 ## `data-retention` — Retention policy engine for personal/rescue data
 
-- 証跡なし（NOT_IMPLEMENTEDまたは設計のみ）
+- **source**: `pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayConfig.kt` — RELAY_RESCUE_RETENTION_DAYS (default 30, bounds 1..365) and RELAY_RETENTION_SWEEP_INTERVAL_MINUTES (default 60, bounds 5..1440); strict fail-closed parsing rejects malformed or out-of-range values at startup instead of silently defaulting
+- **source**: `pc-gateway/src/main/kotlin/com/example/relay/pcgateway/Main.kt` — Startup purge plus a daemon retention sweeper enforce the policy even when no operator opens the console; only the purged count is logged
+- **test**: `pc-gateway/src/test/kotlin/com/example/relay/pcgateway/GatewayRetentionPolicyTest.kt` — 6 tests: pilot defaults, 0/366-day and sweep-interval rejections naming the env var, configured period drives the purge where the default keeps the record, operator list reports the configured retentionDays; negative test: disabling both init guards made 3 tests FAIL, reverted exactly, full :pc-gateway:test suite green
 
 ## `codeql-analysis` — CodeQL static analysis (java-kotlin / js-ts / actions)
 

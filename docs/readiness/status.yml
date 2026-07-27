@@ -687,17 +687,26 @@ features:
     name: "Retention policy engine for personal/rescue data"
     name_ja: "個人・救助情報のretention管理"
     area: operations
-    implementation: NOT_IMPLEMENTED
-    automated_test: NOT_APPLICABLE
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
     emulator_simulator: NOT_APPLICABLE
     real_device: NOT_APPLICABLE
-    field_test: NOT_APPLICABLE
+    field_test: NOT_RUN
     external_decisions:
       - "Privacy/legal owner approval of retention periods"
-    evidence: []
+    evidence:
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayConfig.kt
+        note: "RELAY_RESCUE_RETENTION_DAYS (default 30, bounds 1..365) and RELAY_RETENTION_SWEEP_INTERVAL_MINUTES (default 60, bounds 5..1440); strict fail-closed parsing rejects malformed or out-of-range values at startup instead of silently defaulting"
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/Main.kt
+        note: "Startup purge plus a daemon retention sweeper enforce the policy even when no operator opens the console; only the purged count is logged"
+      - kind: test
+        ref: pc-gateway/src/test/kotlin/com/example/relay/pcgateway/GatewayRetentionPolicyTest.kt
+        note: "6 tests: pilot defaults, 0/366-day and sweep-interval rejections naming the env var, configured period drives the purge where the default keeps the record, operator list reports the configured retentionDays; negative test: disabling both init guards made 3 tests FAIL, reverted exactly, full :pc-gateway:test suite green"
     last_verified: "2026-07-26"
-    commit: "89e7651"
-    notes: "Terminal-detail 30-day retention exists in Gateway; a general policy engine does not."
+    commit: "e84fe9b"
+    notes: "The engine covers decrypted terminal rescue details (the personal-data store); message/audit stores have their own size bounds. The 30-day default is a pilot value pending privacy/legal owner approval and is now operator-configurable within approved bounds."
 
   - id: codeql-analysis
     name: "CodeQL static analysis (java-kotlin / js-ts / actions)"
