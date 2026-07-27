@@ -60,6 +60,8 @@ private const val MAX_CONTROL_BODY_BYTES = 16L * 1024
     val gatewayId: String,
     val database: String,
     val profile: String = "production",
+    /** Defaults to false so older clients that omit the field are treated as production. */
+    val trainingMode: Boolean = false,
     val lanMode: String = "disabled",
     val anonymousIngress: Boolean = true,
     val remoteManagementEnabled: Boolean = false,
@@ -139,6 +141,7 @@ fun Application.gatewayModule(
                     gatewayId = config.gatewayId,
                     database = "ready",
                     profile = config.profile.name.lowercase(),
+                    trainingMode = config.trainingMode,
                     lanMode = config.lanMode.name.lowercase(),
                     anonymousIngress = config.anonymousIngressEnabled,
                     remoteManagementEnabled = config.remoteManagementEnabled,

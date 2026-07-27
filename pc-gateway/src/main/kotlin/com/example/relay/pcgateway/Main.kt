@@ -94,8 +94,11 @@ fun main(args: Array<String>) {
     println("Relay PC Gateway listening on http://${config.host}:${config.port}")
     println("Operator console: http://$consoleHost:${config.port}/")
     println("Runtime profile: ${config.profile.name.lowercase()} / LAN mode: ${config.lanMode.name.lowercase()}")
+    if (config.trainingMode) {
+        println("TRAINING MODE: drill data only; production database, keys, and credentials are not touched")
+    }
     if (config.legacyAdminKeyEnabled) {
-        println("Legacy X-Admin-Key source: ${resolveAdminKeySource()} (development compatibility only; value is not printed)")
+        println("Legacy X-Admin-Key source: ${resolveAdminKeySource(config.trainingMode)} (development compatibility only; value is not printed)")
     } else {
         println("Operator authentication: individual local staff accounts with HttpOnly session cookies")
     }

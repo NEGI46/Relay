@@ -46,6 +46,19 @@
     if (detail) detail.textContent = isDev ? `${label}（正式運用には未対応${anon}）` : label;
     const chip = $("modeLabel");
     if (chip) { chip.textContent = isDev ? label : ""; chip.classList.toggle("dev", isDev); }
+    renderTrainingBanner(health.trainingMode === true);
+  }
+  function renderTrainingBanner(active) {
+    let banner = $("trainingBanner");
+    if (!active) { if (banner) banner.remove(); return; }
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.id = "trainingBanner";
+      banner.className = "training-banner";
+      banner.setAttribute("role", "alert");
+      document.body.prepend(banner);
+    }
+    banner.textContent = "訓練モード — この画面の情報はすべて訓練用です。実際の救助依頼・個人情報は含まれません。";
   }
   function conditionLabel(value) {
     return ({ LIFE_THREATENING: "命の危険", INJURED_OR_UNWELL: "けが・体調不良", MOBILITY_IMPAIRED: "自力移動困難", SUPPORT_NEEDED: "生活・医療支援" })[value] || value;
