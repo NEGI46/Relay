@@ -42,7 +42,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `ios-preview` | iOS simulatorプレビュービルド | iOS | IMPLEMENTED | AUTOMATED_TESTED | EMULATOR_TESTED | BLOCKED_EXTERNAL | BLOCKED_EXTERNAL | Apple Developer signing and iPhone hardware |
 | `meshtastic-adapter` | Meshtastic adapter（契約境界） | 外部連携 | IMPLEMENTED | AUTOMATED_TESTED | N/A | BLOCKED_EXTERNAL | BLOCKED_EXTERNAL | Physical Meshtastic hardware |
 | `bp7-export` | BPv7 export境界 | 外部連携 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
-| `training-mode` | 訓練モード（本番データ完全分離） | 運用 | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | - |
+| `training-mode` | 訓練モード（本番データ完全分離） | 運用 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | NOT_RUN | - |
 | `official-info-provenance` | 公式情報の来歴モデル（JMA XML・CAP） | 運用 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | NOT_RUN | - |
 | `dpapi-key-protection` | Windows DPAPIによるGateway秘密鍵保護 | PC Gateway | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | - |
 | `data-retention` | 個人・救助情報のretention管理 | 運用 | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | Privacy/legal owner approval of retention periods |
@@ -90,7 +90,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `fuzz-decoders`: Deterministic seed-corpus regression on PR; continuous fuzzing opt-in.
 - `formal-release`: The gate exists and fails closed without organization secrets. No formal release has ever been produced; the workflow result is BLOCKED_EXTERNAL until keys exist.
 - `ios-preview`: Simulator build evidence only; no physical iPhone claim.
-- `training-mode`: Planned: separate DB/keys/accounts/credentials with mandatory training banner.
+- `training-mode`: Gateway/Broker training isolation is fail-closed and the staff console banner is driven by the server health flag. Android app training mode (device-side banner and store separation) is a documented follow-up; offline map tiles are deliberately shared (public GSI data).
 - `official-info-provenance`: Provenance is transport-honest only: no trust anchors exist for JMA/CAP publishers, so content authenticity is never claimed; staff console renders the verification state. CAP/Atom parsers are not yet wired to a live polling source (JMA XML feed polling remains a documented future activation trigger).
 - `dpapi-key-protection`: Current boundary is owner-only file permission verification, deliberately not claimed as DPAPI/HSM/KMS.
 - `data-retention`: Terminal-detail 30-day retention exists in Gateway; a general policy engine does not.

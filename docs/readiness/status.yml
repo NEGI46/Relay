@@ -618,16 +618,28 @@ features:
     name: "Training mode with full data separation"
     name_ja: "訓練モード（本番データ完全分離）"
     area: operations
-    implementation: NOT_IMPLEMENTED
-    automated_test: NOT_APPLICABLE
+    implementation: IMPLEMENTED
+    automated_test: AUTOMATED_TESTED
     emulator_simulator: NOT_APPLICABLE
     real_device: NOT_APPLICABLE
-    field_test: NOT_APPLICABLE
+    field_test: NOT_RUN
     external_decisions: []
-    evidence: []
+    evidence:
+      - kind: source
+        ref: pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayConfig.kt
+        note: "RELAY_TRAINING_MODE moves database, rescue keys, official-info cache, legacy admin key, and BLE bridge secret under ~/.relay/training/; fail-closed init guard rejects env path overrides lacking a 'training' segment; warning code and audit target record the mode"
+      - kind: source
+        ref: broker/src/main/kotlin/com/example/relay/broker/BrokerConfig.kt
+        note: "RELAY_BROKER_TRAINING_MODE ?: RELAY_TRAINING_MODE isolates the Broker store to ./data/training/broker.db with the same fail-closed path guard"
+      - kind: test
+        ref: pc-gateway/src/test/kotlin/com/example/relay/pcgateway/GatewayConfigTrainingModeTest.kt
+        note: "8 tests: isolated defaults, production defaults unchanged, 3 fail-closed override rejections, segment matching, /api/health exposes trainingMode for the mandatory console banner; negative test: disabling the guard made the 3 rejection tests FAIL, reverted exactly"
+      - kind: test
+        ref: broker/src/test/kotlin/com/example/relay/broker/BrokerConfigTrainingModeTest.kt
+        note: "4 tests incl. production-path rejection; negative test: disabling the Broker guard made the rejection test FAIL, reverted exactly; full :pc-gateway:test and :broker:test suites green"
     last_verified: "2026-07-26"
-    commit: "89e7651"
-    notes: "Planned: separate DB/keys/accounts/credentials with mandatory training banner."
+    commit: "cf7a798"
+    notes: "Gateway/Broker training isolation is fail-closed and the staff console banner is driven by the server health flag. Android app training mode (device-side banner and store separation) is a documented follow-up; offline map tiles are deliberately shared (public GSI data)."
 
   - id: official-info-provenance
     name: "Official information provenance model (JMA XML / CAP)"

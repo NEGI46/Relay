@@ -155,7 +155,10 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 
 ## `training-mode` — Training mode with full data separation
 
-- 証跡なし（NOT_IMPLEMENTEDまたは設計のみ）
+- **source**: `pc-gateway/src/main/kotlin/com/example/relay/pcgateway/GatewayConfig.kt` — RELAY_TRAINING_MODE moves database, rescue keys, official-info cache, legacy admin key, and BLE bridge secret under ~/.relay/training/; fail-closed init guard rejects env path overrides lacking a 'training' segment; warning code and audit target record the mode
+- **source**: `broker/src/main/kotlin/com/example/relay/broker/BrokerConfig.kt` — RELAY_BROKER_TRAINING_MODE ?: RELAY_TRAINING_MODE isolates the Broker store to ./data/training/broker.db with the same fail-closed path guard
+- **test**: `pc-gateway/src/test/kotlin/com/example/relay/pcgateway/GatewayConfigTrainingModeTest.kt` — 8 tests: isolated defaults, production defaults unchanged, 3 fail-closed override rejections, segment matching, /api/health exposes trainingMode for the mandatory console banner; negative test: disabling the guard made the 3 rejection tests FAIL, reverted exactly
+- **test**: `broker/src/test/kotlin/com/example/relay/broker/BrokerConfigTrainingModeTest.kt` — 4 tests incl. production-path rejection; negative test: disabling the Broker guard made the rejection test FAIL, reverted exactly; full :pc-gateway:test and :broker:test suites green
 
 ## `official-info-provenance` — Official information provenance model (JMA XML / CAP)
 
