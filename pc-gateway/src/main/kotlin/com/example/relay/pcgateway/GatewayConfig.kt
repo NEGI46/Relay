@@ -46,6 +46,24 @@ enum class GatewayLanMode {
     }
 }
 
+/** At-rest protection applied to the Gateway rescue private key file. */
+enum class GatewayKeyProtection {
+    /** Owner-only filesystem permission verification; deliberately not claimed as DPAPI/HSM/KMS. */
+    FILE_PERMISSIONS,
+
+    /** Windows DPAPI per-user encryption of the key file; refuses to run where DPAPI is absent. */
+    DPAPI;
+
+    companion object {
+        fun fromEnvironment(raw: String? = System.getenv("RELAY_KEY_PROTECTION")): GatewayKeyProtection =
+            when (raw?.trim()?.lowercase()) {
+                null, "", "file-permissions", "file_permissions" -> FILE_PERMISSIONS
+                "dpapi" -> DPAPI
+                else -> throw IllegalArgumentException("RELAY_KEY_PROTECTION must be file-permissions or dpapi")
+            }
+    }
+}
+
 data class GatewayConfig(
     val profile: GatewayProfile = GatewayProfile.fromEnvironment(),
     val lanMode: GatewayLanMode = GatewayLanMode.fromEnvironment(),
@@ -76,6 +94,8 @@ data class GatewayConfig(
     val shelterId: String = System.getenv("RELAY_SHELTER_ID") ?: gatewayId,
     val rescueKeyPath: String = System.getenv("RELAY_RESCUE_KEY_FILE")
         ?: File(System.getProperty("user.home"), if (trainingMode) ".relay/training/rescue-keys.json" else ".relay/rescue-keys.json").path,
+    /** At-rest protection mode for [rescueKeyPath]; parsing is fail-closed on unknown values. */
+    val keyProtection: GatewayKeyProtection = GatewayKeyProtection.fromEnvironment(),
     val offlineMapPath: String = System.getenv("RELAY_OFFLINE_MAP_DIR")
         ?: File(System.getProperty("user.home"), ".relay/maps/gsi-fuchu").path,
     val officialInfoCachePath: String = System.getenv("RELAY_OFFICIAL_INFO_CACHE")

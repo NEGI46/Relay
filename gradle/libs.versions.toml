@@ -30,6 +30,8 @@ kotestProperty = "5.9.1"
 pitestPlugin = "1.15.0"
 pitest = "1.17.4"
 archunit = "1.4.1"
+# Native access for Windows DPAPI (CryptProtectData); same version already pinned in verification metadata
+jna = "5.18.1"
 # 2.x required: Docker Engine 29 rejects the pre-1.44 API negotiation used by testcontainers 1.x
 testcontainers = "2.0.5"
 toxiproxyJava = "2.1.7"
@@ -75,6 +77,7 @@ ktor-server-html-builder = { module = "io.ktor:ktor-server-html-builder-jvm", ve
 ktor-server-test-host = { module = "io.ktor:ktor-server-test-host-jvm", version.ref = "ktor" }
 netty-bom = { module = "io.netty:netty-bom", version.ref = "netty" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 sqlcipher-android = { module = "net.zetetic:sqlcipher-android", version.ref = "sqlcipher" }
 androidx-sqlite = { module = "androidx.sqlite:sqlite", version.ref = "androidxSqlite" }
 maplibre-compose = { module = "org.maplibre.compose:maplibre-compose", version.ref = "maplibreCompose" }

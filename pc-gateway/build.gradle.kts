@@ -45,6 +45,8 @@ dependencies {
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json.client)
     implementation(libs.sqlite.jdbc)
+    // Windows DPAPI (CryptProtectData) for at-rest rescue key protection; inert on other platforms.
+    implementation(libs.jna)
     implementation("org.slf4j:slf4j-simple:2.0.17")
     testImplementation(libs.ktor.server.test.host)
     testImplementation(libs.junit)

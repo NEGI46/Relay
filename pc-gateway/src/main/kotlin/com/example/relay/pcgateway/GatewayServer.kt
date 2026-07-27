@@ -585,8 +585,8 @@ data class GatewayRescueKeyStatus(
 ) {
     companion object {
         fun notChecked() = GatewayRescueKeyStatus(storage = "not_checked", status = "not_checked")
-        fun valid(expiresAtEpochMillis: Long, warning: Boolean) = GatewayRescueKeyStatus(
-            storage = "local_file_permission_checked",
+        fun valid(expiresAtEpochMillis: Long, warning: Boolean, dpapiProtected: Boolean = false) = GatewayRescueKeyStatus(
+            storage = if (dpapiProtected) "dpapi_protected_file" else "local_file_permission_checked",
             status = if (warning) "expiring_soon" else "valid",
             expiresAtEpochMillis = expiresAtEpochMillis,
             warningCode = if (warning) "rescue_key_expiring_soon_manual_reprovisioning_required" else null,

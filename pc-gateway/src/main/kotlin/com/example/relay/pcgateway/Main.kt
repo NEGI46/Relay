@@ -54,11 +54,12 @@ fun main(args: Array<String>) {
     if (config.profile != GatewayProfile.DEVELOPMENT && !Files.isRegularFile(rescueKeyPath)) {
         error("rescue key material is not provisioned; automatic generation is disabled outside development")
     }
-    val rescueKeys = RescueKeyStore(rescueKeyPath, config.shelterId).loadOrCreate()
+    val rescueKeys = RescueKeyStore(rescueKeyPath, config.shelterId, protection = config.keyProtection).loadOrCreate()
     val now = System.currentTimeMillis()
     val rescueKeyStatus = GatewayRescueKeyStatus.valid(
         expiresAtEpochMillis = rescueKeys.manifest.validUntilEpochMillis,
         warning = rescueKeys.manifest.validUntilEpochMillis - now <= config.rescueKeyExpiryWarningMillis,
+        dpapiProtected = config.keyProtection == GatewayKeyProtection.DPAPI,
     )
     if (rescueKeyStatus.status == "expiring_soon") {
         System.err.println("Rescue key expiry is approaching; manual key rotation and re-provisioning are required before pilot use.")
@@ -118,6 +119,12 @@ fun main(args: Array<String>) {
         println("Operator authentication: individual local staff accounts with HttpOnly session cookies")
     }
     println("Database: ${config.dbPath}")
+    println(
+        "Rescue key at-rest protection: " + when (config.keyProtection) {
+            GatewayKeyProtection.DPAPI -> "Windows DPAPI (per-user)"
+            GatewayKeyProtection.FILE_PERMISSIONS -> "owner-only file permissions (not DPAPI/HSM/KMS)"
+        },
+    )
     println("Rescue retention: terminal details kept ${config.rescueRetentionDays} day(s), swept every ${config.retentionSweepIntervalMinutes} minute(s) (pilot defaults pending privacy/legal approval)")
     println("Anonymous ingress: ${config.anonymousIngressEnabled}")
     println("Rescue shelter: ${config.shelterId}")
