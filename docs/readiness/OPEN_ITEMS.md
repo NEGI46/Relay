@@ -11,7 +11,6 @@ Status date: **2026-07-26** / commit `89e7651`
 - `continuous-gps-tracking` 継続GPS追跡（background location） — NOT_IMPLEMENTED
 - `auto-disaster-detection` 自動災害検知（FCM・気象・Activation Manifest） — NOT_IMPLEMENTED
 - `broker-high-availability` Broker高可用性・監視・災害復旧 — NOT_IMPLEMENTED（外部判断: Infrastructure/SRE owner for HA, RTO/RPO, and monitoring design）
-- `dpapi-key-protection` Windows DPAPIによるGateway秘密鍵保護 — NOT_IMPLEMENTED
 - `branch-protection` 必須セキュリティチェック付きブランチ保護 — BLOCKED_EXTERNAL（外部判断: Repository owner must apply the settings documented in docs/security/BRANCH_PROTECTION.md）
 
 ## 実装済みだが実機未検証（DEVICE_TESTEDなし）

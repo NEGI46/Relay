@@ -44,7 +44,7 @@
 | BPv7 export境界 | 自動試験まで完了 | 対象外 |
 | 訓練モード（本番データ完全分離） | 自動試験まで完了 | 未実施 |
 | 公式情報の来歴モデル（JMA XML・CAP） | 自動試験まで完了 | 未実施 |
-| Windows DPAPIによるGateway秘密鍵保護 | 未実装 | — |
+| Windows DPAPIによるGateway秘密鍵保護 | 自動試験まで完了 | 未実施 |
 | 個人・救助情報のretention管理 | 自動試験まで完了 | 未実施 |
 | CodeQL静的解析（java-kotlin / js-ts / actions） | 実装のみ | 対象外 |
 | gitleaks秘密情報スキャン（Relay固有ルール） | 自動試験まで完了 | 対象外 |

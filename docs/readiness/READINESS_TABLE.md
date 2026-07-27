@@ -44,7 +44,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `bp7-export` | BPv7 export境界 | 外部連携 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `training-mode` | 訓練モード（本番データ完全分離） | 運用 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | NOT_RUN | - |
 | `official-info-provenance` | 公式情報の来歴モデル（JMA XML・CAP） | 運用 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | NOT_RUN | - |
-| `dpapi-key-protection` | Windows DPAPIによるGateway秘密鍵保護 | PC Gateway | NOT_IMPLEMENTED | N/A | N/A | N/A | N/A | - |
+| `dpapi-key-protection` | Windows DPAPIによるGateway秘密鍵保護 | PC Gateway | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | NOT_RUN | - |
 | `data-retention` | 個人・救助情報のretention管理 | 運用 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | NOT_RUN | Privacy/legal owner approval of retention periods |
 | `codeql-analysis` | CodeQL静的解析（java-kotlin / js-ts / actions） | Supply chain | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
 | `secret-scanning-gitleaks` | gitleaks秘密情報スキャン（Relay固有ルール） | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
@@ -92,7 +92,7 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `ios-preview`: Simulator build evidence only; no physical iPhone claim.
 - `training-mode`: Gateway/Broker training isolation is fail-closed and the staff console banner is driven by the server health flag. Android app training mode (device-side banner and store separation) is a documented follow-up; offline map tiles are deliberately shared (public GSI data).
 - `official-info-provenance`: Provenance is transport-honest only: no trust anchors exist for JMA/CAP publishers, so content authenticity is never claimed; staff console renders the verification state. CAP/Atom parsers are not yet wired to a live polling source (JMA XML feed polling remains a documented future activation trigger).
-- `dpapi-key-protection`: Current boundary is owner-only file permission verification, deliberately not claimed as DPAPI/HSM/KMS.
+- `dpapi-key-protection`: Opt-in per-user DPAPI at-rest protection (default remains file-permissions); deliberately not claimed as HSM/TPM/KMS - the blob opens only for the same Windows user on the same machine, and machine-loss recovery requires re-provisioning.
 - `data-retention`: The engine covers decrypted terminal rescue details (the personal-data store); message/audit stores have their own size bounds. The 30-day default is a pilot value pending privacy/legal owner approval and is now operator-configurable within approved bounds.
 - `codeql-analysis`: Workflow linted locally (actionlint/zizmor) but not yet executed on GitHub-hosted runners.
 - `secret-scanning-gitleaks`: Scan executed locally with checksum-pinned gitleaks 8.30.1; CI execution on GitHub runners pending first push.

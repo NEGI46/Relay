@@ -169,7 +169,9 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 
 ## `dpapi-key-protection` — Windows DPAPI protection for Gateway private keys
 
-- 証跡なし（NOT_IMPLEMENTEDまたは設計のみ）
+- **source**: `pc-gateway/src/main/kotlin/com/example/relay/pcgateway/rescue/WindowsDpapi.kt` — Direct JNA mapping of crypt32 CryptProtectData/CryptUnprotectData (per-user scope, CRYPTPROTECT_UI_FORBIDDEN); lazy native load so non-Windows platforms never touch it
+- **source**: `pc-gateway/src/main/kotlin/com/example/relay/pcgateway/rescue/RescueKeyStore.kt` — RELAY_KEY_PROTECTION=dpapi wraps the key file in a DPAPI blob with one-way migration from plaintext; fail-closed both directions (dpapi mode refuses plaintext fallback, protected files refuse non-dpapi mode); owner-only permission checks still run in both modes
+- **test**: `pc-gateway/src/test/kotlin/com/example/relay/pcgateway/rescue/RescueKeyStoreDpapiTest.kt` — 7/7 on Windows (roundtrip with no plaintext key material on disk, migration, mode mismatch, tampered blob, wrong entropy, fail-closed guards, env parsing); negative proof: disabling both fail-closed guards made 2 tests FAIL, then reverted; Windows-only tests skip via Assume on Linux CI
 
 ## `data-retention` — Retention policy engine for personal/rescue data
 
