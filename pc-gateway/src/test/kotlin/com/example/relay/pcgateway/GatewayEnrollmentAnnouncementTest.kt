@@ -17,6 +17,7 @@ class GatewayEnrollmentAnnouncementTest {
         shelterId = "shelter-test-01",
         publicScheme = "https",
         publicPort = 8443,
+        tlsSpkiSha256 = "c".repeat(64),
     )
 
     @Test
