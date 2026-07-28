@@ -2,3 +2,13 @@ name: Relay security and quality
 
 queries:
   - uses: security-and-quality
+
+query-filters:
+  # CodeQL 2.26.1 reports Kotlin compiler-synthesized locals at line 0 in otherwise clean source.
+  # Kotlin compiler warnings and Detekt continue to enforce source-level unused declarations.
+  - exclude:
+      id: java/local-variable-is-never-read
+  # Room KSP and Kotlin exception lowering synthesize fields at line 0 that source authors cannot
+  # rename. Maintained source remains covered by the rest of the security-and-quality suite.
+  - exclude:
+      id: java/field-masks-super-field
