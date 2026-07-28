@@ -1,4 +1,4 @@
-# Temporary audit: removed before the final pull request.
+# Temporary audit: strict rerun after approved false-positive filters; removed before the final PR.
 name: CodeQL security and quality audit
 
 on:
