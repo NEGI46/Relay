@@ -36,7 +36,7 @@ jobs:
           RELAY_REQUIRE_DOCKER: 'true'
         run: ./gradlew :app:assembleDebug :pc-gateway:build :pc-gateway:installDist :broker:test --no-daemon
       - name: Upload build artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-build-artifacts
@@ -76,7 +76,7 @@ jobs:
             echo "::error::No test cases found in JUnit XML results. This indicates tests did not run."
             exit 1
           fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-unit-test-results
@@ -103,7 +103,7 @@ jobs:
       # Fail-closed: pitest exits non-zero when the mutation score drops below
       # the threshold pinned in relay-protocol/build.gradle.kts.
       - run: ./gradlew :relay-protocol:pitest --no-daemon
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-mutation-report
@@ -136,7 +136,7 @@ jobs:
       # (undocumented status code, response schema mismatch, 5xx).
       - name: Run Broker API contract gate
         run: python tools/api-contract/run_schemathesis.py --skip-build
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-api-contract
@@ -159,7 +159,7 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
       - run: ./gradlew :app:lintDebug --no-daemon
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-android-lint
@@ -193,7 +193,7 @@ jobs:
       - name: Run Playwright tests
         working-directory: staff-console-e2e
         run: npx playwright test
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-playwright-report
@@ -273,7 +273,7 @@ jobs:
           python-version: '3.12'
       - shell: pwsh
         run: ./scripts/run-jazzer.ps1 -Mode $env:SECURITY_MODE -OutputPath artifacts/jazzer -RequirePython
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-fuzz-regression
@@ -298,7 +298,7 @@ jobs:
           MOBSF_URL: ${{ secrets.MOBSF_URL }}
           MOBSF_API_KEY: ${{ secrets.MOBSF_API_KEY }}
         run: ./scripts/run-mobsf.ps1 -ArtifactPath distribution -OutputPath artifacts/mobsf.json -Mode $env:SECURITY_MODE
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-apk-scan
@@ -335,7 +335,7 @@ jobs:
         if: always()
         shell: pwsh
         run: ./scripts/verify-security-evidence.ps1 -EvidencePaths artifacts/syft-sbom.json,artifacts/osv.json,artifacts/grype.json -OutputPath artifacts/dependency-security-evidence.json -RequireComplete -Mode $env:SECURITY_MODE
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-dependency-scan
@@ -357,7 +357,7 @@ jobs:
           path: distribution
       - shell: pwsh
         run: ./scripts/verify-distribution-signatures.ps1 -PackageRoot distribution -Mode $env:SECURITY_MODE
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-signature-verification
@@ -383,7 +383,7 @@ jobs:
         # In report-only mode, unavailable external services remain explicitly BLOCKED in the
         # artifact. The evidence script enforces completeness automatically in block-high-critical.
         run: ./scripts/verify-security-evidence.ps1 -EvidencePaths evidence/mobsf.json,evidence/syft-sbom.json,evidence/osv.json,evidence/grype.json,evidence/signature-verification.json -OutputPath evidence/security-evidence-summary.json -Mode $env:SECURITY_MODE
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-security-evidence-summary
@@ -409,7 +409,7 @@ jobs:
         env:
           PYTHONPATH: gateway-meshtastic-adapter
         run: python -m unittest discover gateway-meshtastic-adapter/tests -p 'test_*.py' -v
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-gateway-recovery
@@ -525,7 +525,7 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-test-pc-gateway.ps1 -SkipBuild -HealthTimeoutSeconds 180
           if ($LASTEXITCODE -ne 0) { throw 'PC Gateway smoke test failed' }
       - name: Upload Windows validation logs
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: relay-windows-validation
