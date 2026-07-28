@@ -21,6 +21,7 @@ class GatewayEnrollmentTrustTest {
         port = 8443,
         scheme = "https",
         manifestFingerprint = fingerprint,
+        tlsSpkiSha256 = fingerprint,
     )
 
     @Test
@@ -97,7 +98,13 @@ class GatewayEnrollmentTrustTest {
         override suspend fun requestPair(settings: GatewaySettings, code: String) = false
         override suspend fun push(settings: GatewaySettings, token: String, messages: List<com.example.relay.domain.RelayMessage>) = error("unused")
         override suspend fun pullReceipts(settings: GatewaySettings, token: String) = emptyList<com.example.relay.domain.DeliveryReceipt>()
-        override suspend fun pushPublic(gateway: DiscoveredGateway, bridgeId: String, bridgeName: String, messages: List<com.example.relay.domain.RelayMessage>): GatewayPushResult {
+        override suspend fun pushPublic(
+            gateway: DiscoveredGateway,
+            bridgeId: String,
+            bridgeName: String,
+            messages: List<com.example.relay.domain.RelayMessage>,
+            tlsSpkiSha256: String?,
+        ): GatewayPushResult {
             host = gateway.host
             return GatewayPushResult(
                 com.example.relay.gateway.protocol.SyncMessagesResponse(
