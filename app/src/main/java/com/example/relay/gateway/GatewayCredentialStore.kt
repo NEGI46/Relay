@@ -3,6 +3,7 @@ package com.example.relay.gateway
 import android.content.Context
 import android.util.Base64
 import java.security.KeyStore
+import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -18,9 +19,10 @@ interface GatewayCredentialStoreContract {
 class GatewayCredentialStore(context: Context) : GatewayCredentialStoreContract {
     private val preferences = context.getSharedPreferences("relay_gateway_credentials", Context.MODE_PRIVATE)
     private val keyAlias = "relay_gateway_token"
+    private val secureRandom = SecureRandom()
 
     override fun save(token: String) {
-        val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+        val iv = ByteArray(12).also(secureRandom::nextBytes)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key(), GCMParameterSpec(128, iv)) }
         val encrypted = cipher.doFinal(token.toByteArray(Charsets.UTF_8))
         preferences.edit().putString("token", Base64.encodeToString(iv + encrypted, Base64.NO_WRAP)).apply()
