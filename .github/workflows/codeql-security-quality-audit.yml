@@ -1,4 +1,4 @@
-# Temporary audit: strict rerun after explicit TLS socket-factory wiring; removed before the final PR.
+# Temporary audit: strict rerun after typed HTTPS socket-factory wiring; removed before the final PR.
 name: CodeQL security and quality audit
 
 on:
