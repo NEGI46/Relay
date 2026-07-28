@@ -136,9 +136,13 @@ class GsiTileCache(private val root: Path) : AutoCloseable {
 
         fun latitudeToTileY(latitude: Double, zoom: Int): Int {
             val radians = latitude * PI / 180.0
-            val normalizedY =
-                (1.0 - ln(tan(radians) + 1.0 / kotlin.math.cos(radians)) / PI) / 2.0
-            val tileScale = 1 shl zoom
+            val tangent = tan(radians)
+            val secant = 1.0 / kotlin.math.cos(radians)
+            val mercator = ln(tangent + secant)
+            val projected = mercator / PI
+            val inverted = 1.0 - projected
+            val normalizedY = inverted / 2.0
+            val tileScale = (1 shl zoom).toDouble()
             return floor(normalizedY * tileScale).toInt()
         }
     }
