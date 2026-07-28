@@ -20,6 +20,7 @@ object GatewayEnrollmentAnnouncement {
             port = config.publicPort,
             scheme = config.publicScheme,
             manifestFingerprint = manifestFingerprint.trim().lowercase(),
+            tlsSpkiSha256 = config.tlsSpkiSha256,
         )
 
     /**
@@ -51,6 +52,7 @@ object GatewayEnrollmentAnnouncement {
             "  QR payload : $payload",
             "  Manual id  : ${token.gatewayId} / shelter ${token.shelterId} at ${token.scheme}://${token.host}:${token.port}",
             "  Manual fp  : ${GatewayEnrollmentCodec.formatManualFingerprint(token.manifestFingerprint)}",
+            "  TLS SPKI   : ${token.tlsSpkiSha256?.let(GatewayEnrollmentCodec::formatManualFingerprint) ?: "not used for HTTP"}",
         )
     }
 }
