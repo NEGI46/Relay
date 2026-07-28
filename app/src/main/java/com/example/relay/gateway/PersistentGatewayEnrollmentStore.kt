@@ -60,13 +60,15 @@ class PersistentGatewayEnrollmentStore(
     private val store = GatewayEnrollmentStore()
 
     init {
-        var dropped = 0
-        storage.read().forEach { payload ->
+        val dropped = storage.read().count { payload ->
             when (val result = GatewayEnrollmentCodec.decodeQrPayload(payload)) {
-                is GatewayEnrollmentResult.Enrolled -> store.enroll(result.token)
+                is GatewayEnrollmentResult.Enrolled -> {
+                    store.enroll(result.token)
+                    false
+                }
                 is GatewayEnrollmentResult.Rejected -> {
-                    dropped++
                     onDiagnostic("gw_enroll_dropped:${result.reason}")
+                    true
                 }
             }
         }
