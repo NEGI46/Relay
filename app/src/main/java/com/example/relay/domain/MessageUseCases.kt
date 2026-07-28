@@ -16,7 +16,7 @@ fun interface ReportSigner {
 }
 
 /** A classified creation failure that UI code can handle without relying on `check`. */
-sealed class LegacyMessageCreationException(val reason: String) : RuntimeException(reason) {
+sealed class LegacyMessageCreationException(reason: String) : RuntimeException(reason) {
     class InvalidMessage(reason: String) : LegacyMessageCreationException(reason)
     class DuplicateMessageId(messageId: String) : LegacyMessageCreationException("duplicate message id: $messageId")
     class MessageIdCollision(messageId: String) : LegacyMessageCreationException("message id collision: $messageId")
