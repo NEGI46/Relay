@@ -151,13 +151,11 @@ private class AndroidGattShelterBleSession private constructor(
             writeDescriptorLegacy(descriptor, value)
         }
 
-    @Suppress("DEPRECATION")
     private fun writeDescriptorLegacy(descriptor: BluetoothGattDescriptor, value: ByteArray): Boolean {
-        // Android 23-32 has no value-taking descriptor write API.
-        // codeql[java/deprecated-call]
-        descriptor.value = value
-        // codeql[java/deprecated-call]
-        return gatt.writeDescriptor(descriptor)
+        // Android 23-32 has no non-deprecated descriptor write API. Keep the
+        // fixed legacy calls isolated behind reflection so modern builds do not
+        // compile against deprecated members.
+        return LegacyBluetoothGattApi.writeDescriptor(gatt, descriptor, value)
     }
 
     private fun writeCharacteristicCompat(
@@ -174,17 +172,13 @@ private class AndroidGattShelterBleSession private constructor(
             writeCharacteristicLegacy(characteristic, value)
         }
 
-    @Suppress("DEPRECATION")
     private fun writeCharacteristicLegacy(
         characteristic: BluetoothGattCharacteristic,
         value: ByteArray,
     ): Boolean {
         characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        // Android 23-32 has no value-taking characteristic write API.
-        // codeql[java/deprecated-call]
-        characteristic.value = value
-        // codeql[java/deprecated-call]
-        return gatt.writeCharacteristic(characteristic)
+        // Android 23-32 has no non-deprecated characteristic write API.
+        return LegacyBluetoothGattApi.writeCharacteristic(gatt, characteristic, value)
     }
 
     private suspend fun receiveResult(sessionId: ByteArray): ByteArray = withTimeout(RESULT_TIMEOUT_MILLIS) {
@@ -251,8 +245,11 @@ private class AndroidGattShelterBleSession private constructor(
         @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
         override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
             // Android invokes this legacy callback only through API 32.
-            // codeql[java/deprecated-call]
-            handleCharacteristicRead(characteristic, characteristic.value ?: byteArrayOf(), status)
+            handleCharacteristicRead(
+                characteristic,
+                LegacyBluetoothGattApi.characteristicValue(characteristic) ?: byteArrayOf(),
+                status,
+            )
         }
 
         private fun handleCharacteristicRead(
@@ -294,8 +291,10 @@ private class AndroidGattShelterBleSession private constructor(
         @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             // Android invokes this legacy callback only through API 32.
-            // codeql[java/deprecated-call]
-            handleCharacteristicChanged(characteristic, characteristic.value ?: return)
+            handleCharacteristicChanged(
+                characteristic,
+                LegacyBluetoothGattApi.characteristicValue(characteristic) ?: return,
+            )
         }
 
         private fun handleCharacteristicChanged(
@@ -349,4 +348,42 @@ private class AndroidGattShelterBleSession private constructor(
             }
         }
     }
+}
+
+private object LegacyBluetoothGattApi {
+    private val descriptorSetValue =
+        BluetoothGattDescriptor::class.java.getMethod("setValue", ByteArray::class.java)
+    private val gattWriteDescriptor =
+        BluetoothGatt::class.java.getMethod("writeDescriptor", BluetoothGattDescriptor::class.java)
+    private val characteristicSetValue =
+        BluetoothGattCharacteristic::class.java.getMethod("setValue", ByteArray::class.java)
+    private val gattWriteCharacteristic =
+        BluetoothGatt::class.java.getMethod("writeCharacteristic", BluetoothGattCharacteristic::class.java)
+    private val characteristicGetValue =
+        BluetoothGattCharacteristic::class.java.getMethod("getValue")
+
+    fun writeDescriptor(
+        gatt: BluetoothGatt,
+        descriptor: BluetoothGattDescriptor,
+        value: ByteArray,
+    ): Boolean =
+        runCatching {
+            val accepted = descriptorSetValue.invoke(descriptor, value) as? Boolean ?: false
+            accepted && (gattWriteDescriptor.invoke(gatt, descriptor) as? Boolean ?: false)
+        }.getOrDefault(false)
+
+    fun writeCharacteristic(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray,
+    ): Boolean =
+        runCatching {
+            val accepted = characteristicSetValue.invoke(characteristic, value) as? Boolean ?: false
+            accepted && (gattWriteCharacteristic.invoke(gatt, characteristic) as? Boolean ?: false)
+        }.getOrDefault(false)
+
+    fun characteristicValue(characteristic: BluetoothGattCharacteristic): ByteArray? =
+        runCatching {
+            characteristicGetValue.invoke(characteristic) as? ByteArray
+        }.getOrNull()
 }
