@@ -22,7 +22,13 @@ interface GatewayBridgeClient {
     suspend fun requestPair(settings: GatewaySettings, code: String): Boolean
     suspend fun push(settings: GatewaySettings, token: String, messages: List<RelayMessage>): GatewayPushResult
     suspend fun pullReceipts(settings: GatewaySettings, token: String): List<DeliveryReceipt>
-    suspend fun pushPublic(gateway: DiscoveredGateway, bridgeId: String, bridgeName: String, messages: List<RelayMessage>): GatewayPushResult =
+    suspend fun pushPublic(
+        gateway: DiscoveredGateway,
+        bridgeId: String,
+        bridgeName: String,
+        messages: List<RelayMessage>,
+        tlsSpkiSha256: String? = null,
+    ): GatewayPushResult =
         throw UnsupportedOperationException("public gateway ingress is not supported")
 }
 
@@ -48,19 +54,23 @@ class HttpGatewayBridgeClient(
         bridgeId: String,
         bridgeName: String,
         messages: List<RelayMessage>,
+        tlsSpkiSha256: String?,
     ): GatewayPushResult {
         val request = SyncMessagesRequest(
             bridgeId = bridgeId,
             bridgeName = bridgeName,
             messages = messages.map(::toGatewayMessage),
         )
-        val response = executePublic(gateway, json.encodeToString(request))
+        val response = executePublic(gateway, json.encodeToString(request), tlsSpkiSha256)
         return GatewayPushResult(json.decodeFromString(response))
     }
     private suspend fun execute(settings: GatewaySettings, token: String, method: String, path: String, body: String?): String =
         withContext(Dispatchers.IO) {
             val bodyBytes = body?.toByteArray(Charsets.UTF_8)
-            val connection = (URL("${gatewayScheme(settings.scheme)}://${settings.host}:${settings.port}$path").openConnection() as HttpURLConnection).apply {
+            val connection = GatewayTlsPinning.open(
+                URL("${gatewayScheme(settings.scheme)}://${settings.host}:${settings.port}$path"),
+                settings.tlsSpkiSha256,
+            ).apply {
                 requestMethod = method; connectTimeout = 5_000; readTimeout = 10_000; setRequestProperty("Authorization", "Bearer $token"); setRequestProperty("X-Bridge-Id", settings.bridgeId)
                 if (bodyBytes != null) {
                     doOutput = true
@@ -79,9 +89,16 @@ class HttpGatewayBridgeClient(
                 connection.disconnect()
             }
     }
-    private suspend fun executePublic(gateway: DiscoveredGateway, body: String): String = withContext(Dispatchers.IO) {
+    private suspend fun executePublic(
+        gateway: DiscoveredGateway,
+        body: String,
+        tlsSpkiSha256: String?,
+    ): String = withContext(Dispatchers.IO) {
         val bodyBytes = body.toByteArray(Charsets.UTF_8)
-        val connection = (URL("${gatewayScheme(gateway.scheme)}://${gateway.host}:${gateway.port}/api/public/sync/messages").openConnection() as HttpURLConnection).apply {
+        val connection = GatewayTlsPinning.open(
+            URL("${gatewayScheme(gateway.scheme)}://${gateway.host}:${gateway.port}/api/public/sync/messages"),
+            tlsSpkiSha256,
+        ).apply {
             requestMethod = "POST"
             connectTimeout = 5_000
             readTimeout = 10_000
