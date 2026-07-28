@@ -49,6 +49,32 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup-pc-gateway.ps1 -LanMode
 
 スクリプトは Public network profile を検出すると LAN firewall/task 変更前に停止します。TLS proxy、DNS、証明書、WAF、閉域網の正当性をスクリプトが検証済みと主張することはありません。
 
+### HTTPS の SPKI ピン
+
+HTTPS を公開する Gateway は、TLS reverse proxy の leaf certificate の公開鍵を
+SHA-256 でハッシュした 64 桁の小文字 hex を設定しないと起動しません。
+
+~~~powershell
+$env:RELAY_GATEWAY_PUBLIC_SCHEME = 'https'
+$env:RELAY_GATEWAY_TLS_SPKI_SHA256 = '<64 lowercase hex characters>'
+~~~
+
+証明書ファイルから確認する場合は、承認済みの管理端末で次を実行し、出力の
+`SHA2-256(stdin)= ` より後だけを設定します。
+
+~~~text
+openssl x509 -in gateway-cert.pem -pubkey -noout |
+  openssl pkey -pubin -outform DER |
+  openssl dgst -sha256
+~~~
+
+ピンは接続先からその場で取得せず、証明書の管理者から別経路で照合してください。
+Gateway の enrollment QR/token にこの値が入り、Android は通常の CA・有効期限・
+hostname 検証に加えて SPKI 一致を要求します。証明書更新で鍵も変える場合は、
+先に新しいピンを承認・設定し、QR/token を再発行して端末を再 enrollment します。
+scheduled task を使う場合も、この環境変数をサービス実行アカウントから読める
+承認済みの service environment に設定してください。
+
 ## 開発互換モード
 
 既存の匿名 LAN / UDP discovery / HTTP 管理キー経路を試す必要がある場合だけ、明示的に development を選びます。
