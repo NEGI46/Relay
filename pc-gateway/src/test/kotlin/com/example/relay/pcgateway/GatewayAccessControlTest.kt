@@ -100,6 +100,7 @@ class GatewayAccessControlTest {
         val config = GatewayConfig(
             profile = GatewayProfile.PRODUCTION,
             lanMode = GatewayLanMode.TLS_REVERSE_PROXY,
+            tlsSpkiSha256 = "c".repeat(64),
         )
         assertFalse(config.managementSourceAllowed("127.0.0.1"))
     }
@@ -109,6 +110,7 @@ class GatewayAccessControlTest {
         val config = GatewayConfig(
             profile = GatewayProfile.PRODUCTION,
             lanMode = GatewayLanMode.TLS_REVERSE_PROXY,
+            tlsSpkiSha256 = "c".repeat(64),
             dbPath = Files.createTempFile("relay-proxy-ui", ".db").toString(),
         )
         GatewayStore(config).use { store ->
@@ -148,6 +150,7 @@ class GatewayAccessControlTest {
         val config = GatewayConfig(
             profile = GatewayProfile.PRODUCTION,
             lanMode = GatewayLanMode.TLS_REVERSE_PROXY,
+            tlsSpkiSha256 = "c".repeat(64),
             remoteManagementEnabled = true,
             dbPath = Files.createTempFile("relay-session-cookie", ".db").toString(),
         )
