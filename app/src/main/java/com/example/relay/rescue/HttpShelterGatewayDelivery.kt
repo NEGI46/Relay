@@ -3,6 +3,8 @@ package com.example.relay.rescue
 import com.example.relay.BuildConfig
 import com.example.relay.gateway.DiscoveredGateway
 import com.example.relay.gateway.GatewayDiscovery
+import com.example.relay.gateway.GatewayEnrollmentStore
+import com.example.relay.gateway.GatewayTlsPinning
 import com.example.relay.gateway.UdpGatewayDiscovery
 import java.net.HttpURLConnection
 import java.net.URL
@@ -15,6 +17,7 @@ import kotlinx.serialization.json.Json
 /** Sends only the already encrypted rescue envelope to a discovered local PC Gateway. */
 class HttpShelterGatewayDelivery(
     private val discovery: GatewayDiscovery = UdpGatewayDiscovery(),
+    private val enrollmentStore: GatewayEnrollmentStore? = null,
     private val json: Json = Json { encodeDefaults = true; ignoreUnknownKeys = false },
 ) {
     suspend fun deliver(
@@ -29,10 +32,16 @@ class HttpShelterGatewayDelivery(
         if (scheme == "http" && !BuildConfig.ALLOW_HTTP_GATEWAY) {
             return@withContext GatewayDeliveryResult.InsecureTransportBlocked
         }
+        val enrolledGateway = enrollmentStore?.trustedTokenFor(gateway)
+        if (scheme == "https" && enrolledGateway?.tlsSpkiSha256 == null) {
+            return@withContext GatewayDeliveryResult.InsecureTransportBlocked
+        }
         val request = HttpRescueDeliveryRequest(envelope, carrierId, courierDeliveryId)
         runCatching {
-            val connection = (URL("$scheme://${gateway.host}:${gateway.port}/api/public/rescue/deliver")
-                .openConnection() as HttpURLConnection).apply {
+            val connection = GatewayTlsPinning.open(
+                URL("$scheme://${gateway.host}:${gateway.port}/api/public/rescue/deliver"),
+                enrolledGateway?.tlsSpkiSha256,
+            ).apply {
                 requestMethod = "POST"
                 connectTimeout = 5_000
                 readTimeout = 10_000
