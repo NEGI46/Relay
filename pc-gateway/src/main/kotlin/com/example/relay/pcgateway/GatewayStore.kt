@@ -8,6 +8,7 @@ import com.example.relay.pcgateway.rescue.RescuePersistence
 import com.example.relay.pcgateway.rescue.SqliteRescuePersistence
 import java.io.File
 import java.security.MessageDigest
+import java.security.SecureRandom
 import java.sql.Connection
 import java.sql.DriverManager
 import java.util.Base64
@@ -23,6 +24,7 @@ private const val CONTENT_UNVERIFIED = "UNVERIFIED"
 private const val CONTENT_SIGNED_UNVERIFIED = "SIGNED_UNVERIFIED"
 private const val PAIRING_CODE_MIN = 100000
 private const val PAIRING_CODE_MAX = 999999
+private val SECURE_RANDOM = SecureRandom()
 
 data class StoreOutcome(
     val messageId: String,
@@ -239,7 +241,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
     fun createPairingCode(now: Long = System.currentTimeMillis()): String = synchronized(lock) {
         // CSPRNG: pairing codes gate bridge enrollment, so kotlin.random is not acceptable.
         val span = PAIRING_CODE_MAX - PAIRING_CODE_MIN + 1
-        val code = (PAIRING_CODE_MIN + java.security.SecureRandom().nextInt(span)).toString()
+        val code = (PAIRING_CODE_MIN + SECURE_RANDOM.nextInt(span)).toString()
         writeCoordinator.write {
             connection.prepareStatement("INSERT INTO pairing_codes(code, expires_at) VALUES (?, ?)").use {
                 it.setString(1, code)
@@ -272,7 +274,7 @@ class GatewayStore(private val config: GatewayConfig, private val json: Json = G
     fun approvePair(bridgeId: String, code: String, now: Long = System.currentTimeMillis()): String? = synchronized(lock) {
         if (!requestPair(code, bridgeId, bridgeId, now)) return null
         val token = Base64.getUrlEncoder().withoutPadding()
-            .encodeToString(ByteArray(32).also { java.security.SecureRandom().nextBytes(it) })
+            .encodeToString(ByteArray(32).also(SECURE_RANDOM::nextBytes))
         writeCoordinator.write {
             connection.prepareStatement("UPDATE bridges SET paired=1, token_hash=? WHERE bridge_id=?").use {
                 it.setString(1, hash(token))
