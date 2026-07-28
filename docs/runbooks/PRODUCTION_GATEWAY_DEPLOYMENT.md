@@ -39,6 +39,26 @@ $env:RELAY_GATEWAY_DB = 'C:\ProgramData\RelayPcGateway\relay-gateway.db'
 
 For Windows scheduled startup, use `scripts/setup-pc-gateway.ps1` with its safe defaults. Use `-LanMode closed-network -HostBind <approved-IP>` only after the network owner approves the boundary. `tls-reverse-proxy` is not a substitute for actually configuring the proxy, certificate, DNS, ACLs, and logging outside Relay.
 
+### HTTPS SPKI pin
+
+An HTTPS public endpoint must also set
+`RELAY_GATEWAY_TLS_SPKI_SHA256=<64 lowercase hex characters>`. Use the SHA-256
+digest of the TLS reverse proxy leaf certificate's SubjectPublicKeyInfo:
+
+```text
+openssl x509 -in gateway-cert.pem -pubkey -noout |
+  openssl pkey -pubin -outform DER |
+  openssl dgst -sha256
+```
+
+Copy only the hex value after `SHA2-256(stdin)= `. Verify it with the certificate
+owner over an approved out-of-band channel; never learn the initial pin from the
+endpoint being enrolled. The Gateway publishes it in the enrollment QR/token, and
+Android requires both normal CA/validity/hostname verification and an SPKI match.
+Provision the environment variable for the scheduled-task/service account. When a
+certificate renewal changes its key, approve and deploy the new pin first, then
+regenerate the enrollment QR/token and re-enroll devices.
+
 ## 2. Initialize named local staff accounts
 
 Before opening the operator console, create the first `ADMIN` exactly once. Do not put a password in a command-line argument, task definition, source file, or ticket.
