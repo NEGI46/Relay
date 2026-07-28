@@ -1,4 +1,4 @@
-# Temporary audit: strict rerun after approved false-positive filters; removed before the final PR.
+# Temporary audit: strict rerun after TLS pin parser correction; removed before the final PR.
 name: CodeQL security and quality audit
 
 on:
