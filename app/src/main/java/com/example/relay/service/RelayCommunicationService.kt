@@ -142,7 +142,9 @@ class RelayCommunicationService : Service() {
     }
 
     private fun notification(connectedPeers: Int): Notification {
-        val stopIntent = Intent(this, RelayCommunicationService::class.java).setAction(ACTION_STOP)
+        val stopIntent = Intent(this, RelayCommunicationService::class.java)
+            .setAction(ACTION_STOP)
+            .setPackage(packageName)
         val stopPendingIntent = PendingIntent.getService(
             this,
             1,
