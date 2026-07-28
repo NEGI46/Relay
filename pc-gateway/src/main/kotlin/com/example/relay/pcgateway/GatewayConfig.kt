@@ -87,6 +87,11 @@ data class GatewayConfig(
         ?: if (lanMode == GatewayLanMode.TLS_REVERSE_PROXY) "https" else "http").lowercase(),
     val publicPort: Int = (System.getenv("RELAY_GATEWAY_PUBLIC_PORT") ?: System.getenv("RELAY_GATEWAY_PORT") ?: "8080")
         .toIntOrNull() ?: 8080,
+    /** SHA-256 hex of the TLS proxy certificate public key's SubjectPublicKeyInfo. */
+    val tlsSpkiSha256: String? = System.getenv("RELAY_GATEWAY_TLS_SPKI_SHA256")
+        ?.filterNot { it == ':' || it == '-' || it.isWhitespace() }
+        ?.lowercase()
+        ?.takeIf { it.isNotEmpty() },
     // Packaged apps (Windows EXE / macOS app image) may start with a read-only CWD.
     // Keep the default database under the user's writable home profile.
     val dbPath: String = System.getenv("RELAY_GATEWAY_DB")
@@ -235,6 +240,9 @@ data class GatewayConfig(
         require(publicPort in 1..65_535) { "RELAY_GATEWAY_PUBLIC_PORT must be a valid TCP port" }
         require(lanDiscoveryPort in 1..65_535) { "RELAY_GATEWAY_DISCOVERY_PORT must be a valid UDP port" }
         require(publicScheme in setOf("http", "https")) { "RELAY_GATEWAY_PUBLIC_SCHEME must be http or https" }
+        require(publicScheme != "https" || tlsSpkiSha256.isValidSha256Hex()) {
+            "HTTPS Gateway publication requires RELAY_GATEWAY_TLS_SPKI_SHA256"
+        }
         require(!(lanMode == GatewayLanMode.TLS_REVERSE_PROXY && publicScheme != "https")) {
             "TLS reverse-proxy mode requires RELAY_GATEWAY_PUBLIC_SCHEME=https"
         }
@@ -332,6 +340,9 @@ data class GatewayConfig(
         }.getOrDefault(false)
     }
 }
+
+private fun String?.isValidSha256Hex(): Boolean =
+    this != null && length == 64 && all { it in '0'..'9' || it in 'a'..'f' }
 
 private fun environmentBoolean(name: String, default: Boolean): Boolean =
     System.getenv(name)?.trim()?.toBooleanStrictOrNull() ?: default
