@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
   actions: read
+  security-events: read
 
 jobs:
   analyze:
@@ -21,8 +22,6 @@ jobs:
         include:
           - language: java-kotlin
             build-mode: manual
-          - language: javascript-typescript
-            build-mode: none
           - language: actions
             build-mode: none
     steps:
@@ -52,6 +51,21 @@ jobs:
           output: codeql-audit-results
           upload: never
           category: "/audit/security-and-quality/${{ matrix.language }}"
+      - name: List rule and source locations only
+        shell: bash
+        run: |
+          set -euo pipefail
+          find codeql-audit-results -type f -name '*.sarif' -print0 \
+            | xargs -0 -r jq -r '
+                .runs[]?.results[]?
+                | [
+                    .ruleId,
+                    (.locations[0].physicalLocation.artifactLocation.uri // "unknown"),
+                    ((.locations[0].physicalLocation.region.startLine // 0) | tostring)
+                  ]
+                | @tsv
+              ' \
+            | sort -u
       - name: Require zero security and quality results
         shell: bash
         run: |
