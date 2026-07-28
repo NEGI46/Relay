@@ -46,6 +46,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          config-file: ./.github/codeql/codeql-config.yml
       - name: Build Kotlin/JVM sources for extraction
         if: matrix.language == 'java-kotlin'
         run: |
