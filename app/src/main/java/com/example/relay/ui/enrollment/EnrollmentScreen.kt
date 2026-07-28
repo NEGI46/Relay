@@ -364,6 +364,14 @@ private fun EnrollmentConfirmationDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
                 )
+                pending.token.tlsSpkiSha256?.let { tlsPin ->
+                    Text("TLS SPKI Fingerprint:", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        GatewayEnrollmentCodec.formatManualFingerprint(tlsPin),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "このfingerprintがGateway管理者から提供されたものと一致することを確認してください。",
