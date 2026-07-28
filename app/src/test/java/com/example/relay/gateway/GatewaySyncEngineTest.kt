@@ -304,6 +304,7 @@ class GatewaySyncEngineTest {
             port = 8080,
             scheme = "https",
             manifestFingerprint = "fingerprint-1",
+            tlsSpkiSha256 = "a".repeat(64),
         )
         val engine = GatewaySyncEngine(
             repository,
@@ -342,6 +343,7 @@ class GatewaySyncEngineTest {
             port = 8080,
             scheme = "https",
             manifestFingerprint = "fingerprint-1",
+            tlsSpkiSha256 = "a".repeat(64),
         )
         val engine = GatewaySyncEngine(
             repository,
@@ -411,6 +413,7 @@ private class FakeClient(
         bridgeId: String,
         bridgeName: String,
         messages: List<RelayMessage>,
+        tlsSpkiSha256: String?,
     ): GatewayPushResult {
         publicPushes++
         lastPublicMessages = messages
@@ -449,5 +452,6 @@ private class SuspendingClient : GatewayBridgeClient {
         bridgeId: String,
         bridgeName: String,
         messages: List<RelayMessage>,
+        tlsSpkiSha256: String?,
     ) = error("not used")
 }
