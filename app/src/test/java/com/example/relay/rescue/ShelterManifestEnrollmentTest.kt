@@ -67,6 +67,7 @@ class ShelterManifestEnrollmentTest {
             port = 8443,
             scheme = "https",
             manifestFingerprint = m.fingerprint(),
+            tlsSpkiSha256 = "a".repeat(64),
         )
 
         val keys = enrollment(m, store).enrollShelterFor(token)
@@ -86,6 +87,7 @@ class ShelterManifestEnrollmentTest {
             port = 8443,
             scheme = "https",
             manifestFingerprint = m.fingerprint(),
+            tlsSpkiSha256 = "a".repeat(64),
         )
 
         assertThrows(IllegalArgumentException::class.java) { enrollment(m, store).enrollShelterFor(token) }
