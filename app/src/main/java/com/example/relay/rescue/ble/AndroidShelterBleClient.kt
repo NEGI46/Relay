@@ -153,7 +153,10 @@ private class AndroidGattShelterBleSession private constructor(
 
     @Suppress("DEPRECATION")
     private fun writeDescriptorLegacy(descriptor: BluetoothGattDescriptor, value: ByteArray): Boolean {
+        // Android 23-32 has no value-taking descriptor write API.
+        // codeql[java/deprecated-call]
         descriptor.value = value
+        // codeql[java/deprecated-call]
         return gatt.writeDescriptor(descriptor)
     }
 
@@ -177,7 +180,10 @@ private class AndroidGattShelterBleSession private constructor(
         value: ByteArray,
     ): Boolean {
         characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        // Android 23-32 has no value-taking characteristic write API.
+        // codeql[java/deprecated-call]
         characteristic.value = value
+        // codeql[java/deprecated-call]
         return gatt.writeCharacteristic(characteristic)
     }
 
@@ -244,6 +250,8 @@ private class AndroidGattShelterBleSession private constructor(
 
         @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
         override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            // Android invokes this legacy callback only through API 32.
+            // codeql[java/deprecated-call]
             handleCharacteristicRead(characteristic, characteristic.value ?: byteArrayOf(), status)
         }
 
@@ -285,6 +293,8 @@ private class AndroidGattShelterBleSession private constructor(
 
         @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+            // Android invokes this legacy callback only through API 32.
+            // codeql[java/deprecated-call]
             handleCharacteristicChanged(characteristic, characteristic.value ?: return)
         }
 
