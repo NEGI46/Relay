@@ -7,11 +7,6 @@ on:
         description: Release tag (for example, v0.1.0)
         required: true
         type: string
-      target_ref:
-        description: Immutable commit SHA, branch, or tag to package
-        required: true
-        default: agent/zero-operation-relay
-        type: string
 
 # This workflow intentionally fails before publication unless organization-owned signing and
 # verification material is available. It must never turn a debug, unsigned, or locally signed
@@ -26,6 +21,7 @@ env:
 jobs:
   resolve-source:
     name: Resolve immutable release source
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -34,13 +30,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-          ref: ${{ inputs.target_ref }}
       - id: commit
         name: Resolve checked-out commit
         shell: bash
         run: |
           set -euo pipefail
-          commit="$(git rev-parse HEAD)"
+          commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
           [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo 'Unable to resolve immutable release commit.' >&2; exit 1; }
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
