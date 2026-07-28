@@ -125,7 +125,7 @@ class MessageUseCasesTest {
             create(SafetyState.SAFE, 0, "north", "ok")
             fail("Expected storage rejection")
         } catch (failure: LegacyMessageCreationException.StorageRejected) {
-            assertEquals("max stored messages", failure.reason)
+            assertEquals("max stored messages", failure.message)
         }
 
         assertEquals(listOf("active"), repository.all().map { it.messageId })
