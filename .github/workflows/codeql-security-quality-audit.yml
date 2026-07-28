@@ -1,4 +1,4 @@
-# Temporary audit: rerun after release-workflow hardening.
+# Temporary audit: removed before the final pull request.
 name: CodeQL security and quality audit
 
 on:
@@ -40,7 +40,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          queries: security-and-quality
+          config-file: ./.github/codeql/codeql-config.yml
       - name: Build Kotlin/JVM sources for extraction
         if: matrix.language == 'java-kotlin'
         run: |
@@ -52,7 +52,7 @@ jobs:
           output: codeql-audit-results
           upload: never
           category: "/audit/security-and-quality/${{ matrix.language }}"
-      - name: List rule and source locations only
+      - name: List rule and source location only
         shell: bash
         run: |
           set -euo pipefail
