@@ -21,7 +21,15 @@ class EnrollmentControllerTest {
         port: Int = 8443,
         scheme: String = "https",
         manifestFingerprint: String = fingerprint,
-    ) = GatewayEnrollmentToken(gatewayId, shelterId, host, port, scheme, manifestFingerprint)
+    ) = GatewayEnrollmentToken(
+        gatewayId,
+        shelterId,
+        host,
+        port,
+        scheme,
+        manifestFingerprint,
+        tlsSpkiSha256 = manifestFingerprint.takeIf { scheme == "https" },
+    )
 
     private class FakeStorage(initial: Set<String> = emptySet()) : EnrollmentPayloadStorage {
         var payloads: Set<String> = initial
