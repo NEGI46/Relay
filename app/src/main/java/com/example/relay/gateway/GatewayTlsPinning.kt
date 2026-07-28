@@ -48,10 +48,11 @@ internal object GatewayTlsPinning {
             override fun getAcceptedIssuers(): Array<X509Certificate> =
                 platformTrustManager.acceptedIssuers
         }
-        val context = SSLContext.getInstance("TLS").apply {
-            init(null, arrayOf<TrustManager>(pinningTrustManager), SecureRandom())
-        }
-        connection.sslSocketFactory = context.socketFactory
+        // Keep these calls explicit: besides being easier to audit, CodeQL can
+        // trace this exact SSLContext -> socket factory -> connection chain.
+        val context = SSLContext.getInstance("TLS")
+        context.init(null, arrayOf<TrustManager>(pinningTrustManager), SecureRandom())
+        connection.setSSLSocketFactory(context.socketFactory)
         return connection
     }
 
