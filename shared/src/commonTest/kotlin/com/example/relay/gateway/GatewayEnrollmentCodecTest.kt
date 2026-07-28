@@ -15,6 +15,7 @@ class GatewayEnrollmentCodecTest {
         port = 8443,
         scheme = "https",
         manifestFingerprint = fingerprint,
+        tlsSpkiSha256 = fingerprint,
     )
 
     private fun beacon(
@@ -43,6 +44,7 @@ class GatewayEnrollmentCodecTest {
                 port = token.port,
                 scheme = "HTTPS",
                 fingerprintText = grouped,
+                tlsSpkiSha256Text = grouped,
             ),
         )
         assertEquals(token, result.token)
@@ -60,7 +62,10 @@ class GatewayEnrollmentCodecTest {
     fun unknownVersionIsRejected() {
         val payload = GatewayEnrollmentCodec.encodeQrPayload(token)
         // Rewrite only the version segment and recompute nothing: version check runs before checksum.
-        val bumped = payload.replaceFirst("$GATEWAY_ENROLLMENT_SCHEME:$GATEWAY_ENROLLMENT_VERSION:", "$GATEWAY_ENROLLMENT_SCHEME:2:")
+        val bumped = payload.replaceFirst(
+            "$GATEWAY_ENROLLMENT_SCHEME:$GATEWAY_ENROLLMENT_VERSION:",
+            "$GATEWAY_ENROLLMENT_SCHEME:${GATEWAY_ENROLLMENT_VERSION + 1}:",
+        )
         val result = assertIs<GatewayEnrollmentResult.Rejected>(GatewayEnrollmentCodec.decodeQrPayload(bumped))
         assertEquals(GatewayEnrollmentRejection.UNSUPPORTED_VERSION, result.reason)
     }
