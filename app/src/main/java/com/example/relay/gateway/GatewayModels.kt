@@ -16,6 +16,8 @@ data class GatewaySettings(
     val lastDeliveryResult: String? = null,
     /** HTTPS is required in release/pilotRelease; HTTP remains a debug/localDev compatibility path. */
     val scheme: String = "https",
+    /** SHA-256 hex of the Gateway TLS certificate public key (SubjectPublicKeyInfo). */
+    val tlsSpkiSha256: String = "",
 )
 
 sealed interface GatewaySyncResult {
