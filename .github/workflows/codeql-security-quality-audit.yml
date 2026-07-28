@@ -1,4 +1,4 @@
-# Temporary audit: strict rerun after Java TLS pinning bridge; removed before the final PR.
+# Temporary audit: full Android/Java rerun after Java TLS pinning bridge; removed before the final PR.
 name: CodeQL security and quality audit
 
 on:
@@ -41,11 +41,11 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
           config-file: ./.github/codeql/codeql-config.yml
-      - name: Build Kotlin/JVM sources for extraction
+      - name: Build Android and JVM sources for extraction
         if: matrix.language == 'java-kotlin'
         run: |
           chmod +x gradlew
-          ./gradlew :app:compileDebugKotlin :pc-gateway:classes :broker:classes :relay-protocol:classes :shared:compileKotlinJvm --no-daemon
+          ./gradlew :app:assembleDebug :pc-gateway:classes :broker:classes :relay-protocol:classes :shared:compileKotlinJvm --no-daemon
       - name: Analyze without uploading alerts
         uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
