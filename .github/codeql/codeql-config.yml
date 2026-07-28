@@ -1,0 +1,4 @@
+name: Relay security and quality
+
+queries:
+  - uses: security-and-quality
