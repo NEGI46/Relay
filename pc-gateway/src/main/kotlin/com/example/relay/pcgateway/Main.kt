@@ -152,7 +152,6 @@ fun main(args: Array<String>) {
     // Startup order: Outbox MUST be ready before PullAgent starts (receipts from early pulls must not be lost)
     val brokerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     var brokerHttpClient: HttpClient? = null
-    var receiptOutbox: ReceiptOutbox? = null
     if (config.brokerUrl != null) {
         val client = HttpClient(CIO)
         brokerHttpClient = client
@@ -168,7 +167,6 @@ fun main(args: Array<String>) {
             httpClient = client,
             gatewayCredential = brokerCredential,
         )
-        receiptOutbox = outbox
         receiptOutboxRef = outbox
         brokerScope.launch { outbox.startFlusher(this) }
 
