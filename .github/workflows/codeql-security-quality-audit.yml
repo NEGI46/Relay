@@ -1,3 +1,4 @@
+# Temporary audit: rerun after release-workflow hardening.
 name: CodeQL security and quality audit
 
 on:
