@@ -1,0 +1,64 @@
+name: CodeQL security and quality audit
+
+on:
+  push:
+    branches: [fix/dependency-security-quality]
+    paths:
+      - .github/workflows/codeql-security-quality-audit.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  analyze:
+    name: Audit ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        if: matrix.language == 'java-kotlin'
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Initialize CodeQL security and quality suite
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-and-quality
+      - name: Build Kotlin/JVM sources for extraction
+        if: matrix.language == 'java-kotlin'
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:compileDebugKotlin :pc-gateway:classes :broker:classes :relay-protocol:classes :shared:compileKotlinJvm --no-daemon
+      - name: Analyze without uploading alerts
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          output: codeql-audit-results
+          upload: never
+          category: "/audit/security-and-quality/${{ matrix.language }}"
+      - name: Require zero security and quality results
+        shell: bash
+        run: |
+          set -euo pipefail
+          count="$(find codeql-audit-results -type f -name '*.sarif' -print0 \
+            | xargs -0 -r jq '[.runs[]?.results[]?] | length' \
+            | awk '{ total += $1 } END { print total + 0 }')"
+          printf 'language=%s\nsecurity_and_quality_results=%s\n' \
+            '${{ matrix.language }}' "${count}"
+          test "${count}" -eq 0
