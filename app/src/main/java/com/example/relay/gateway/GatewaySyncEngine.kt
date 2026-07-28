@@ -119,10 +119,15 @@ class GatewaySyncEngine(
                         settingsStore.record("gateway_not_found")
                     }
                 settingsStore.recordDiscovery(gateway.host, if (gateway.gatewayId == "manual-fallback") "manual_fallback" else "beacon_received")
-                val trust = if (gateway.gatewayId == "manual-fallback") {
-                    GatewayTrustDecision.UNVERIFIED
+                val enrolledGateway = if (gateway.gatewayId == "manual-fallback") {
+                    null
                 } else {
-                    enrollmentStore?.decisionFor(gateway) ?: GatewayTrustDecision.UNVERIFIED
+                    enrollmentStore?.trustedTokenFor(gateway)
+                }
+                val trust = when {
+                    gateway.gatewayId == "manual-fallback" -> GatewayTrustDecision.UNVERIFIED
+                    enrolledGateway != null -> GatewayTrustDecision.TRUSTED
+                    else -> enrollmentStore?.decisionFor(gateway) ?: GatewayTrustDecision.UNVERIFIED
                 }
                 if (trust == GatewayTrustDecision.REJECTED) {
                     return@withLock GatewaySyncResult.Deferred("gateway_trust_rejected").also {
@@ -136,7 +141,13 @@ class GatewaySyncEngine(
                         settingsStore.record("bridge_identity_missing")
                     }
                 }
-                client.pushPublic(gateway, localBridgeId, "Relay Bridge", messages)
+                client.pushPublic(
+                    gateway,
+                    localBridgeId,
+                    "Relay Bridge",
+                    messages,
+                    tlsSpkiSha256 = enrolledGateway?.tlsSpkiSha256,
+                )
             }
             val receipts = if (useAuthenticated) {
                 client.pullReceipts(settings, token!!)
