@@ -9,10 +9,12 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.os.Build
 import android.os.ParcelUuid
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
@@ -123,9 +125,8 @@ private class AndroidGattShelterBleSession private constructor(
         if (!gatt.setCharacteristicNotification(downlinkCharacteristic, true)) throw IllegalStateException("result indication unavailable")
         val descriptor = downlinkCharacteristic.getDescriptor(CLIENT_CONFIGURATION_UUID)
             ?: throw IllegalStateException("result indication descriptor unavailable")
-        descriptor.value = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
         val completion = callback.beginDescriptorWrite()
-        if (!gatt.writeDescriptor(descriptor)) {
+        if (!writeDescriptorCompat(descriptor, BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)) {
             callback.cancelDescriptorWrite(completion)
             throw IllegalStateException("result indication subscription failed")
         }
@@ -134,15 +135,50 @@ private class AndroidGattShelterBleSession private constructor(
 
     private suspend fun writeFrames(frames: List<ByteArray>) {
         frames.forEach { frame ->
-            uplinkCharacteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            uplinkCharacteristic.value = frame
             val completion = callback.beginCharacteristicWrite()
-            if (!gatt.writeCharacteristic(uplinkCharacteristic)) {
+            if (!writeCharacteristicCompat(uplinkCharacteristic, frame)) {
                 callback.cancelCharacteristicWrite(completion)
                 throw IllegalStateException("uplink write could not start")
             }
             if (!completion.await()) throw IllegalStateException("uplink write rejected")
         }
+    }
+
+    private fun writeDescriptorCompat(descriptor: BluetoothGattDescriptor, value: ByteArray): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
+        } else {
+            writeDescriptorLegacy(descriptor, value)
+        }
+
+    @Suppress("DEPRECATION")
+    private fun writeDescriptorLegacy(descriptor: BluetoothGattDescriptor, value: ByteArray): Boolean {
+        descriptor.value = value
+        return gatt.writeDescriptor(descriptor)
+    }
+
+    private fun writeCharacteristicCompat(
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray,
+    ): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeCharacteristic(
+                characteristic,
+                value,
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+            ) == BluetoothStatusCodes.SUCCESS
+        } else {
+            writeCharacteristicLegacy(characteristic, value)
+        }
+
+    @Suppress("DEPRECATION")
+    private fun writeCharacteristicLegacy(
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray,
+    ): Boolean {
+        characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        characteristic.value = value
+        return gatt.writeCharacteristic(characteristic)
     }
 
     private suspend fun receiveResult(sessionId: ByteArray): ByteArray = withTimeout(RESULT_TIMEOUT_MILLIS) {
@@ -197,12 +233,30 @@ private class AndroidGattShelterBleSession private constructor(
             else services.complete(Unit)
         }
 
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int,
+        ) {
+            handleCharacteristicRead(characteristic, value, status)
+        }
+
+        @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
         override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            handleCharacteristicRead(characteristic, characteristic.value ?: byteArrayOf(), status)
+        }
+
+        private fun handleCharacteristicRead(
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int,
+        ) {
             if (characteristic.uuid != IDENTITY_CHARACTERISTIC_UUID) return
             val completion = synchronized(operationLock) {
                 identityRead.also { identityRead = null }
             } ?: return
-            val identity = characteristic.value?.let(ShelterBleIdentity::decode)
+            val identity = ShelterBleIdentity.decode(value)
             if (status == BluetoothGatt.GATT_SUCCESS && identity != null && expectedIdentity.sameWireIdentity(identity)) completion.complete(identity)
             else completion.completeExceptionally(SecurityException("invalid bridge identity"))
         }
@@ -221,9 +275,25 @@ private class AndroidGattShelterBleSession private constructor(
             }?.complete(status == BluetoothGatt.GATT_SUCCESS)
         }
 
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+        ) {
+            handleCharacteristicChanged(characteristic, value)
+        }
+
+        @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+            handleCharacteristicChanged(characteristic, characteristic.value ?: return)
+        }
+
+        private fun handleCharacteristicChanged(
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+        ) {
             if (characteristic.uuid != DOWNLINK_CHARACTERISTIC_UUID) return
-            RescueBleFrameCodec.decode(characteristic.value ?: return)?.let { indications.trySend(it) }
+            RescueBleFrameCodec.decode(value)?.let { indications.trySend(it) }
         }
 
         fun beginIdentityRead() = CompletableDeferred<ShelterBleIdentity>().also { completion -> synchronized(operationLock) { check(identityRead == null); identityRead = completion } }
