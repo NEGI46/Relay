@@ -68,10 +68,8 @@ internal object GatewayTlsPinning {
             ?.lowercase()
             ?.takeIf { it.length == SHA256_HEX_LENGTH && it.all { char -> char in '0'..'9' || char in 'a'..'f' } }
             ?: return null
-        return normalized.chunked(2).map(String::toIntHex).map(Int::toByte).toByteArray()
+        return normalized.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
     }
-
-    private fun String.toIntHex(): Int = toInt(16)
 
     private fun sha256(value: ByteArray): ByteArray =
         MessageDigest.getInstance("SHA-256").digest(value)
