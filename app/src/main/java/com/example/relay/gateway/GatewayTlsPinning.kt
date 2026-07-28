@@ -22,8 +22,8 @@ import javax.net.ssl.X509TrustManager
  */
 internal object GatewayTlsPinning {
     fun open(url: URL, tlsSpkiSha256: String?): HttpURLConnection {
-        val connection = url.openConnection() as HttpURLConnection
-        if (connection !is HttpsURLConnection) return connection
+        val connection = url.openConnection()
+        if (connection !is HttpsURLConnection) return connection as HttpURLConnection
 
         val pin = normalizePin(tlsSpkiSha256)
             ?: throw MissingGatewayTlsPinException()
@@ -52,7 +52,7 @@ internal object GatewayTlsPinning {
         // trace this exact SSLContext -> socket factory -> connection chain.
         val context = SSLContext.getInstance("TLS")
         context.init(null, arrayOf<TrustManager>(pinningTrustManager), SecureRandom())
-        connection.setSSLSocketFactory(context.socketFactory)
+        connection.setSSLSocketFactory(context.getSocketFactory())
         return connection
     }
 
