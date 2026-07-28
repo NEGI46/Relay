@@ -17,7 +17,7 @@ import com.example.relay.rescue.RescueCryptography
  * checksum, or any invalid field yields [GatewayEnrollmentResult.Rejected], never a partial token.
  */
 const val GATEWAY_ENROLLMENT_SCHEME: String = "relay-gw"
-const val GATEWAY_ENROLLMENT_VERSION: Int = 1
+const val GATEWAY_ENROLLMENT_VERSION: Int = 2
 
 /** Hard upper bound so a malicious QR cannot force large allocations before validation. */
 const val GATEWAY_ENROLLMENT_MAX_PAYLOAD_BYTES: Int = 512
@@ -34,6 +34,8 @@ data class GatewayEnrollmentToken(
     val port: Int,
     val scheme: String,
     val manifestFingerprint: String,
+    /** SHA-256 hex of the Gateway TLS certificate public key (SubjectPublicKeyInfo). */
+    val tlsSpkiSha256: String? = null,
 )
 
 enum class GatewayEnrollmentRejection {
@@ -88,13 +90,16 @@ object GatewayEnrollmentCodec {
         val (scheme, versionText, inner, providedChecksum) = parts
         if (scheme != GATEWAY_ENROLLMENT_SCHEME) return rejected(GatewayEnrollmentRejection.MALFORMED)
         val version = versionText.toIntOrNull() ?: return rejected(GatewayEnrollmentRejection.MALFORMED)
-        if (version != GATEWAY_ENROLLMENT_VERSION) return rejected(GatewayEnrollmentRejection.UNSUPPORTED_VERSION)
+        if (version !in setOf(1, GATEWAY_ENROLLMENT_VERSION)) {
+            return rejected(GatewayEnrollmentRejection.UNSUPPORTED_VERSION)
+        }
         val body = scheme + OUTER_DELIMITER + versionText + OUTER_DELIMITER + inner
         if (!constantTimeEquals(checksum(body), providedChecksum.lowercase())) {
             return rejected(GatewayEnrollmentRejection.CHECKSUM_MISMATCH)
         }
         val fields = inner.split(INNER_DELIMITER)
-        if (fields.size != 6) return rejected(GatewayEnrollmentRejection.MALFORMED)
+        val expectedFieldCount = if (version == 1) 6 else 7
+        if (fields.size != expectedFieldCount) return rejected(GatewayEnrollmentRejection.MALFORMED)
         val port = fields[3].toIntOrNull() ?: return rejected(GatewayEnrollmentRejection.INVALID_FIELD)
         val token = GatewayEnrollmentToken(
             gatewayId = fields[0],
@@ -103,6 +108,7 @@ object GatewayEnrollmentCodec {
             port = port,
             scheme = fields[4],
             manifestFingerprint = fields[5],
+            tlsSpkiSha256 = fields.getOrNull(6)?.takeUnless { it == NO_TLS_PIN },
         )
         return validate(token)?.let { GatewayEnrollmentResult.Enrolled(it) }
             ?: rejected(GatewayEnrollmentRejection.INVALID_FIELD)
@@ -120,6 +126,7 @@ object GatewayEnrollmentCodec {
         port: Int,
         scheme: String,
         fingerprintText: String,
+        tlsSpkiSha256Text: String? = null,
     ): GatewayEnrollmentResult {
         val token = GatewayEnrollmentToken(
             gatewayId = gatewayId.trim(),
@@ -128,6 +135,7 @@ object GatewayEnrollmentCodec {
             port = port,
             scheme = scheme.trim().lowercase(),
             manifestFingerprint = normalizeFingerprint(fingerprintText),
+            tlsSpkiSha256 = tlsSpkiSha256Text?.let(::normalizeFingerprint),
         )
         return validate(token)?.let { GatewayEnrollmentResult.Enrolled(it) }
             ?: rejected(GatewayEnrollmentRejection.INVALID_FIELD)
@@ -146,6 +154,7 @@ object GatewayEnrollmentCodec {
         host = token.host.trim(),
         scheme = token.scheme.trim().lowercase(),
         manifestFingerprint = normalizeFingerprint(token.manifestFingerprint),
+        tlsSpkiSha256 = token.tlsSpkiSha256?.let(::normalizeFingerprint),
     )
 
     private fun body(token: GatewayEnrollmentToken): String {
@@ -156,6 +165,7 @@ object GatewayEnrollmentCodec {
             token.port.toString(),
             token.scheme,
             token.manifestFingerprint,
+            token.tlsSpkiSha256 ?: NO_TLS_PIN,
         ).joinToString(INNER_DELIMITER.toString())
         return GATEWAY_ENROLLMENT_SCHEME + OUTER_DELIMITER + GATEWAY_ENROLLMENT_VERSION + OUTER_DELIMITER + inner
     }
@@ -171,6 +181,8 @@ object GatewayEnrollmentCodec {
         if (token.port !in 1..65_535) return null
         if (token.scheme != "http" && token.scheme != "https") return null
         if (!isValidFingerprint(token.manifestFingerprint)) return null
+        if (token.scheme == "https" && token.tlsSpkiSha256 == null) return null
+        if (token.tlsSpkiSha256 != null && !isValidFingerprint(token.tlsSpkiSha256)) return null
         return token
     }
 
@@ -200,6 +212,8 @@ object GatewayEnrollmentCodec {
 
     private fun rejected(reason: GatewayEnrollmentRejection): GatewayEnrollmentResult.Rejected =
         GatewayEnrollmentResult.Rejected(reason)
+
+    private const val NO_TLS_PIN = "none"
 }
 
 /**
