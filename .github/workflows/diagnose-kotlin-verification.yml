@@ -8,13 +8,15 @@ on:
       - ".github/workflows/diagnose-kotlin-verification.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   generate-metadata:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
         with:
           distribution: temurin
@@ -22,8 +24,17 @@ jobs:
           cache: gradle
       - run: chmod +x gradlew
       - run: ./gradlew help --no-daemon --write-verification-metadata sha256
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
-          name: kotlin-verification-metadata
-          path: gradle/verification-metadata.xml
-          retention-days: 1
+          script: |
+            const fs = require("fs");
+            const content = fs.readFileSync("gradle/verification-metadata.xml").toString("base64");
+            await github.rest.repos.createOrUpdateFileContents({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path: "gradle/verification-metadata.xml",
+              message: "chore: refresh Kotlin 2.3.21 verification metadata",
+              content,
+              branch: context.payload.pull_request.head.ref,
+              sha: context.payload.pull_request.head.sha
+            });
