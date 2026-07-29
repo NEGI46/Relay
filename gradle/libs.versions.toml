@@ -29,7 +29,7 @@ junitJupiter = "6.1.2"
 kotestProperty = "5.9.1"
 pitestPlugin = "1.19.0"
 pitest = "1.17.4"
-archunit = "1.4.1"
+archunit = "1.4.2"
 # Native access for Windows DPAPI (CryptProtectData); same version already pinned in verification metadata
 jna = "5.18.1"
 # 2.x required: Docker Engine 29 rejects the pre-1.44 API negotiation used by testcontainers 1.x
