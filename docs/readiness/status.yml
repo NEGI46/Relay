@@ -17,8 +17,8 @@
 # evidence; a code change or automated test can never set them.
 
 schema_version: 1
-status_date: "2026-07-26"
-source_commit: "89e7651"
+status_date: "2026-07-29"
+source_commit: "23bd1da"
 branch: "agent/zero-operation-relay"
 disclaimer_ja: >-
   Relayは119、消防・警察・自治体の公式な緊急連絡手段の代替ではありません。
@@ -727,7 +727,7 @@ features:
     name_ja: "CodeQL静的解析（java-kotlin / js-ts / actions）"
     area: supply-chain
     implementation: IMPLEMENTED
-    automated_test: NOT_RUN
+    automated_test: AUTOMATED_TESTED
     emulator_simulator: NOT_APPLICABLE
     real_device: NOT_APPLICABLE
     field_test: NOT_APPLICABLE
@@ -735,9 +735,10 @@ features:
     evidence:
       - kind: workflow
         ref: .github/workflows/codeql.yml
-    last_verified: "2026-07-26"
-    commit: "869c77c"
-    notes: "Workflow linted locally (actionlint/zizmor) but not yet executed on GitHub-hosted runners."
+        note: "GitHub Actions run 30323098366 for PR #53 completed successfully on 2026-07-28 for java-kotlin, javascript-typescript, and actions."
+    last_verified: "2026-07-29"
+    commit: "5758f8b"
+    notes: "Executed successfully on GitHub-hosted runners for the merged dependency/security update; this is automated static-analysis evidence only."
 
   - id: secret-scanning-gitleaks
     name: "Secret scanning with Relay-specific gitleaks rules"
@@ -752,12 +753,13 @@ features:
     evidence:
       - kind: workflow
         ref: .github/workflows/security-baseline.yml
+        note: "GitHub Actions run 30323098338 for PR #53 completed successfully on 2026-07-28, including the full-history gitleaks scan."
       - kind: doc
         ref: .gitleaks.toml
         note: "Local run: 293 commits clean; negative test with planted fake secrets detected 2 leaks (exit 1)"
-    last_verified: "2026-07-26"
-    commit: "869c77c"
-    notes: "Scan executed locally with checksum-pinned gitleaks 8.30.1; CI execution on GitHub runners pending first push."
+    last_verified: "2026-07-29"
+    commit: "5758f8b"
+    notes: "Both the checksum-pinned local scan and the GitHub-hosted CI scan have completed successfully."
 
   - id: workflow-lint-zizmor
     name: "Workflow lint and hardening audit (actionlint + zizmor)"
@@ -772,10 +774,10 @@ features:
     evidence:
       - kind: workflow
         ref: .github/workflows/security-baseline.yml
-        note: "Local run: actionlint exit 0; zizmor 0 findings (30 suppressed via persist-credentials:false)"
-    last_verified: "2026-07-26"
-    commit: "869c77c"
-    notes: "All checkouts use persist-credentials:false; publish workflows demoted to contents:read with job-level write."
+        note: "GitHub Actions run 30323098338 for PR #53 completed successfully on 2026-07-28: actionlint exit 0 and zizmor exit 0."
+    last_verified: "2026-07-29"
+    commit: "5758f8b"
+    notes: "All checkouts use persist-credentials:false; publish workflows retain only job-level write permissions where required."
 
   - id: action-sha-pinning-gate
     name: "CI gate rejecting non-SHA-pinned GitHub Actions"
@@ -790,9 +792,9 @@ features:
     evidence:
       - kind: workflow
         ref: .github/workflows/security-baseline.yml
-        note: "Local regex gate run: 0 violations across all workflows"
-    last_verified: "2026-07-26"
-    commit: "869c77c"
+        note: "GitHub Actions run 30323098338 for PR #53 completed successfully on 2026-07-28 with no non-SHA action references."
+    last_verified: "2026-07-29"
+    commit: "5758f8b"
     notes: ""
 
   - id: dependency-review
@@ -800,7 +802,7 @@ features:
     name_ja: "PR依存関係レビュー（high以上で失敗・ライセンス拒否リスト）"
     area: supply-chain
     implementation: IMPLEMENTED
-    automated_test: NOT_RUN
+    automated_test: AUTOMATED_TESTED
     emulator_simulator: NOT_APPLICABLE
     real_device: NOT_APPLICABLE
     field_test: NOT_APPLICABLE
@@ -808,9 +810,10 @@ features:
     evidence:
       - kind: workflow
         ref: .github/workflows/dependency-review.yml
-    last_verified: "2026-07-26"
-    commit: "869c77c"
-    notes: "Only runs on pull_request events; requires GitHub dependency graph."
+        note: "GitHub Actions run 30323098359 for PR #53 completed successfully on 2026-07-28 with the high-severity and license-denylist policy enabled."
+    last_verified: "2026-07-29"
+    commit: "5758f8b"
+    notes: "Runs only for pull requests and requires the GitHub dependency graph; both prerequisites were satisfied for PR #53."
 
   - id: scorecard-monitoring
     name: "OSSF Scorecard supply-chain posture monitoring"
@@ -919,10 +922,10 @@ features:
         note: "ForbiddenImport android.util.Log / java.util.Random; baseline gates only new findings"
       - kind: workflow
         ref: .github/workflows/security-baseline.yml
-        note: "Local negative test: planted android.util.Log import detected (exit 2); positive run exit 0"
-    last_verified: "2026-07-26"
-    commit: "ac1ddc2"
-    notes: "1294 existing findings recorded as baseline debt (0 ForbiddenImport); CLI checksum-pinned, no Gradle plugin dependency added."
+        note: "GitHub Actions run 30323098338 for PR #53 completed successfully on 2026-07-28; the checksum-pinned detekt CLI enforced the baseline and Relay rules."
+    last_verified: "2026-07-29"
+    commit: "5758f8b"
+    notes: "1294 existing findings are recorded as baseline debt (0 ForbiddenImport); the checksum-pinned CLI rejects new findings and ran successfully in GitHub Actions."
 
   - id: property-based-testing
     name: "Property-based tests for Gateway signing protocol (kotest-property)"

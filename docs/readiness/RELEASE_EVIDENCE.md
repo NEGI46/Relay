@@ -4,7 +4,7 @@
 
 # Relay release evidence index
 
-Status date: **2026-07-26** / commit `89e7651`
+Status date: **2026-07-29** / commit `23bd1da`
 
 Evidence listed here proves only what its kind states. `source`/`test`/`script`/`workflow`/`doc` entries are automated or written evidence; only dated `external_record` entries can support DEVICE_TESTED / FIELD_TESTED claims.
 
@@ -181,24 +181,24 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 
 ## `codeql-analysis` — CodeQL static analysis (java-kotlin / js-ts / actions)
 
-- **workflow**: `.github/workflows/codeql.yml`
+- **workflow**: `.github/workflows/codeql.yml` — GitHub Actions run 30323098366 for PR #53 completed successfully on 2026-07-28 for java-kotlin, javascript-typescript, and actions.
 
 ## `secret-scanning-gitleaks` — Secret scanning with Relay-specific gitleaks rules
 
-- **workflow**: `.github/workflows/security-baseline.yml`
+- **workflow**: `.github/workflows/security-baseline.yml` — GitHub Actions run 30323098338 for PR #53 completed successfully on 2026-07-28, including the full-history gitleaks scan.
 - **doc**: `.gitleaks.toml` — Local run: 293 commits clean; negative test with planted fake secrets detected 2 leaks (exit 1)
 
 ## `workflow-lint-zizmor` — Workflow lint and hardening audit (actionlint + zizmor)
 
-- **workflow**: `.github/workflows/security-baseline.yml` — Local run: actionlint exit 0; zizmor 0 findings (30 suppressed via persist-credentials:false)
+- **workflow**: `.github/workflows/security-baseline.yml` — GitHub Actions run 30323098338 for PR #53 completed successfully on 2026-07-28: actionlint exit 0 and zizmor exit 0.
 
 ## `action-sha-pinning-gate` — CI gate rejecting non-SHA-pinned GitHub Actions
 
-- **workflow**: `.github/workflows/security-baseline.yml` — Local regex gate run: 0 violations across all workflows
+- **workflow**: `.github/workflows/security-baseline.yml` — GitHub Actions run 30323098338 for PR #53 completed successfully on 2026-07-28 with no non-SHA action references.
 
 ## `dependency-review` — PR dependency review (fail on high severity, license denylist)
 
-- **workflow**: `.github/workflows/dependency-review.yml`
+- **workflow**: `.github/workflows/dependency-review.yml` — GitHub Actions run 30323098359 for PR #53 completed successfully on 2026-07-28 with the high-severity and license-denylist policy enabled.
 
 ## `scorecard-monitoring` — OSSF Scorecard supply-chain posture monitoring
 
@@ -224,7 +224,7 @@ Evidence listed here proves only what its kind states. `source`/`test`/`script`/
 ## `detekt-static-analysis` — detekt static analysis with Relay sensitive-logging rules
 
 - **source**: `config/detekt/detekt.yml` — ForbiddenImport android.util.Log / java.util.Random; baseline gates only new findings
-- **workflow**: `.github/workflows/security-baseline.yml` — Local negative test: planted android.util.Log import detected (exit 2); positive run exit 0
+- **workflow**: `.github/workflows/security-baseline.yml` — GitHub Actions run 30323098338 for PR #53 completed successfully on 2026-07-28; the checksum-pinned detekt CLI enforced the baseline and Relay rules.
 
 ## `property-based-testing` — Property-based tests for Gateway signing protocol (kotest-property)
 
