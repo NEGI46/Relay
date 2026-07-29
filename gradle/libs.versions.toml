@@ -1,6 +1,6 @@
 [versions]
 agp = "8.13.2"
-kotlin = "2.3.20"
+kotlin = "2.3.21"
 ksp = "2.3.10"
 composeBom = "2026.06.01"
 activityCompose = "1.13.0"
@@ -93,7 +93,7 @@ junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "jun
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotestProperty" }
 archunit-junit4 = { module = "com.tngtech.archunit:archunit-junit4", version.ref = "archunit" }
 testcontainers-core = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
-testcontainers-toxiproxy = { module = "org.testcontainers:testcontainers-toxiproxy", version.ref = "testcontainers" }
+testcontainers-toxiproxy = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
 toxiproxy-java = { module = "eu.rekawek.toxiproxy:toxiproxy-java", version.ref = "toxiproxyJava" }
 
 [plugins]
