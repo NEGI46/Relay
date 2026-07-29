@@ -55,7 +55,7 @@
 | No fallback success | PASS | No `catch` blocks that silently pass |
 | No release weakening | PASS | Release build config unchanged |
 | No DB migration break | PASS | No Room schema changes |
-| API 23 compat preserved | PASS | `minSdk = 23` maintained; `mediumPhoneApi23` added for verification |
+| API 23 compat preserved | PASS | `minSdk = 23` maintained; AGP 9 build-managed devices start at API 27, while API 23 remains a physical-device validation boundary |
 
 ## Audit 5: Completeness
 
