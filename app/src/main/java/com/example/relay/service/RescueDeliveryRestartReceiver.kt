@@ -24,7 +24,17 @@ class RescueDeliveryRestartReceiver : BroadcastReceiver() {
             app.diagnostics.record("restart_receiver_suppressed_user_stop")
             return
         }
-        val source = when (intent.action) {
+        val action = intent.action ?: return
+        // System broadcasts can be forged as explicit intents. Verify the complete action allowlist
+        // before reading extras or starting any recovery work.
+        if (
+            action != Intent.ACTION_BOOT_COMPLETED &&
+            action != Intent.ACTION_MY_PACKAGE_REPLACED &&
+            action != BluetoothAdapter.ACTION_STATE_CHANGED
+        ) {
+            return
+        }
+        val source = when (action) {
             Intent.ACTION_BOOT_COMPLETED -> ActivationSource.BOOT_RESTORE
             Intent.ACTION_MY_PACKAGE_REPLACED -> ActivationSource.PACKAGE_REPLACED
             BluetoothAdapter.ACTION_STATE_CHANGED -> {
