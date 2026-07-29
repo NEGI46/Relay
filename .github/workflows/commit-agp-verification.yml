@@ -1,0 +1,42 @@
+name: Commit AGP runtime verification metadata
+
+on:
+  pull_request:
+    branches: [agent/zero-operation-relay]
+    paths:
+      - gradle/verification-metadata.xml
+      - .github/workflows/commit-agp-verification.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate-and-commit:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: true
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Generate runtime verification metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --write-verification-metadata sha256 :app:testDebugUnitTest --no-daemon
+          git add gradle/verification-metadata.xml
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Verify AGP runtime dependencies"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
