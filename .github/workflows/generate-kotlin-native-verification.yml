@@ -1,0 +1,44 @@
+name: Generate Kotlin Native verification metadata
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/generate-kotlin-native-verification.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  generate-metadata:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - run: chmod +x gradlew
+      - run: ./gradlew :composeApp:downloadKotlinNativeDistribution --no-daemon --write-verification-metadata sha256
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const fs = require("fs");
+            const path = "gradle/verification-metadata.xml";
+            const current = await github.rest.repos.getContent({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path,
+              ref: context.payload.pull_request.head.ref
+            });
+            await github.rest.repos.createOrUpdateFileContents({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path,
+              message: "chore: verify Kotlin Native 2.3.21 artifacts",
+              content: fs.readFileSync(path).toString("base64"),
+              branch: context.payload.pull_request.head.ref,
+              sha: current.data.sha
+            });
