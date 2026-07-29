@@ -4,7 +4,7 @@
 
 Please report suspected vulnerabilities privately before public disclosure. Do not include rescue content, GPS, access tokens, private keys, passwords, or production credentials in a GitHub issue.
 
-Until a dedicated security contact is published by the project owner, use GitHub’s private security-advisory reporting feature for this repository. If that feature is unavailable, contact the repository owner through a private channel and include only the minimum reproducible, sanitized information.
+Until a dedicated security contact is published by the project owner, use [GitHub’s private vulnerability-reporting form for Relay](https://github.com/NEGI46/Relay/security/advisories/new). If that feature is unavailable, contact the repository owner through a private channel and include only the minimum reproducible, sanitized information.
 
 ## What to include
 
@@ -15,7 +15,7 @@ Until a dedicated security contact is published by the project owner, use GitHub
 
 ## Coordinated disclosure
 
-The maintainers will acknowledge a report, assess impact, and coordinate a remediation/disclosure timeline with the reporter. No fixed SLA is promised for this pilot repository. Do not exploit a vulnerability against real users, shelters, networks, or emergency services.
+The maintainers will acknowledge a report within 14 days, assess impact, and coordinate a remediation and disclosure timeline with the reporter. No fixed remediation SLA is promised for this pilot repository. Do not exploit a vulnerability against real users, shelters, networks, or emergency services.
 
 ## Current boundary
 

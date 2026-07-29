@@ -127,7 +127,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install pinned Schemathesis
-        run: python -m pip install schemathesis==4.24.3
+        run: python -m pip install --require-hashes -r tools/requirements-schemathesis.txt
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
       - name: Build Broker distribution
@@ -247,7 +247,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install pinned readiness tool dependencies
-        run: python -m pip install -r tools/requirements.txt
+        run: python -m pip install --require-hashes -r tools/requirements-readiness.txt
       - name: Validate status.yml against schema and semantic rules
         run: python tools/readiness/readiness_tool.py validate
       - name: Fail on drift between status.yml and generated docs/README block

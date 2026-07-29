@@ -1,0 +1,3 @@
+# Hash-locked Linux CPython 3.12 binary for the workflow lint gate.
+zizmor==1.28.0 \
+    --hash=sha256:ae2cab67ce713e760e0d1b61ad749d374693ea2b310337aab11cd446748267f3
