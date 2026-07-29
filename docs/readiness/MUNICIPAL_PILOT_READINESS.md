@@ -44,7 +44,7 @@ See the detailed list in [BLOCKED_BY_EXTERNAL_DECISIONS.md](BLOCKED_BY_EXTERNAL_
 - TLS/DNS/reverse proxy/WAF/hosting and a network boundary approved for the demonstration;
 - Android organization signing key, Windows Authenticode certificate, cosign/TUF keys, scanner tools, and release approval;
 - regional root/public-key directory issuance, private-key rotation/revocation/re-provisioning policy, and protected key storage;
-- privacy, retention/deletion, telecom-law, insurance, commercial licensing, OSS notice, and copyright decisions;
+- privacy, retention/deletion, telecom-law, insurance, ongoing copyright/third-party-notice governance;
 - actual Android devices, Windows deployment target, optional macOS/Xcode/iOS prerequisites, and field test personnel.
 
 ## Why real-disaster use cannot yet be claimed
@@ -54,7 +54,7 @@ See the detailed list in [BLOCKED_BY_EXTERNAL_DECISIONS.md](BLOCKED_BY_EXTERNAL_
 3. The Broker is a single-instance implementation; it is not HA, load-tested, or disaster-recovered.
 4. Real production certificates, signed release artifacts, HSM/DPAPI/KMS controls, and external monitoring/incident response are absent from this environment.
 5. Anonymous/unauthenticated reports remain deliberately distinguishable but are not identity- or truth-verified.
-6. Legal/privacy/insurance/license decisions have not been made by their responsible organizations.
+6. Legal/privacy/insurance decisions and continuing copyright/third-party-notice governance remain external responsibilities.
 
 ## Gate for a limited-area joint demonstration
 

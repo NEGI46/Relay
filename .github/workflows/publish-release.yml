@@ -228,13 +228,14 @@ jobs:
           test -f release/android-signature-verification.txt
           test -f release/windows-authenticode-verification.txt
           test -f release/release-sbom.spdx.json
+          cp LICENSE release/LICENSE
           cp docs/runbooks/VERIFY_FORMAL_RELEASE.md release/RELEASE_ARTIFACT_VERIFICATION.md
           source_commit="$(git rev-parse HEAD)"
           [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]] || { echo 'Unable to resolve immutable build commit.' >&2; exit 1; }
           printf '{"sourceCommit":"%s","workflow":"%s","formalRelease":true}\n' "$source_commit" "$GITHUB_WORKFLOW" > release/build-source.json
           (
             cd release
-            sha256sum Relay-Android-release.apk Relay-PC-Gateway-setup.exe android-build-info.json windows-build-info.json build-source.json RELEASE_ARTIFACT_VERIFICATION.md > SHA256SUMS
+            sha256sum Relay-Android-release.apk Relay-PC-Gateway-setup.exe LICENSE android-build-info.json windows-build-info.json build-source.json RELEASE_ARTIFACT_VERIFICATION.md > SHA256SUMS
           )
       - name: Require and apply release artifact signatures
         shell: pwsh
@@ -275,6 +276,7 @@ jobs:
           test -f release/android-signature-verification.txt
           test -f release/windows-authenticode-verification.txt
           test -f release/release-sbom.spdx.json
+          test -f release/LICENSE
           test -f release/signature-verification.json
           test -f release/RELEASE_ARTIFACT_VERIFICATION.md
           tar -C release/metadata -czf release/Relay-TUF-metadata.tar.gz tuf
@@ -304,6 +306,7 @@ jobs:
           test -f release/Relay-Android-release.apk
           test -f release/Relay-PC-Gateway-setup.exe
           test -f release/SHA256SUMS
+          test -f release/LICENSE
           test -f release/release-sbom.spdx.json
           test -f release/signature-verification.json
           test -f release/Relay-TUF-metadata.tar.gz
