@@ -1,0 +1,39 @@
+name: Generate AGP verification metadata
+
+on:
+  pull_request:
+    branches: [agent/zero-operation-relay]
+    paths:
+      - gradle/libs.versions.toml
+      - gradle/wrapper/gradle-wrapper.properties
+      - .github/workflows/generate-agp-verification.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v7.0.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Generate verified dependency metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --write-verification-metadata sha256 help --no-daemon
+          ./gradlew --write-verification-metadata sha256 :app:dependencies :shared:jvmTest :relay-protocol:test :composeApp:desktopTest --no-daemon
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agp-verification-metadata
+          path: gradle/verification-metadata.xml
+          if-no-files-found: error
