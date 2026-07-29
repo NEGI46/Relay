@@ -664,6 +664,6 @@ Relay is not an emergency-dispatch service, not a 119 replacement, and not produ
 
 ## License / ライセンス
 
-Relay is licensed under the [Apache License 2.0](LICENSE). You may use, modify, and redistribute the project under its terms. The license includes an express patent grant; it does not grant rights to use the Relay name or any other trademarks.
+Relay is licensed under the [Apache License 2.0](LICENSE). You may use, modify, and redistribute the project under its terms. The license includes an express patent grant. It does not grant trademark rights, except for reasonable and customary use in describing the origin of the work or reproducing the NOTICE file.
 
-Relayは [Apache License 2.0](LICENSE) の下で提供されます。ライセンス条件の範囲で、利用・改変・再配布できます。明示的な特許ライセンスを含みますが、Relayの名称その他の商標を使用する権利は含みません。
+Relayは [Apache License 2.0](LICENSE) の下で提供されます。ライセンス条件の範囲で、利用・改変・再配布できます。明示的な特許ライセンスを含みます。商標の使用権は含みませんが、作品の出所を説明するため、またはNOTICEファイルを複製するための合理的かつ慣習的な使用は除きます。
