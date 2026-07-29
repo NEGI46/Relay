@@ -1,0 +1,32 @@
+name: Generate pruned verification metadata
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/generate-pruned-verification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Regenerate metadata from the active CI dependency graph
+        run: |
+          rm gradle/verification-metadata.xml
+          chmod +x gradlew
+          ./gradlew :app:lintDebug :app:testDebugUnitTest :composeApp:desktopTest :shared:jvmTest :relay-protocol:test :relay-protocol:pitest :broker:test :broker:installDist :pc-gateway:test :pc-gateway:installDist :fuzz-jvm:test --no-daemon --write-verification-metadata sha256
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pruned-verification-metadata
+          path: gradle/verification-metadata.xml
