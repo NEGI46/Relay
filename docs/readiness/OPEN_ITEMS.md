@@ -4,7 +4,7 @@
 
 # Relay open readiness items
 
-Status date: **2026-07-26** / commit `89e7651`
+Status date: **2026-07-29** / commit `23bd1da`
 
 ## 未実装・実装不能（外部判断待ち）
 

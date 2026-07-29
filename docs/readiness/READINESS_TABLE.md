@@ -4,7 +4,7 @@
 
 # Relay readiness table
 
-Status date: **2026-07-26** / commit `89e7651` / branch `agent/zero-operation-relay`
+Status date: **2026-07-29** / commit `23bd1da` / branch `agent/zero-operation-relay`
 
 > Relayは119、消防・警察・自治体の公式な緊急連絡手段の代替ではありません。 本ファイルのどの状態も、実災害での救助や自治体・消防の承認を保証しません。
 
@@ -46,11 +46,11 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 | `official-info-provenance` | 公式情報の来歴モデル（JMA XML・CAP） | 運用 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | NOT_RUN | - |
 | `dpapi-key-protection` | Windows DPAPIによるGateway秘密鍵保護 | PC Gateway | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | NOT_RUN | - |
 | `data-retention` | 個人・救助情報のretention管理 | 運用 | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | NOT_RUN | Privacy/legal owner approval of retention periods |
-| `codeql-analysis` | CodeQL静的解析（java-kotlin / js-ts / actions） | Supply chain | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
+| `codeql-analysis` | CodeQL静的解析（java-kotlin / js-ts / actions） | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `secret-scanning-gitleaks` | gitleaks秘密情報スキャン（Relay固有ルール） | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `workflow-lint-zizmor` | ワークフローlintと堅牢化監査（actionlint + zizmor） | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `action-sha-pinning-gate` | SHA固定されていないGitHub Actionsを拒否するCIゲート | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
-| `dependency-review` | PR依存関係レビュー（high以上で失敗・ライセンス拒否リスト） | Supply chain | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
+| `dependency-review` | PR依存関係レビュー（high以上で失敗・ライセンス拒否リスト） | Supply chain | IMPLEMENTED | AUTOMATED_TESTED | N/A | N/A | N/A | - |
 | `scorecard-monitoring` | OSSF Scorecardサプライチェーン姿勢モニタリング | Supply chain | IMPLEMENTED | NOT_RUN | N/A | N/A | N/A | - |
 | `dependabot-updates` | Dependabot更新設定（gradle/actions/npm/pip） | Supply chain | IMPLEMENTED | N/A | N/A | N/A | N/A | - |
 | `branch-protection` | 必須セキュリティチェック付きブランチ保護 | Supply chain | BLOCKED_EXTERNAL | BLOCKED_EXTERNAL | N/A | N/A | N/A | Repository owner must apply the settings documented in docs/security/BRANCH_PROTECTION.md |
@@ -94,16 +94,16 @@ State axes are independent: `IMPLEMENTED` and `AUTOMATED_TESTED` never imply `DE
 - `official-info-provenance`: Provenance is transport-honest only: no trust anchors exist for JMA/CAP publishers, so content authenticity is never claimed; staff console renders the verification state. CAP/Atom parsers are not yet wired to a live polling source (JMA XML feed polling remains a documented future activation trigger).
 - `dpapi-key-protection`: Opt-in per-user DPAPI at-rest protection (default remains file-permissions); deliberately not claimed as HSM/TPM/KMS - the blob opens only for the same Windows user on the same machine, and machine-loss recovery requires re-provisioning.
 - `data-retention`: The engine covers decrypted terminal rescue details (the personal-data store); message/audit stores have their own size bounds. The 30-day default is a pilot value pending privacy/legal owner approval and is now operator-configurable within approved bounds.
-- `codeql-analysis`: Workflow linted locally (actionlint/zizmor) but not yet executed on GitHub-hosted runners.
-- `secret-scanning-gitleaks`: Scan executed locally with checksum-pinned gitleaks 8.30.1; CI execution on GitHub runners pending first push.
-- `workflow-lint-zizmor`: All checkouts use persist-credentials:false; publish workflows demoted to contents:read with job-level write.
-- `dependency-review`: Only runs on pull_request events; requires GitHub dependency graph.
+- `codeql-analysis`: Executed successfully on GitHub-hosted runners for the merged dependency/security update; this is automated static-analysis evidence only.
+- `secret-scanning-gitleaks`: Both the checksum-pinned local scan and the GitHub-hosted CI scan have completed successfully.
+- `workflow-lint-zizmor`: All checkouts use persist-credentials:false; publish workflows retain only job-level write permissions where required.
+- `dependency-review`: Runs only for pull requests and requires the GitHub dependency graph; both prerequisites were satisfied for PR #53.
 - `scorecard-monitoring`: Honestly gated to the default branch; will not produce results until merged there.
 - `dependabot-updates`: Configuration only; GitHub activates it server-side once present on the default branch.
 - `branch-protection`: CI cannot verify repository settings; remains blocked until the owner applies and confirms them.
 - `gradle-dependency-verification`: Generated on Windows; platform-specific artifacts for ubuntu/macos CI lanes may need additions (fail-closed, documented).
 - `release-provenance-attestation`: Real attestation requires an actual formal release run on GitHub; not executable locally.
-- `detekt-static-analysis`: 1294 existing findings recorded as baseline debt (0 ForbiddenImport); CLI checksum-pinned, no Gradle plugin dependency added.
+- `detekt-static-analysis`: 1294 existing findings are recorded as baseline debt (0 ForbiddenImport); the checksum-pinned CLI rejects new findings and ran successfully in GitHub Actions.
 - `property-based-testing`: kotest-property 5.9.1 pinned in verification-metadata.xml (sha256); JUnit4 + runBlocking bridge; :relay-protocol:test green under active dependency verification.
 - `mutation-testing`: PIT 1.17.4 via info.solidsoft.pitest 1.15.0, pinned in verification-metadata.xml; targetTests set explicitly because the plugin default silently skipped tests outside the targetClasses package (false NO_COVERAGE); PIT analysis drove the tamper property from 5 to all 15 canonical fields.
 - `architecture-tests`: ArchUnit 1.4.1 (archunit-junit4) runs inside :pc-gateway:test whose classpath contains all JVM production modules (relay-protocol, shared-jvm, pc-gateway, broker); :pc-gateway:test --rerun-tasks 97 tests 0 failures. Android-only modules (app, composeApp) are outside this JVM import and remain covered only by their own unit tests.
