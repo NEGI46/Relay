@@ -23,7 +23,7 @@ jobs:
       - name: Generate JVM Jazzer verification metadata
         run: |
           chmod +x gradlew
-          ./gradlew --write-verification-metadata sha256 :fuzz-jvm:test --no-daemon
+          ./gradlew --refresh-dependencies --write-verification-metadata sha256 :fuzz-jvm:test --no-daemon
       - name: Commit generated verification metadata
         run: |
           if git diff --quiet -- gradle/verification-metadata.xml; then exit 1; fi
