@@ -1,4 +1,3 @@
-import com.android.build.api.dsl.ManagedVirtualDevice
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -160,15 +159,17 @@ android {
         // developer workstation and in CI. Run with:
         //   ./gradlew :app:mediumPhoneApi36DebugAndroidTest
         managedDevices {
-            devices {
-                maybeCreate<ManagedVirtualDevice>("mediumPhoneApi36").apply {
+            localDevices {
+                create("mediumPhoneApi36") {
                     device = "Medium Phone"
                     apiLevel = 36
                     systemImageSource = "google_apis_playstore"
                 }
-                maybeCreate<ManagedVirtualDevice>("mediumPhoneApi23").apply {
+                // AGP 9 build-managed devices require API 27 or newer. minSdk remains 23;
+                // API 23 coverage is retained for physical-device validation instead.
+                create("mediumPhoneApi27") {
                     device = "Medium Phone"
-                    apiLevel = 23
+                    apiLevel = 27
                     systemImageSource = "google"
                 }
             }
