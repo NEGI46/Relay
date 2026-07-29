@@ -61,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p codeql-sarif
-          find ../results -maxdepth 1 -type f -name '*.sarif' -exec cp {} codeql-sarif/ \\;
+          find ../results -maxdepth 1 -type f -name '*.sarif' -exec cp {} codeql-sarif/ \;
           test -n "$(find codeql-sarif -type f -name '*.sarif' -print -quit)"
       - name: Upload CodeQL SARIF for remediation
         if: always()
