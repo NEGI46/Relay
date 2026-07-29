@@ -1,0 +1,31 @@
+name: Generate broker verification metadata
+
+on:
+  pull_request:
+    paths:
+      - "gradle/libs.versions.toml"
+      - "gradle/verification-metadata.xml"
+      - ".github/workflows/generate-broker-verification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - run: chmod +x gradlew
+      - run: ./gradlew :broker:compileTestKotlin --no-daemon --write-verification-metadata sha256
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: broker-verification-metadata
+          path: gradle/verification-metadata.xml
+          retention-days: 1
