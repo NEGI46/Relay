@@ -1,0 +1,38 @@
+name: Generate coroutines BOM verification hash
+
+on:
+  push:
+    branches:
+      - agent/verify-coroutines-bom
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Generate Android lint verification metadata
+        run: |
+          chmod +x gradlew
+          ./gradlew --write-verification-metadata sha256 :app:lintDebug --no-daemon
+      - name: Commit generated verification metadata
+        run: |
+          if git diff --quiet -- gradle/verification-metadata.xml; then
+            echo "No verification metadata change generated"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gradle/verification-metadata.xml
+          git commit -m "build: verify coroutines BOM metadata"
+          git push
