@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -142,7 +143,9 @@ class RelayCommunicationService : Service() {
     }
 
     private fun notification(connectedPeers: Int): Notification {
-        val stopIntent = Intent(this, RelayCommunicationService::class.java).setAction(ACTION_STOP)
+        val stopIntent = Intent()
+            .setComponent(ComponentName(this, RelayCommunicationService::class.java))
+            .setAction(ACTION_STOP)
         val stopPendingIntent = PendingIntent.getService(
             this,
             1,
