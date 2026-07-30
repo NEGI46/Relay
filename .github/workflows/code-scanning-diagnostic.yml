@@ -1,0 +1,41 @@
+name: Code scanning verification
+
+on:
+  push:
+    branches:
+      - agent/code-scanning-diagnostic
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          languages: java-kotlin
+          build-mode: manual
+      - name: Build Kotlin/JVM sources for extraction
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:compileDebugKotlin :pc-gateway:classes :broker:classes :relay-protocol:classes :shared:compileKotlinJvm --no-daemon
+      - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          category: "/diagnostic/java-kotlin"
+          upload: false
+          output: results
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: codeql-java-kotlin-verification-sarif
+          path: results/**/*.sarif
+          if-no-files-found: error
