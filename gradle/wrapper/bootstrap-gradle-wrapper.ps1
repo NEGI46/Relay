@@ -45,7 +45,13 @@ $jarPath = Join-Path $jarDirectory "gradle-wrapper-$expectedSha256.jar"
 $propertiesCachePath = Join-Path $jarDirectory "gradle-wrapper-$expectedSha256.properties"
 
 function Get-Sha256([string] $Path) {
-    (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        ([System.BitConverter]::ToString($sha256.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
 }
 
 if ((Test-Path -LiteralPath $jarPath -PathType Leaf) -and (Get-Sha256 $jarPath) -ne $expectedSha256) {
