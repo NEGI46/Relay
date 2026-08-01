@@ -17,25 +17,27 @@ object GatewayMessageFuzzer {
                 data.consumeRemainingAsString(),
             )
         } catch (_: SerializationException) {
-            return
+            null
         } catch (_: IllegalArgumentException) {
-            return
+            null
         } catch (_: IndexOutOfBoundsException) {
             // Kotlin serialization can surface malformed numeric JSON as an index error;
             // the production HTTP boundary rejects the same input as malformed JSON.
-            return
+            null
         }
-        check(
-            message.messageId.length +
-                message.messageType.length +
-                message.recordType.length +
-                message.priority.length +
-                message.status.length +
-                message.originDeviceId.length +
-                message.hopCount +
-                message.hopLimit +
-                message.payload.toString().length +
-                (message.integrity?.signature?.length ?: 0) >= Int.MIN_VALUE,
-        )
+        if (message != null) {
+            check(
+                message.messageId.length +
+                    message.messageType.length +
+                    message.recordType.length +
+                    message.priority.length +
+                    message.status.length +
+                    message.originDeviceId.length +
+                    message.hopCount +
+                    message.hopLimit +
+                    message.payload.toString().length +
+                    (message.integrity?.signature?.length ?: 0) >= Int.MIN_VALUE,
+            )
+        }
     }
 }
