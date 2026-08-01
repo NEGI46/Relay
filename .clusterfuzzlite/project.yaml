@@ -1,0 +1,5 @@
+language: jvm
+fuzzing_engines:
+  - libfuzzer
+sanitizers:
+  - address

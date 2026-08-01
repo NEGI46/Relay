@@ -23,7 +23,7 @@ Validation rule: only a command that completed successfully at the current code 
 | TUF metadata chain | `test-lab/tuf_metadata_test.py -v` | PASS | 5 tests passed. This does not verify a production release key. |
 | Virtual BLE | `tools/ble-sim/run_tests.py` | BLOCKED | 12 simulator tests passed; the optional Bumble dependency was not available. |
 | Decoder / virtual BLE regression | `scripts/run-jazzer.ps1 -RequirePython` | PASS | 4 deterministic decoder tests and 12 virtual BLE tests passed; the machine-readable result names its Jazzer target `NOT_RUN`. |
-| Jazzer fuzzing | JVM Jazzer target | NOT_RUN | No JVM target exists. `JAZZER_FUZZ=1` now fails instead of calling regression coverage Jazzer. |
+| Jazzer fuzzing | .clusterfuzzlite JVM targets and ClusterFuzzLite PR workflow | PENDING CI | Standalone QrFrameFuzzer and GatewayMessageFuzzer entry points now exercise production decoders; final PASS requires the PR workflow run. |
 | SBOM / OSV / Grype | local scan scripts | BLOCKED | Syft, OSV-Scanner, and Grype are not installed. Scripts emitted `BLOCKED`; required mode also failed as intended. |
 | MobSF | `scripts/run-mobsf.ps1` | BLOCKED | `MOBSF_URL` and `MOBSF_API_KEY` are not configured. Required mode emitted `BLOCKED` and failed as intended. |
 | Distribution signature verification | `scripts/verify-distribution-signatures.ps1 -RequireVerification` | BLOCKED | No distribution/signing evidence or cosign verification setup is available. Required mode emitted `BLOCKED` and failed as intended. |

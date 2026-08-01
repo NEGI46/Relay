@@ -61,14 +61,14 @@ jobs:
           curl -sf http://127.0.0.1:19876/v1/health || { echo "::error::Broker failed to start"; exit 1; }
       - name: Start Gateway
         run: |
-          export RELAY_GATEWAY_PROFILE=DEVELOPMENT
+          export RELAY_PROFILE=development
           export RELAY_GATEWAY_HOST=127.0.0.1
           export RELAY_GATEWAY_PORT=19877
-          export RELAY_GATEWAY_DB_PATH="$RUNNER_TEMP/gateway.db"
+          export RELAY_GATEWAY_DB="$RUNNER_TEMP/gateway.db"
           export RELAY_GATEWAY_ID=ci-test-gateway
           export RELAY_SHELTER_ID=ci-test-shelter
-          export RELAY_GATEWAY_RESCUE_KEY_PATH="$RUNNER_TEMP/rescue-keys.json"
-          export RELAY_GATEWAY_OFFLINE_MAP_PATH="$RUNNER_TEMP/maps"
+          export RELAY_RESCUE_KEY_FILE="$RUNNER_TEMP/rescue-keys.json"
+          export RELAY_OFFLINE_MAP_DIR="$RUNNER_TEMP/maps"
           export RELAY_GATEWAY_LAN_MODE=DISABLED
           mkdir -p "$RUNNER_TEMP/maps"
           pc-gateway/build/install/pc-gateway/bin/pc-gateway &
