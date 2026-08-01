@@ -147,15 +147,15 @@ try {
     # --- Step 4: Start Gateway ---
     Write-Host "[3/8] Starting Gateway on port $GatewayPort..."
     $gatewayEnv = @{
-        RELAY_GATEWAY_PROFILE = 'DEVELOPMENT'
-        RELAY_GATEWAY_HOST = '127.0.0.1'
-        RELAY_GATEWAY_PORT = "$GatewayPort"
-        RELAY_GATEWAY_DB_PATH = $gatewayDb
-        RELAY_GATEWAY_ID = 'e2e-test-gateway'
-        RELAY_SHELTER_ID = 'e2e-test-shelter'
-        RELAY_GATEWAY_RESCUE_KEY_PATH = $gatewayKeys
-        RELAY_GATEWAY_OFFLINE_MAP_PATH = (Join-Path $tempDir 'maps')
-        RELAY_GATEWAY_LAN_MODE = 'DISABLED'
+        RELAY_PROFILE = 'development'
+       RELAY_GATEWAY_HOST = '127.0.0.1'
+       RELAY_GATEWAY_PORT = "$GatewayPort"
+        RELAY_GATEWAY_DB = $gatewayDb
+       RELAY_GATEWAY_ID = 'e2e-test-gateway'
+       RELAY_SHELTER_ID = 'e2e-test-shelter'
+        RELAY_RESCUE_KEY_FILE = $gatewayKeys
+        RELAY_OFFLINE_MAP_DIR = (Join-Path $tempDir 'maps')
+       RELAY_GATEWAY_LAN_MODE = 'DISABLED'
     }
     foreach ($kv in $gatewayEnv.GetEnumerator()) { [Environment]::SetEnvironmentVariable($kv.Key, $kv.Value, 'Process') }
 
