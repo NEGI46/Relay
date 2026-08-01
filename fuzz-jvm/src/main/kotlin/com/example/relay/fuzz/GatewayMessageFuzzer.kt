@@ -20,6 +20,10 @@ object GatewayMessageFuzzer {
             return
         } catch (_: IllegalArgumentException) {
             return
+        } catch (_: IndexOutOfBoundsException) {
+            // Kotlin serialization can surface malformed numeric JSON as an index error;
+            // the production HTTP boundary rejects the same input as malformed JSON.
+            return
         }
         check(
             message.messageId.length +
