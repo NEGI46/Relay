@@ -24,6 +24,11 @@ supports Linux/macOS, so `JAZZER_FUZZ=1` is refused on Windows (the deterministi
 regression lane above still runs there). Availability must never be represented
 as coverage when the continuous lane is not run.
 
+The repository also provides standalone `QrFrameFuzzer` and `GatewayMessageFuzzer`
+entry points in `fuzz-jvm/src/test/java`. The pinned ClusterFuzzLite workflow
+under `.github/workflows/clusterfuzzlite.yml` builds those targets from the same
+production decoders and runs them with the JVM address-sanitized driver.
+
 The BLE fragment decoder (`RescueBleFrameCodec`) lives in the Android `:app`
 module and cannot be a plain-JVM fuzz dependency; its boundaries are covered by
 the deterministic corpus under `test-lab/fuzz` and the BLE virtual transport

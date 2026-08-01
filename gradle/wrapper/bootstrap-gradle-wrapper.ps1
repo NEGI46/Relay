@@ -1,97 +1,80 @@
 [CmdletBinding()]
 param(
     [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$GradleArguments
+    [string[]] $GradleArguments
 )
 
 $ErrorActionPreference = 'Stop'
 
-function Fail([string]$Message) {
-    throw $Message
-}
-
-function Read-Property([string]$Path, [string]$Name) {
-    $pattern = '^' + [regex]::Escape($Name) + '=(.*)$'
-    $line = Get-Content -LiteralPath $Path |
-        Where-Object { $_ -match $pattern } |
-        Select-Object -First 1
-    if ($null -eq $line) {
-        Fail "missing $Name in $Path"
-    }
-    return ($line -replace $pattern, '$1')
+function Fail([string] $Message) {
+    throw "gradle wrapper bootstrap: $Message"
 }
 
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
-$propertiesFile = Join-Path $scriptDirectory 'gradle-wrapper.properties'
-if (-not (Test-Path -LiteralPath $propertiesFile)) {
-    Fail "missing $propertiesFile"
+$propertiesPath = Join-Path $scriptDirectory 'gradle-wrapper.properties'
+if (-not (Test-Path -LiteralPath $propertiesPath -PathType Leaf)) {
+    Fail "missing $propertiesPath"
 }
 
-$wrapperJarUrl = Read-Property $propertiesFile 'wrapperJarUrl'
-$wrapperJarSha256 = Read-Property $propertiesFile 'wrapperJarSha256'
-if ($wrapperJarUrl -notmatch '^https://raw\.githubusercontent\.com/gradle/gradle/[0-9a-f]{40}/gradle/wrapper/gradle-wrapper\.jar$') {
-    Fail 'wrapperJarUrl must point to an immutable Gradle commit'
-}
-if ($wrapperJarSha256 -notmatch '^[0-9a-f]{64}$') {
-    Fail 'wrapperJarSha256 must be a lowercase SHA-256 digest'
-}
-
-$gradleUserHome = $env:GRADLE_USER_HOME
-if ([string]::IsNullOrWhiteSpace($gradleUserHome)) {
-    $gradleUserHome = Join-Path $env:USERPROFILE '.gradle'
-}
-$jarDirectory = Join-Path $gradleUserHome 'wrapper\jars'
-$jarPath = Join-Path $jarDirectory ('gradle-wrapper-' + $wrapperJarSha256 + '.jar')
-New-Item -ItemType Directory -Force -Path $jarDirectory | Out-Null
-
-if (Test-Path -LiteralPath $jarPath) {
-    $actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $jarPath).Hash.ToLowerInvariant()
-    if ($actualSha256 -ne $wrapperJarSha256) {
-        Remove-Item -Force -LiteralPath $jarPath
+$properties = @{}
+foreach ($line in Get-Content -LiteralPath $propertiesPath) {
+    if ($line -match '^(?<name>[^#=]+)=(?<value>.*)$') {
+        $properties[$Matches.name.Trim()] = $Matches.value.Trim()
     }
 }
 
-if (-not (Test-Path -LiteralPath $jarPath)) {
-    $temporaryPath = $jarPath + '.' + [guid]::NewGuid().ToString() + '.tmp'
-    try {
-        Invoke-WebRequest -Uri $wrapperJarUrl -OutFile $temporaryPath
-        $actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $temporaryPath).Hash.ToLowerInvariant()
-        if ($actualSha256 -ne $wrapperJarSha256) {
-            Fail 'downloaded Gradle Wrapper JAR failed SHA-256 verification'
-        }
-        Move-Item -Force -LiteralPath $temporaryPath -Destination $jarPath
-    } finally {
-        if (Test-Path -LiteralPath $temporaryPath) {
-            Remove-Item -Force -LiteralPath $temporaryPath
-        }
-    }
+$wrapperUrl = $properties['wrapperJarUrl']
+$expectedSha256 = $properties['wrapperJarSha256']
+if ($wrapperUrl -notmatch '^https://raw\.githubusercontent\.com/gradle/gradle/[0-9a-f]{40}/gradle/wrapper/gradle-wrapper\.jar$') {
+    Fail 'wrapperJarUrl must use an immutable Gradle GitHub raw URL'
+}
+if ($expectedSha256 -notmatch '^[0-9a-f]{64}$') {
+    Fail 'wrapperJarSha256 must be a SHA-256 digest'
 }
 
-# Gradle 9.5 resolves its distribution properties beside the wrapper JAR.
-$propertiesCachePath = Join-Path $jarDirectory ('gradle-wrapper-' + $wrapperJarSha256 + '.properties')
-Copy-Item -Force -LiteralPath $propertiesFile -Destination $propertiesCachePath
-
-$javaExe = $null
-if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
-    $javaExe = Join-Path $env:JAVA_HOME 'bin\java.exe'
-    if (-not (Test-Path -LiteralPath $javaExe)) {
-        Fail 'JAVA_HOME does not point to a usable Java installation'
-    }
+$gradleUserHome = if ($env:GRADLE_USER_HOME) {
+    $env:GRADLE_USER_HOME
+} elseif ($env:USERPROFILE) {
+    Join-Path $env:USERPROFILE '.gradle'
 } else {
-    $javaCommand = Get-Command java.exe -ErrorAction SilentlyContinue
-    if ($null -eq $javaCommand) {
-        Fail 'JAVA_HOME is not set and no java.exe command could be found'
-    }
-    $javaExe = $javaCommand.Source
+    Fail 'USERPROFILE is not set'
 }
 
-$javaOptions = @('-Xmx64m', '-Xms64m')
-foreach ($optionName in @('JAVA_OPTS', 'GRADLE_OPTS')) {
-    $optionValue = [Environment]::GetEnvironmentVariable($optionName)
-    if (-not [string]::IsNullOrWhiteSpace($optionValue)) {
-        $javaOptions += ($optionValue -split '\s+')
+$jarDirectory = Join-Path $gradleUserHome 'wrapper\jars'
+$jarPath = Join-Path $jarDirectory "gradle-wrapper-$expectedSha256.jar"
+$propertiesCachePath = Join-Path $jarDirectory "gradle-wrapper-$expectedSha256.properties"
+
+function Get-Sha256([string] $Path) {
+    (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+if ((Test-Path -LiteralPath $jarPath -PathType Leaf) -and (Get-Sha256 $jarPath) -ne $expectedSha256) {
+    Remove-Item -LiteralPath $jarPath -Force
+}
+
+if (-not (Test-Path -LiteralPath $jarPath -PathType Leaf)) {
+    New-Item -ItemType Directory -Path $jarDirectory -Force | Out-Null
+    $temporaryPath = "$jarPath.download.$PID"
+    try {
+        Invoke-WebRequest -Uri $wrapperUrl -OutFile $temporaryPath
+        if ((Get-Sha256 $temporaryPath) -ne $expectedSha256) {
+            Fail 'wrapper JAR SHA-256 verification failed'
+        }
+        Move-Item -LiteralPath $temporaryPath -Destination $jarPath -Force
+    } finally {
+        if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
     }
 }
 
-& $javaExe @javaOptions '-Dorg.gradle.appname=gradlew' '-jar' $jarPath @GradleArguments
+Copy-Item -LiteralPath $propertiesPath -Destination $propertiesCachePath -Force
+
+$javaExecutable = if ($env:JAVA_HOME) {
+    Join-Path $env:JAVA_HOME 'bin\java.exe'
+} else {
+    'java.exe'
+}
+
+& $javaExecutable '-Dorg.gradle.appname=gradlew' '-jar' $jarPath @GradleArguments
 exit $LASTEXITCODE
