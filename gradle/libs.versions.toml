@@ -34,7 +34,7 @@ archunit = "1.4.2"
 jna = "5.18.1"
 # 2.x required: Docker Engine 29 rejects the pre-1.44 API negotiation used by testcontainers 1.x
 testcontainers = "2.0.5"
-toxiproxyJava = "2.1.7"
+toxiproxyJava = "2.1.11"
 desugarJdkLibs = "2.1.5"
 kover = "0.9.9"
 
