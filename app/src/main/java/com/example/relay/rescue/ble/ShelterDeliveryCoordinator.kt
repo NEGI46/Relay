@@ -8,6 +8,7 @@ import com.example.relay.rescue.ResolvedShelterKeys
 import com.example.relay.rescue.RescueEnvelopeRepository
 import com.example.relay.rescue.RescueRequestKey
 import com.example.relay.rescue.RescueSubmissionStatus
+import com.example.relay.rescue.RescueUrgency
 import com.example.relay.rescue.ShelterReceiptStatus
 import com.example.relay.rescue.SignedShelterManifest
 import com.example.relay.rescue.SignedShelterReceipt
@@ -169,6 +170,19 @@ class ShelterDeliveryCoordinator(
         )
         if (keys == null) _state.value = ShelterDeliveryState.WaitingToRetry("shelter key does not match envelope")
         return keys
+    }
+
+    private fun RescueSubmissionStatus.deliveryPriority(): Int = when (this) {
+        RescueSubmissionStatus.PENDING -> 3
+        RescueSubmissionStatus.IN_TRANSIT -> 2
+        RescueSubmissionStatus.SHELTER_STORED -> 1
+        else -> 0
+    }
+
+    private fun RescueUrgency.deliveryPriority(): Int = when (this) {
+        RescueUrgency.IMMEDIATE -> 3
+        RescueUrgency.URGENT -> 2
+        RescueUrgency.ROUTINE -> 1
     }
 
     private suspend fun submitCandidate(
