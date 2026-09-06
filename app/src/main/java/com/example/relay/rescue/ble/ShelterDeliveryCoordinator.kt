@@ -34,6 +34,11 @@ sealed interface ShelterDeliveryState {
     data class WaitingToRetry(val reason: String) : ShelterDeliveryState
 }
 
+private const val DELIVERY_PRIORITY_HIGH = 3
+private const val DELIVERY_PRIORITY_MEDIUM = 2
+private const val DELIVERY_PRIORITY_LOW = 1
+private const val DELIVERY_PRIORITY_NONE = 0
+
 /**
  * Automatic courier delivery. It never reads rescue plaintext and it never
  * consumes a mesh hop: only a verified PC receipt changes submission state.
@@ -173,16 +178,16 @@ class ShelterDeliveryCoordinator(
     }
 
     private fun RescueSubmissionStatus.deliveryPriority(): Int = when (this) {
-        RescueSubmissionStatus.PENDING -> 3
-        RescueSubmissionStatus.IN_TRANSIT -> 2
-        RescueSubmissionStatus.SHELTER_STORED -> 1
-        else -> 0
+        RescueSubmissionStatus.PENDING -> DELIVERY_PRIORITY_HIGH
+        RescueSubmissionStatus.IN_TRANSIT -> DELIVERY_PRIORITY_MEDIUM
+        RescueSubmissionStatus.SHELTER_STORED -> DELIVERY_PRIORITY_LOW
+        else -> DELIVERY_PRIORITY_NONE
     }
 
     private fun RescueUrgency.deliveryPriority(): Int = when (this) {
-        RescueUrgency.IMMEDIATE -> 3
-        RescueUrgency.URGENT -> 2
-        RescueUrgency.ROUTINE -> 1
+        RescueUrgency.IMMEDIATE -> DELIVERY_PRIORITY_HIGH
+        RescueUrgency.URGENT -> DELIVERY_PRIORITY_MEDIUM
+        RescueUrgency.ROUTINE -> DELIVERY_PRIORITY_LOW
     }
 
     private suspend fun submitCandidate(
