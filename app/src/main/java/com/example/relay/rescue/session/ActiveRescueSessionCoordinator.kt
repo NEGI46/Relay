@@ -58,6 +58,7 @@ sealed interface RescueSessionOperationResult {
  * Sender-owned rescue workflow. The ViewModel supplies UI input only; this coordinator owns
  * version allocation, encryption, atomic persistence, recovery, cancellation, and expiry.
  */
+@Suppress("LongParameterList")
 class ActiveRescueSessionCoordinator(
     private val store: ActiveRescueSessionStore,
     private val recoveryCipher: RecoveryPayloadCipher,
@@ -503,16 +504,15 @@ class ActiveRescueSessionCoordinator(
 
     private suspend fun attachCurrentLocation(draft: RescueRequestDraft): RescueRequestDraft {
         val provider = locationProvider ?: return draft
-        val fix = runCatching { provider.currentFix(8_000) }.getOrNull() ?: return draft
-        return draft.copy(
-            location = RescueLocation(
+        return runCatching { provider.currentFix(8_000) }.getOrNull()?.let { fix ->
+            draft.copy(location = RescueLocation(
                 latitude = fix.latitude,
                 longitude = fix.longitude,
                 accuracyMeters = fix.accuracyMeters,
                 description = draft.location?.description.orEmpty(),
                 capturedAtEpochMillis = fix.capturedAtEpochMillis,
-            ),
-        )
+            ))
+        } ?: draft
     }
 
     private fun mutexFor(requestId: String): Mutex = locks.computeIfAbsent(requestId) { Mutex() }

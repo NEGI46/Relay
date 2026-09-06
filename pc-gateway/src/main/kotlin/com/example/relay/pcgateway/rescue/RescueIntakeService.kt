@@ -56,6 +56,7 @@ class RescueIntakeService(
      * This method deliberately does not log envelopes or decrypted payloads.
      */
     @Synchronized
+    @Suppress("ComplexCondition")
     fun ingest(
         envelope: EncryptedRescueEnvelope,
         carrierId: String,
@@ -128,7 +129,9 @@ class RescueIntakeService(
                     previous.envelope.senderKeyId != envelope.senderKeyId ||
                     previous.envelope.senderPublicKeyBase64 != envelope.senderPublicKeyBase64)
             ) {
-                return@transaction RescueIngestResult.Rejected(RescueRejectionCode.INVALID_SENDER_AUTHORIZATION)
+                return@transaction RescueIngestResult.Rejected(
+                    RescueRejectionCode.INVALID_SENDER_AUTHORIZATION,
+                )
             }
             val carriedStatus = previous?.responseStatus
                 ?.takeUnless { payload.action == RescueRequestAction.CANCELLED || it in terminalStatuses }

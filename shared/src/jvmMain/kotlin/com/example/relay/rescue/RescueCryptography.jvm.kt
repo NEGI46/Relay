@@ -137,7 +137,10 @@ actual object RescueCryptography {
     }
 
     actual fun verifySenderAuthorization(envelope: EncryptedRescueEnvelope): Boolean = try {
-        if (envelope.senderKeyId.isBlank() && envelope.senderPublicKeyBase64.isBlank() && envelope.senderSignatureBase64.isBlank()) return false
+        if (envelope.senderKeyId.isBlank() &&
+            envelope.senderPublicKeyBase64.isBlank() &&
+            envelope.senderSignatureBase64.isBlank()
+        ) return false
         if (envelope.validate() != RescueValidationResult.Valid) return false
         val key = RescuePublicKey(
             keyId = envelope.senderKeyId,

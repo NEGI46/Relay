@@ -107,6 +107,7 @@ class InMemoryRescueEnvelopeRepository(
         require(maxStoredBytes > 0)
     }
 
+    @Suppress("CyclomaticComplexMethod", "ComplexCondition")
     override fun store(
         envelope: EncryptedRescueEnvelope,
         receivedAtEpochMillis: Long,

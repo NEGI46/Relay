@@ -7,6 +7,7 @@ import com.example.relay.domain.MessagePayload
 
 const val RESCUE_PROTOCOL_VERSION: Int = 1
 const val RESCUE_MAX_CIPHERTEXT_BYTES: Int = 1_048_576
+const val RESCUE_MAX_SENDER_PUBLIC_KEY_BYTES: Int = 1_024
 
 @Serializable
 enum class RescueUrgency { ROUTINE, URGENT, IMMEDIATE }
@@ -217,7 +218,7 @@ fun EncryptedRescueEnvelope.validate(): RescueValidationResult = validationResul
     val senderAuthorizationPresent = hasSenderAuthorization()
     if (senderAuthorizationPresent) {
         requireIdentifier(senderKeyId, "invalid_sender_key_id")
-        require(senderPublicKeyBase64.length in 64..1_024, "invalid_sender_public_key")
+        require(senderPublicKeyBase64.length in 64..RESCUE_MAX_SENDER_PUBLIC_KEY_BYTES, "invalid_sender_public_key")
         require(senderSignatureBase64.length in 64..256, "invalid_sender_signature")
     }
 }
