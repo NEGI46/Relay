@@ -56,7 +56,7 @@ class RescueIntakeService(
      * This method deliberately does not log envelopes or decrypted payloads.
      */
     @Synchronized
-    @Suppress("ComplexCondition")
+    @Suppress("ComplexCondition", "LongMethod", "CyclomaticComplexMethod", "ReturnCount")
     fun ingest(
         envelope: EncryptedRescueEnvelope,
         carrierId: String,
@@ -141,7 +141,10 @@ class RescueIntakeService(
                     RescueResponseStatus.UNCONFIRMED
                 }
             val carriedAssignment = previous
-                ?.takeUnless { payload.action == RescueRequestAction.CANCELLED || it.responseStatus in terminalStatuses }
+                ?.takeUnless {
+                    payload.action == RescueRequestAction.CANCELLED ||
+                        it.responseStatus in terminalStatuses
+                }
                 ?.assignedNodeId
 
             val request = StoredRescueRequest(

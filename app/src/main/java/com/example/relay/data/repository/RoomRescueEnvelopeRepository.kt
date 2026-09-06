@@ -53,7 +53,7 @@ class RoomRescueEnvelopeRepository(
      * Session updates call this while holding the same Room transaction that updates the recovery
      * record. `allowPruning=false` rejects rather than evicting another active sender's envelope.
      */
-    @Suppress("ComplexCondition")
+    @Suppress("ComplexCondition", "LongMethod", "CyclomaticComplexMethod", "ReturnCount")
     internal fun storeInTransaction(
         envelope: EncryptedRescueEnvelope,
         receivedAtEpochMillis: Long,
