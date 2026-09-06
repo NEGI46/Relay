@@ -123,7 +123,6 @@ class ReceiptOutbox(
 
         var sent = 0
         for ((receiptId, receiptJson) in pending) {
-            markAttempt(receiptId)
             val upload = BrokerReceiptUpload(
                 receipt = json.decodeFromString<SignedShelterReceipt>(receiptJson),
                 gatewayId = gatewayId,
@@ -144,6 +143,7 @@ class ReceiptOutbox(
                     // The Gateway may have received this envelope over LAN/BLE before the
                     // Broker. Keep the signed receipt pending so it can be accepted once the
                     // ciphertext reaches the Broker; 422 is not proof that delivery is doomed.
+                    markAttempt(receiptId)
                     incrementRetry(receiptId)
                 } else {
                     incrementRetry(receiptId)
