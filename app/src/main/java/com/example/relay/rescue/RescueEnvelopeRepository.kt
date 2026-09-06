@@ -172,11 +172,11 @@ class InMemoryRescueEnvelopeRepository(
         records[key] = current.copy(
             envelope = current.envelope.copy(hopCount = exportedHopCount),
             state = current.state.copy(
-                submissionStatus = if (current.state.submissionStatus.rank() < RescueSubmissionStatus.IN_TRANSIT.rank()) {
-                    RescueSubmissionStatus.IN_TRANSIT
-                } else {
-                    current.state.submissionStatus
-                },
+                submissionStatus = maxOf(
+                    current.state.submissionStatus,
+                    RescueSubmissionStatus.IN_TRANSIT,
+                    compareBy { it.rank() },
+                ),
                 submissionCount = current.state.submissionCount + 1,
             ),
         )

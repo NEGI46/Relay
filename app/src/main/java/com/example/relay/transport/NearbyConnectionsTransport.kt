@@ -27,7 +27,11 @@ class NearbyConnectionsTransport(
     private val reconnectBaseDelayMs: Long = 1_000,
     private val reconnectMaxDelayMs: Long = 30_000,
 ) : OfflineTransport {
-    private data class PendingTransfer(val peerId: String, val endpointId: String, val completion: CompletableDeferred<SendResult>)
+    private data class PendingTransfer(
+        val peerId: String,
+        val endpointId: String,
+        val completion: CompletableDeferred<SendResult>,
+    )
 
     private val lifecycleMutex = Mutex()
     private val _state = MutableStateFlow(OfflineTransportState())
@@ -187,10 +191,13 @@ class NearbyConnectionsTransport(
     private suspend fun handleBytesReceived(event: NearbyPlatformEvent.BytesReceived) {
         val peerId = endpointToPeer[event.endpointId] ?: return
         if (peerId !in _state.value.connectedPeerIds) return
-        if (event.bytes.size > maxPayloadBytes) return fail("receive", "payload exceeds Nearby BYTES limit")
-        val bytes = event.bytes.copyOf()
-        _receivedPayloads.emit(ReceivedPayload(peerId, bytes))
-        _transportEvents.emit(TransportEvent.PayloadReceived(peerId, bytes.size))
+        if (event.bytes.size > maxPayloadBytes) {
+            fail("receive", "payload exceeds Nearby BYTES limit")
+        } else {
+            val bytes = event.bytes.copyOf()
+            _receivedPayloads.emit(ReceivedPayload(peerId, bytes))
+            _transportEvents.emit(TransportEvent.PayloadReceived(peerId, bytes.size))
+        }
     }
 
     private suspend fun handleTransferSucceeded(event: NearbyPlatformEvent.PayloadTransferSucceeded) {
