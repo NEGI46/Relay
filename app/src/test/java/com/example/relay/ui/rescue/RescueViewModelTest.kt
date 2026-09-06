@@ -115,6 +115,12 @@ class RescueViewModelTest {
         assertEquals(PRIVATE_NOTE, decrypted.freeText)
         assertNotEquals(PRIVATE_NOTE, stored.envelope.ciphertextBase64)
         assertFalse(stored.envelope.toString().contains(PRIVATE_NOTE))
+        assertTrue(repository.recordSuccessfulExport(stored.key, 1))
+        viewModel.onRefreshStatus()
+        val refreshed = withTimeout(ASYNC_TIMEOUT_MILLIS) {
+            viewModel.state.first { it.broadcast.transferCount == 1 }
+        }
+        assertEquals(RescueSubmissionStatus.IN_TRANSIT, refreshed.ownRequest!!.submissionStatus)
     }
 
     @Test

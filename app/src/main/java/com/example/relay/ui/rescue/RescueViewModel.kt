@@ -6,6 +6,7 @@ import com.example.relay.rescue.CourierRescuePresenter
 import com.example.relay.rescue.RescueCondition
 import com.example.relay.rescue.RescueEnvelopeRepository
 import com.example.relay.rescue.RescueRequestAction
+import com.example.relay.rescue.RescueRequestKey
 import com.example.relay.rescue.RescueRequestDraft
 import com.example.relay.rescue.RescueSubmissionStatus
 import com.example.relay.rescue.RescueUrgency
@@ -366,6 +367,9 @@ class RescueViewModel(
     }
 
     private fun showRecovered(recovered: RecoveredRescueSession) {
+        val durableRecord = repository.get(
+            RescueRequestKey(recovered.session.requestId, recovered.session.latestVersion),
+        )
         _state.update { current ->
             current.copy(
                 screen = RescueScreen.BROADCASTING,
@@ -373,6 +377,7 @@ class RescueViewModel(
                 recoveryFailure = false,
                 ownRequest = recovered.toOwnRequest(),
                 broadcast = current.broadcast.copy(
+                    transferCount = durableRecord?.state?.submissionCount ?: 0,
                     isActive = recovered.recovery.draft.action == RescueRequestAction.ACTIVE &&
                         recovered.session.terminalStatus == null,
                     statusMessage = current.language.text(

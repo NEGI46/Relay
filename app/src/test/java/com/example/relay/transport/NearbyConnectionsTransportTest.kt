@@ -16,6 +16,123 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class NearbyConnectionsTransportTest {
     @Test
+    fun `failed automatic acceptance is retried by deterministic initiator`() = runTest {
+        val platform = FakeNearbyPlatform(failAccept = true)
+        val transport = NearbyConnectionsTransport("device-A", platform, AllowedNearbyPermissionGate, backgroundScope)
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.EndpointFound("endpoint-1", "device-B"))
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("endpoint-1", "device-B", "1234", false))
+        runCurrent()
+        assertEquals(1, platform.requested.size)
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(2, platform.requested.size)
+    }
+
+    @Test
+    fun `discovery loss during handshake does not discard the connection`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val transport = NearbyConnectionsTransport("device-A", platform, AllowedNearbyPermissionGate, backgroundScope)
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.EndpointFound("endpoint-1", "device-B"))
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("endpoint-1", "device-B", "1234", false))
+        platform.events.emit(NearbyPlatformEvent.EndpointLost("endpoint-1"))
+        platform.events.emit(NearbyPlatformEvent.ConnectionSucceeded("endpoint-1"))
+        runCurrent()
+
+        assertTrue("device-B" in transport.state.value.connectedPeerIds)
+        assertTrue(platform.disconnected.isEmpty())
+    }
+
+    @Test
+    fun `restarted peer replaces inactive endpoint and old callbacks cannot disconnect it`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val transport = NearbyConnectionsTransport("device-A", platform, AllowedNearbyPermissionGate, backgroundScope)
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("old", "device-B", "1234", true))
+        platform.events.emit(NearbyPlatformEvent.ConnectionSucceeded("old"))
+        platform.events.emit(NearbyPlatformEvent.Disconnected("old"))
+        platform.events.emit(NearbyPlatformEvent.EndpointFound("new", "device-B"))
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("new", "device-B", "5678", false))
+        platform.events.emit(NearbyPlatformEvent.ConnectionSucceeded("new"))
+        platform.events.emit(NearbyPlatformEvent.EndpointLost("old"))
+        platform.events.emit(NearbyPlatformEvent.Disconnected("old"))
+        runCurrent()
+
+        assertEquals(listOf("new"), platform.requested)
+        assertTrue("device-B" in transport.state.value.connectedPeerIds)
+        assertEquals(listOf(Peer("device-B")), transport.discoveredPeers.value)
+        assertFalse("new" in platform.disconnected)
+    }
+
+    @Test
+    fun `duplicate identity cannot replace an active connection`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val transport = NearbyConnectionsTransport("device-A", platform, AllowedNearbyPermissionGate, backgroundScope)
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("active", "device-B", "1234", true))
+        platform.events.emit(NearbyPlatformEvent.ConnectionSucceeded("active"))
+        platform.events.emit(NearbyPlatformEvent.EndpointFound("duplicate", "device-B"))
+        runCurrent()
+
+        assertTrue("device-B" in transport.state.value.connectedPeerIds)
+        assertEquals(listOf("duplicate"), platform.disconnected)
+    }
+
+    @Test
+    fun `transfer completion from another endpoint cannot acknowledge our send`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val transport = NearbyConnectionsTransport("device-A", platform, AllowedNearbyPermissionGate, backgroundScope)
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("endpoint-1", "device-B", "1234", true))
+        platform.events.emit(NearbyPlatformEvent.ConnectionSucceeded("endpoint-1"))
+        runCurrent()
+        val result = async { transport.send("device-B", byteArrayOf(1)) }
+        runCurrent()
+        platform.events.emit(NearbyPlatformEvent.PayloadTransferSucceeded("other-endpoint", 100L))
+        runCurrent()
+        assertFalse(result.isCompleted)
+        platform.events.emit(NearbyPlatformEvent.PayloadTransferSucceeded("endpoint-1", 100L))
+        runCurrent()
+        assertEquals(SendResult.PayloadTransferCompleted, result.await())
+    }
+
+    @Test
+    fun `cancelling send removes pending transfer without reporting success later`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val transport = NearbyConnectionsTransport("device-A", platform, AllowedNearbyPermissionGate, backgroundScope)
+        val observed = mutableListOf<TransportEvent>()
+        backgroundScope.launch { transport.transportEvents.collect(observed::add) }
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("endpoint-1", "device-B", "1234", true))
+        platform.events.emit(NearbyPlatformEvent.ConnectionSucceeded("endpoint-1"))
+        runCurrent()
+        val result = async { transport.send("device-B", byteArrayOf(1)) }
+        runCurrent()
+        result.cancel()
+        runCurrent()
+        platform.events.emit(NearbyPlatformEvent.PayloadTransferSucceeded("endpoint-1", 100L))
+        runCurrent()
+        assertTrue(result.isCancelled)
+        assertFalse(observed.any { it is TransportEvent.PayloadTransferCompleted })
+    }
+
+    @Test
+    fun `oversized incoming bytes never reach the protocol consumer`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val transport = NearbyConnectionsTransport("device-A", platform, AllowedNearbyPermissionGate, backgroundScope)
+        val received = mutableListOf<ReceivedPayload>()
+        backgroundScope.launch { transport.receivedPayloads.collect(received::add) }
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("endpoint-1", "device-B", "1234", true))
+        platform.events.emit(NearbyPlatformEvent.ConnectionSucceeded("endpoint-1"))
+        platform.events.emit(NearbyPlatformEvent.BytesReceived("endpoint-1", ByteArray(32 * 1024 + 1)))
+        runCurrent()
+        assertTrue(received.isEmpty())
+        assertEquals("payload exceeds Nearby BYTES limit", transport.state.value.lastError)
+    }
+
+    @Test
     fun `platform discovery maps endpoint name to domain peer and loss removes it`() = runTest {
         val platform = FakeNearbyPlatform()
         val transport = NearbyConnectionsTransport("local", platform, AllowedNearbyPermissionGate, backgroundScope)
@@ -499,6 +616,7 @@ class NearbyConnectionsTransportTest {
 private class FakeNearbyPlatform(
     private val completeDuringSend: Boolean = false,
     private val failSendAfterPayloadCreated: Boolean = false,
+    private val failAccept: Boolean = false,
 ) : NearbyPlatform {
     override val events = MutableSharedFlow<NearbyPlatformEvent>(extraBufferCapacity = 32)
     var advertisingStarts = 0
@@ -512,7 +630,10 @@ private class FakeNearbyPlatform(
     override suspend fun startAdvertising(localEndpointName: String) { advertisingStarts++ }
     override suspend fun startDiscovery() { discoveryStarts++ }
     override suspend fun requestConnection(localEndpointName: String, endpointId: String) { requested += endpointId }
-    override suspend fun acceptConnection(endpointId: String) { accepted += endpointId }
+    override suspend fun acceptConnection(endpointId: String) {
+        if (failAccept) error("temporary accept failure")
+        accepted += endpointId
+    }
     override suspend fun rejectConnection(endpointId: String) { rejected += endpointId }
     override fun disconnect(endpointId: String) { disconnected += endpointId }
     override suspend fun sendBytes(endpointId: String, bytes: ByteArray, onPayloadCreated: (Long) -> Unit): Long {

@@ -61,6 +61,12 @@ class RescueWorkflowTest {
             courierStore.applyReceipt(RescueRequestKey("request-1", 1), receipt, signer.publicKey),
         )
         assertEquals(RescueSubmissionStatus.SHELTER_ACCEPTED, CourierRescuePresenter(courierStore).items().single().submissionStatus)
+        // A delayed peer ACK must not downgrade a verified shelter receipt.
+        assertEquals(true, courierStore.recordSuccessfulExport(RescueRequestKey("request-1", 1), 2))
+        val afterLateAck = courierStore.get(RescueRequestKey("request-1", 1))!!
+        assertEquals(RescueSubmissionStatus.SHELTER_ACCEPTED, afterLateAck.state.submissionStatus)
+        assertEquals(receipt, afterLateAck.state.signedReceipt)
+        assertEquals(1, afterLateAck.state.submissionCount)
     }
 
     @Test

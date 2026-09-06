@@ -1,6 +1,7 @@
 package com.example.relay.transport
 
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -26,7 +27,11 @@ class NearbyConnectionsTransport(
     private val reconnectBaseDelayMs: Long = 1_000,
     private val reconnectMaxDelayMs: Long = 30_000,
 ) : OfflineTransport {
-    private data class PendingTransfer(val peerId: String, val completion: CompletableDeferred<SendResult>)
+    private data class PendingTransfer(
+        val peerId: String,
+        val endpointId: String,
+        val completion: CompletableDeferred<SendResult>,
+    )
 
     private val lifecycleMutex = Mutex()
     private val _state = MutableStateFlow(OfflineTransportState())
@@ -122,14 +127,17 @@ class NearbyConnectionsTransport(
             val completion = CompletableDeferred<SendResult>()
             val payloadId = platform.sendBytes(endpointId, payload.copyOf()) { createdId ->
                 createdPayloadId = createdId
-                pendingTransfers[createdId] = PendingTransfer(peerId, completion)
+                pendingTransfers[createdId] = PendingTransfer(peerId, endpointId, completion)
             }
             _transportEvents.emit(TransportEvent.PayloadSendRequested(peerId, payloadId, payload.size))
             withTimeoutOrNull(transferTimeoutMs) { completion.await() }
                 ?: SendResult.Failed("payload transfer timed out").also { pendingTransfers.remove(payloadId) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Exception) {
-            createdPayloadId?.let { pendingTransfers.remove(it)?.completion?.complete(SendResult.Failed(error.safeReason())) }
             SendResult.Failed(error.safeReason()).also { fail("send", error.safeReason()) }
+        } finally {
+            createdPayloadId?.let { pendingTransfers.remove(it) }
         }
     }
 
@@ -183,19 +191,25 @@ class NearbyConnectionsTransport(
     private suspend fun handleBytesReceived(event: NearbyPlatformEvent.BytesReceived) {
         val peerId = endpointToPeer[event.endpointId] ?: return
         if (peerId !in _state.value.connectedPeerIds) return
-        val bytes = event.bytes.copyOf()
-        _receivedPayloads.emit(ReceivedPayload(peerId, bytes))
-        _transportEvents.emit(TransportEvent.PayloadReceived(peerId, bytes.size))
+        if (event.bytes.size > maxPayloadBytes) {
+            fail("receive", "payload exceeds Nearby BYTES limit")
+        } else {
+            val bytes = event.bytes.copyOf()
+            _receivedPayloads.emit(ReceivedPayload(peerId, bytes))
+            _transportEvents.emit(TransportEvent.PayloadReceived(peerId, bytes.size))
+        }
     }
 
     private suspend fun handleTransferSucceeded(event: NearbyPlatformEvent.PayloadTransferSucceeded) {
-        val outgoing = pendingTransfers.remove(event.payloadId) ?: return
+        val outgoing = pendingTransfers[event.payloadId] ?: return
+        if (outgoing.endpointId != event.endpointId || !pendingTransfers.remove(event.payloadId, outgoing)) return
         outgoing.completion.complete(SendResult.PayloadTransferCompleted)
         _transportEvents.emit(TransportEvent.PayloadTransferCompleted(outgoing.peerId, event.payloadId))
     }
 
     private suspend fun handleTransferFailed(event: NearbyPlatformEvent.PayloadTransferFailed) {
-        val outgoing = pendingTransfers.remove(event.payloadId) ?: return
+        val outgoing = pendingTransfers[event.payloadId] ?: return
+        if (outgoing.endpointId != event.endpointId || !pendingTransfers.remove(event.payloadId, outgoing)) return
         outgoing.completion.complete(SendResult.Failed(event.reason))
         _transportEvents.emit(TransportEvent.PayloadTransferFailed(outgoing.peerId, event.payloadId, event.reason))
     }
@@ -204,8 +218,18 @@ class NearbyConnectionsTransport(
         if (peerId.isBlank() || peerId == localDeviceId) return
         val existing = peerToEndpoint[peerId]
         if (existing != null && existing != endpointId) {
-            platform.rejectConnection(endpointId)
-            return fail("discovery", "duplicate peer identity")
+            if (peerId in connectingPeerIds || peerId in _state.value.connectedPeerIds ||
+                peerId in _state.value.pendingVerifications
+            ) {
+                platform.disconnect(endpointId)
+                return fail("discovery", "duplicate peer identity")
+            }
+            // Nearby endpoint IDs are session-scoped. A restarted peer must be allowed
+            // to replace an inactive mapping even if EndpointLost was never delivered.
+            cancelReconnect(peerId, resetAttempts = true)
+            clearPeerConnection(peerId)
+            endpointToPeer.remove(existing)
+            platform.disconnect(existing)
         }
         peerToEndpoint[peerId] = endpointId
         endpointToPeer[endpointId] = peerId
@@ -221,7 +245,9 @@ class NearbyConnectionsTransport(
 
     private suspend fun removeDiscoveredEndpoint(endpointId: String) {
         val peerId = endpointToPeer[endpointId] ?: return
-        if (peerId in _state.value.connectedPeerIds || peerId in _state.value.pendingVerifications) return
+        if (peerId in connectingPeerIds || peerId in _state.value.connectedPeerIds ||
+            peerId in _state.value.pendingVerifications
+        ) return
         cancelReconnect(peerId, resetAttempts = true)
         cancelConnectionAttemptTimeout(peerId)
         connectingPeerIds -= peerId
@@ -266,6 +292,7 @@ class NearbyConnectionsTransport(
             clearPeerConnection(peerId)
             fail("accept", error.safeReason())
             _connectionEvents.emit(ConnectionEvent.Failed(peerId, error.safeReason()))
+            scheduleReconnect(peerId)
         }
     }
 
