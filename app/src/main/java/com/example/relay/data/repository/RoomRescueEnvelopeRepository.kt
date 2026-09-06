@@ -150,7 +150,11 @@ class RoomRescueEnvelopeRepository(
             val updated = current.copy(
                 envelope = current.envelope.copy(hopCount = exportedHopCount),
                 state = current.state.copy(
-                    submissionStatus = RescueSubmissionStatus.IN_TRANSIT,
+                    submissionStatus = if (current.state.submissionStatus.rank() < RescueSubmissionStatus.IN_TRANSIT.rank()) {
+                        RescueSubmissionStatus.IN_TRANSIT
+                    } else {
+                        current.state.submissionStatus
+                    },
                     submissionCount = current.state.submissionCount + 1,
                 ),
             )

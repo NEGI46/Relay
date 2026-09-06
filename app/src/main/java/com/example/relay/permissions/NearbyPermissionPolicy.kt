@@ -37,10 +37,10 @@ object NearbyPermissionPolicy {
 
     /**
      * GPS create-path permissions for APIs where transport no longer implies location grant.
-     * API 31 and below already include location in [transportPermissions].
+     * API 31 also needs coarse location in the same runtime request as fine location.
      */
     fun locationPermissionsForGps(sdkInt: Int = Build.VERSION.SDK_INT): List<String> = when {
-        sdkInt >= 32 -> listOf(
+        sdkInt >= 31 -> listOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
         )
