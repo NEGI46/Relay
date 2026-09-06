@@ -46,7 +46,9 @@ class InMemoryRescuePersistence : RescuePersistence {
         val before = requests.size
         val expiredRequestIds = requests.values.filter {
             it.terminalAtEpochMillis?.let { terminalAt -> terminalAt < cutoffEpochMillis } == true
-        }.mapTo(mutableSetOf()) { it.key.requestId }
+        }.map { it.key.requestId }.toSet().filterTo(mutableSetOf()) { requestId ->
+            requests.values.none { it.key.requestId == requestId && it.terminalAtEpochMillis == null }
+        }
         requests.entries.removeAll { it.key.requestId in expiredRequestIds }
         return before - requests.size
     }
@@ -232,8 +234,11 @@ class SqliteRescuePersistence(
     override fun deleteTerminalBefore(cutoffEpochMillis: Long): Int = synchronized(lock) {
         writeCoordinator.write {
             connection.prepareStatement(
-                "DELETE FROM rescue_requests WHERE request_id IN " +
-                    "(SELECT request_id FROM rescue_requests WHERE terminal_at IS NOT NULL AND terminal_at < ?)",
+                // Purge only terminal revisions when the case has no active revision. An old
+                // completed revision must not delete a newer, still-active revision with the
+                // same logical request ID.
+                "DELETE FROM rescue_requests WHERE terminal_at IS NOT NULL AND terminal_at < ? " +
+                    "AND request_id NOT IN (SELECT request_id FROM rescue_requests WHERE terminal_at IS NULL)",
             ).use { ps ->
                 ps.setLong(1, cutoffEpochMillis)
                 ps.executeUpdate()

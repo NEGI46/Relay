@@ -167,7 +167,8 @@
 
   async function updateStatus(id, status) {
     try {
-      await api(`/api/rescue/requests/${encodeURIComponent(id)}/status`, { method: "POST", headers: authHeaders(true), body: JSON.stringify({ status }) });
+      const observed = state.requests.find((item) => item.requestId === id);
+      await api(`/api/rescue/requests/${encodeURIComponent(id)}/status`, { method: "POST", headers: authHeaders(true), body: JSON.stringify({ status, expectedRequestVersion: observed?.requestVersion ?? null }) });
       await loadRequests();
     } catch (error) {
       alert(error.status === 409 ? "別の運用者が先に担当したか、状態の順序が正しくありません。更新してください。" : `状態更新に失敗しました: ${error.message}`);

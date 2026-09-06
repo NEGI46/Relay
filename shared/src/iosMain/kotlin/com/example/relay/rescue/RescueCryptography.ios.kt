@@ -49,6 +49,8 @@ actual object RescueCryptography {
 
     actual fun verifyEnvelopeFraming(envelope: EncryptedRescueEnvelope): Boolean = notImplemented()
 
+    actual fun verifySenderAuthorization(envelope: EncryptedRescueEnvelope): Boolean = notImplemented()
+
     actual fun sha256Hex(bytes: ByteArray): String {
         val hash = Sha256.digest(bytes)
         return buildString(64) {

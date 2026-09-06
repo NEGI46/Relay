@@ -132,6 +132,7 @@ class RelayApplication : Application() {
                 RescueDeliveryService.enableAndStart(this)
                 notifyRescueStoreChanged()
             },
+            senderEnvelopeAuthorizer = uploadSigningKeyStore::authorizeEnvelope,
         )
     }
 

@@ -289,7 +289,7 @@ fun Application.gatewayModule(
             val request = call.receive<RescueStatusChangeRequest>()
             // Never trust an operator name supplied by a browser.  Claim ownership is bound to
             // the authenticated local account, and the audit record uses the same identity.
-            when (val result = service.updateStatus(id, request.status, staff.username)) {
+            when (val result = service.updateStatus(id, request.status, staff.username, request.expectedRequestVersion)) {
                 is RescueStatusUpdateResult.Updated -> {
                     val auditAction = if (
                         request.status == com.example.relay.pcgateway.rescue.RescueResponseStatus.CONFIRMED &&

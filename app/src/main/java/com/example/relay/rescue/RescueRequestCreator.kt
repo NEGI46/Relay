@@ -44,6 +44,7 @@ sealed interface RescueCreationResult {
 
 class RescueRequestCreator(
     private val repository: RescueEnvelopeRepository,
+    private val envelopeAuthorizer: (EncryptedRescueEnvelope) -> EncryptedRescueEnvelope = { it },
 ) {
     fun create(
         draft: RescueRequestDraft,
@@ -52,12 +53,13 @@ class RescueRequestCreator(
         maxHopCount: Int = 8,
     ): RescueCreationResult {
         val payload = draft.toPayload()
-        val envelope = RescueCryptography.encrypt(
+        val unsignedEnvelope = RescueCryptography.encrypt(
             payload = payload,
             recipientPublicKey = shelterPublicKey,
             envelopeId = envelopeId,
             maxHopCount = maxHopCount,
         )
+        val envelope = envelopeAuthorizer(unsignedEnvelope)
         return when (val result = repository.store(envelope, draft.createdAtEpochMillis)) {
             is RescueStoreResult.Stored -> RescueCreationResult.Stored(result.record, result.pruned)
             is RescueStoreResult.Rejected -> RescueCreationResult.NotStored(result.reason)

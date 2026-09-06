@@ -191,10 +191,10 @@ class SyncCoordinator(
     }
 
     private suspend fun handle(peerId: String, bytes: ByteArray) {
-        if (rescueNearbyCoordinator?.isRescuePayload(bytes) == true) {
-            rescueNearbyCoordinator.handlePayload(peerId, bytes)
-            return
-        }
+        // Rescue packets have a dedicated codec, but they still consume the same radio, CPU, and
+        // database resources as ordinary relay packets. Apply the common size/admission budget
+        // before dispatching by protocol so an OPEN peer cannot bypass resource accounting with
+        // an endless stream of otherwise-valid rescue frames.
         if (bytes.size > resourcePolicy.maxPayloadBytes || !incomingPayloadPolicy.allow(peerId, bytes.size)) {
             reject(peerId, "payload limit")
             return
@@ -207,7 +207,14 @@ class SyncCoordinator(
                 true
             }
         }
-        if (!withinReceiveLimit) { reject(peerId, "received item limit"); return }
+        if (!withinReceiveLimit) {
+            reject(peerId, "received item limit")
+            return
+        }
+        if (rescueNearbyCoordinator?.isRescuePayload(bytes) == true) {
+            rescueNearbyCoordinator.handlePayload(peerId, bytes)
+            return
+        }
         val decoded = codec.decode(bytes)
         if (decoded !is DecodeResult.Success) {
             val reason = (decoded as? DecodeResult.Failure)?.error?.name ?: "decode failure"

@@ -52,6 +52,7 @@ enum class RescueStoreRejection {
     SUPERSEDED_BY_NEWER_VERSION,
     /** A courier/peer must not replace a sender-owned active request outside its coordinator. */
     ACTIVE_SESSION_PROTECTED,
+    INVALID_SENDER_AUTHORIZATION,
     EXCEEDS_BYTE_LIMIT,
 }
 
@@ -116,6 +117,9 @@ class InMemoryRescueEnvelopeRepository(
         ) {
             return@synchronized RescueStoreResult.Rejected(RescueStoreRejection.INVALID_ENVELOPE)
         }
+        if (envelope.hasSenderAuthorization() && !RescueCryptography.verifySenderAuthorization(envelope)) {
+            return@synchronized RescueStoreResult.Rejected(RescueStoreRejection.INVALID_SENDER_AUTHORIZATION)
+        }
         if (envelope.expiresAtEpochMillis <= receivedAtEpochMillis) {
             return@synchronized RescueStoreResult.Rejected(RescueStoreRejection.EXPIRED)
         }
@@ -125,6 +129,16 @@ class InMemoryRescueEnvelopeRepository(
 
         records.entries.removeAll { it.value.envelope.expiresAtEpochMillis <= receivedAtEpochMillis }
         val key = envelope.requestKey()
+        val previousSigned = records.values.firstOrNull {
+            it.envelope.requestId == key.requestId && it.envelope.hasSenderAuthorization()
+        }
+        if (previousSigned != null &&
+            (!envelope.hasSenderAuthorization() ||
+                previousSigned.envelope.senderKeyId != envelope.senderKeyId ||
+                previousSigned.envelope.senderPublicKeyBase64 != envelope.senderPublicKeyBase64)
+        ) {
+            return@synchronized RescueStoreResult.Rejected(RescueStoreRejection.INVALID_SENDER_AUTHORIZATION)
+        }
         records[key]?.let { existing ->
             return@synchronized RescueStoreResult.Rejected(
                 if (existing.envelope.ciphertextSha256Hex == envelope.ciphertextSha256Hex) {
@@ -170,7 +184,9 @@ class InMemoryRescueEnvelopeRepository(
             return@synchronized false
         }
         records[key] = current.copy(
-            envelope = current.envelope.copy(hopCount = exportedHopCount),
+            // Keep the source copy at its route depth; the forwarded packet already contains the
+            // incremented depth. This separates path length from fan-out count.
+            envelope = current.envelope,
             state = current.state.copy(
                 submissionStatus = maxOf(
                     current.state.submissionStatus,
