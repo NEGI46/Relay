@@ -86,14 +86,14 @@ class NearbyConnectionsTransport(
         try {
             platform.startAdvertising(localDeviceId)
             _state.update { it.copy(started = true, advertising = true) }
-            _transportEvents.emit(TransportEvent.AdvertisingStarted)
+            _transportEvents.send(TransportEvent.AdvertisingStarted)
             platform.startDiscovery()
             _state.update { it.copy(discovering = true) }
-            _transportEvents.emit(TransportEvent.DiscoveryStarted)
+            _transportEvents.send(TransportEvent.DiscoveryStarted)
         } catch (error: Exception) {
             runCatching { platform.stopAll() }
             cleanup(error.safeReason())
-            _transportEvents.emit(TransportEvent.Error("start", error.safeReason()))
+            _transportEvents.send(TransportEvent.Error("start", error.safeReason()))
         }
     }
 
@@ -101,7 +101,7 @@ class NearbyConnectionsTransport(
         lifecycleMutex.withLock {
             val stopFailure = runCatching { platform.stopAll() }.exceptionOrNull()
             cleanup(stopFailure?.safeReason())
-            stopFailure?.let { _transportEvents.emit(TransportEvent.Error("stop", it.safeReason())) }
+            stopFailure?.let { _transportEvents.send(TransportEvent.Error("stop", it.safeReason())) }
         }
     }
 
@@ -159,7 +159,7 @@ class NearbyConnectionsTransport(
                         }
                     }
                 }
-                _transportEvents.emit(TransportEvent.PayloadSendRequested(peerId, payloadId, payload.size))
+                _transportEvents.send(TransportEvent.PayloadSendRequested(peerId, payloadId, payload.size))
                 completion.await()
             }
             result ?: SendResult.Failed("payload transfer timed out")
@@ -231,8 +231,8 @@ class NearbyConnectionsTransport(
             fail("receive", "payload exceeds Nearby BYTES limit")
         } else {
             val bytes = event.bytes.copyOf()
-            _receivedPayloads.emit(ReceivedPayload(peerId, bytes))
-            _transportEvents.emit(TransportEvent.PayloadReceived(peerId, bytes.size))
+            _receivedPayloads.send(ReceivedPayload(peerId, bytes))
+            _transportEvents.send(TransportEvent.PayloadReceived(peerId, bytes.size))
         }
     }
 
@@ -240,14 +240,14 @@ class NearbyConnectionsTransport(
         val outgoing = pendingTransfers[event.payloadId] ?: return
         if (outgoing.endpointId != event.endpointId || !pendingTransfers.remove(event.payloadId, outgoing)) return
         outgoing.completion.complete(SendResult.PayloadTransferCompleted)
-        _transportEvents.emit(TransportEvent.PayloadTransferCompleted(outgoing.peerId, event.payloadId))
+        _transportEvents.send(TransportEvent.PayloadTransferCompleted(outgoing.peerId, event.payloadId))
     }
 
     private suspend fun handleTransferFailed(event: NearbyPlatformEvent.PayloadTransferFailed) {
         val outgoing = pendingTransfers[event.payloadId] ?: return
         if (outgoing.endpointId != event.endpointId || !pendingTransfers.remove(event.payloadId, outgoing)) return
         outgoing.completion.complete(SendResult.Failed(event.reason))
-        _transportEvents.emit(TransportEvent.PayloadTransferFailed(outgoing.peerId, event.payloadId, event.reason))
+        _transportEvents.send(TransportEvent.PayloadTransferFailed(outgoing.peerId, event.payloadId, event.reason))
     }
 
     private suspend fun addPeer(endpointId: String, peerId: String, initiateConnection: Boolean = true) {
@@ -270,7 +270,7 @@ class NearbyConnectionsTransport(
         peerToEndpoint[peerId] = endpointId
         endpointToPeer[endpointId] = peerId
         _discoveredPeers.value = peerToEndpoint.keys.sorted().map(::Peer)
-        _transportEvents.emit(TransportEvent.PeerFound(peerId))
+        _transportEvents.send(TransportEvent.PeerFound(peerId))
         // Disaster mode is intentionally hands-off: use a deterministic initiator
         // so both devices do not race to request the same connection. TRUSTED mode
         // additionally refuses to reach out to peers that are not on the allow-list.
@@ -290,7 +290,7 @@ class NearbyConnectionsTransport(
         endpointToPeer.remove(endpointId)
         peerToEndpoint.remove(peerId)
         _discoveredPeers.value = peerToEndpoint.keys.sorted().map(::Peer)
-        _transportEvents.emit(TransportEvent.PeerLost(peerId))
+        _transportEvents.send(TransportEvent.PeerLost(peerId))
     }
 
     private suspend fun handleInitiated(event: NearbyPlatformEvent.ConnectionInitiated) {
@@ -423,7 +423,7 @@ class NearbyConnectionsTransport(
     }
 
     private fun scheduleReconnect(peerId: String) {
-        if (!_state.value.started || !isDeterministicInitiator(peerId) || peerId !in peerToEndpoint) return
+        if (!_state.value.started || !isDeterministicInitiator(peerId) || !peerToEndpoint.containsKey(peerId)) return
         if (!connectionPolicy.allowsConnection(peerId)) return
         if (peerId in _state.value.connectedPeerIds || reconnectJobs[peerId]?.isActive == true) return
         val attempt = reconnectAttempts[peerId] ?: 0
@@ -450,7 +450,7 @@ class NearbyConnectionsTransport(
 
     private suspend fun fail(operation: String, reason: String) {
         _state.update { it.copy(lastError = reason) }
-        _transportEvents.emit(TransportEvent.Error(operation, reason))
+        _transportEvents.send(TransportEvent.Error(operation, reason))
     }
 
     private fun cleanup(lastError: String?) {
