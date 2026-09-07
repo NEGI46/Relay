@@ -16,6 +16,7 @@ expect object RescueCryptography {
     fun decrypt(envelope: EncryptedRescueEnvelope, recipientPrivateKey: RescuePrivateKey): RescuePayload
     /** Verifies untrusted courier framing without requiring a private key. */
     fun verifyEnvelopeFraming(envelope: EncryptedRescueEnvelope): Boolean
+    fun verifySenderAuthorization(envelope: EncryptedRescueEnvelope): Boolean
 
     fun sha256Hex(bytes: ByteArray): String
     fun signReceipt(receipt: UnsignedShelterReceipt, shelterPrivateKey: RescuePrivateKey): SignedShelterReceipt

@@ -46,6 +46,20 @@ class RescueCryptographyTest {
         )
     }
 
+    @Test
+    fun malformedSenderAuthorizationCannotBeAcceptedAsAValidEnvelope() {
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val envelope = RescueCryptography.encrypt(payload(), recipient.publicKey, "envelope-1")
+            .copy(
+                senderKeyId = "sender-key",
+                senderPublicKeyBase64 = "A".repeat(64),
+                senderSignatureBase64 = "B".repeat(64),
+            )
+
+        assertEquals(RescueValidationResult.Valid, envelope.validate())
+        assertFalse(RescueCryptography.verifySenderAuthorization(envelope))
+    }
+
     private fun payload() = RescuePayload(
         requestId = "request-1",
         requestVersion = 1,

@@ -227,7 +227,7 @@ class RescueNearbyCoordinatorTest {
             ),
         )
 
-        assertEquals(1, store.get(key)!!.envelope.hopCount)
+        assertEquals(0, store.get(key)!!.envelope.hopCount)
         assertEquals(RescueSubmissionStatus.IN_TRANSIT, store.get(key)!!.state.submissionStatus)
     }
 

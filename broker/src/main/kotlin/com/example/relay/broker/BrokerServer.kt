@@ -1,6 +1,8 @@
 package com.example.relay.broker
 
 import com.example.relay.rescue.RescueValidationResult
+import com.example.relay.rescue.RescueCryptography
+import com.example.relay.rescue.hasSenderAuthorization
 import com.example.relay.rescue.ShelterPublicKeyManifest
 import com.example.relay.rescue.brokerDeviceRegistrationBytes
 import com.example.relay.rescue.validate
@@ -139,6 +141,11 @@ fun Application.brokerModule(
             // Validate envelope structure (shared validation logic)
             if (envelope.validate() != RescueValidationResult.Valid) {
                 call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_envelope"))
+                return@post
+            }
+            if (envelope.hasSenderAuthorization() && !RescueCryptography.verifySenderAuthorization(envelope)) {
+                observability.record(BrokerSecurityEvent.INVALID_SIGNATURE)
+                call.respond(HttpStatusCode.BadRequest, mapOf("reason" to "invalid_sender_authorization"))
                 return@post
             }
             // Validate deviceKeyId format

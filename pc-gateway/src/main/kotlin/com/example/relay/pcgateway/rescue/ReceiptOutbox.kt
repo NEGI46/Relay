@@ -35,9 +35,9 @@ data class BrokerReceiptUpload(
  * reliably delivered to the Broker via at-least-once semantics.
  * Broker deduplicates by receipt_id (idempotent).
  *
- * The flusher only marks SENT after receiving 2xx from Broker. A 422 means the Broker has no
- * matching envelope (for example, a receipt from a LAN-only delivery), so it is terminal and is
- * not retried forever. Other failures remain pending for at-least-once retry.
+ * The flusher only marks SENT after receiving 2xx from Broker. A 422 can mean the envelope arrived
+ * over LAN/BLE before the Broker; it remains pending with a delay so the receipt is retried after
+ * the ciphertext is eventually uploaded.
  */
 class ReceiptOutbox(
     private val persistence: SqliteRescuePersistence,
@@ -67,9 +67,11 @@ class ReceiptOutbox(
                         status TEXT NOT NULL DEFAULT 'PENDING',
                         created_at INTEGER NOT NULL,
                         sent_at INTEGER,
-                        retry_count INTEGER NOT NULL DEFAULT 0
+                        retry_count INTEGER NOT NULL DEFAULT 0,
+                        last_attempt_at INTEGER
                     )""",
                 )
+                runCatching { stmt.executeUpdate("ALTER TABLE receipt_outbox ADD COLUMN last_attempt_at INTEGER") }
             }
         }
     }
@@ -138,7 +140,11 @@ class ReceiptOutbox(
                     markSent(receiptId)
                     sent++
                 } else if (response.status == HttpStatusCode.UnprocessableEntity) {
-                    markRejected(receiptId)
+                    // The Gateway may have received this envelope over LAN/BLE before the
+                    // Broker. Keep the signed receipt pending so it can be accepted once the
+                    // ciphertext reaches the Broker; 422 is not proof that delivery is doomed.
+                    markAttempt(receiptId)
+                    incrementRetry(receiptId)
                 } else {
                     incrementRetry(receiptId)
                 }
@@ -153,8 +159,10 @@ class ReceiptOutbox(
         return persistence.withConnection { connection ->
             val results = mutableListOf<Pair<String, String>>()
             connection.prepareStatement(
-                "SELECT receipt_id, receipt_json FROM receipt_outbox WHERE status = 'PENDING' ORDER BY created_at ASC LIMIT 20",
+                "SELECT receipt_id, receipt_json FROM receipt_outbox WHERE status = 'PENDING' " +
+                    "AND (last_attempt_at IS NULL OR last_attempt_at < ?) ORDER BY created_at ASC LIMIT 20",
             ).use { stmt ->
+                stmt.setLong(1, System.currentTimeMillis() - RETRY_DELAY_MILLIS)
                 stmt.executeQuery().use { rs ->
                     while (rs.next()) {
                         results.add(rs.getString("receipt_id") to rs.getString("receipt_json"))
@@ -188,14 +196,19 @@ class ReceiptOutbox(
         }
     }
 
-    private fun markRejected(receiptId: String) {
+    private fun markAttempt(receiptId: String) {
         persistence.withConnection { connection ->
             connection.prepareStatement(
-                "UPDATE receipt_outbox SET status = 'REJECTED' WHERE receipt_id = ?",
+                "UPDATE receipt_outbox SET last_attempt_at = ? WHERE receipt_id = ?",
             ).use { stmt ->
-                stmt.setString(1, receiptId)
+                stmt.setLong(1, System.currentTimeMillis())
+                stmt.setString(2, receiptId)
                 stmt.executeUpdate()
             }
         }
+    }
+
+    private companion object {
+        const val RETRY_DELAY_MILLIS = 60_000L
     }
 }

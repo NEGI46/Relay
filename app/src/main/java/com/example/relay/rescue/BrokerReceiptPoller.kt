@@ -65,6 +65,12 @@ class BrokerReceiptPoller(
             if (result == ReceiptApplicationResult.APPLIED) {
                 app.rescueNearbyCoordinator?.onLocalStoreChanged()
             }
+            // Do not advance the monotonic cursor past a receipt that could not yet be
+            // verified/applied. Replaying an already-applied receipt is idempotent; skipping an
+            // unapplied one would permanently lose the only signed status update.
+            if (result !in setOf(ReceiptApplicationResult.APPLIED, ReceiptApplicationResult.ALREADY_APPLIED)) {
+                return
+            }
         }
 
         // Advance cursor to Broker's monotonic seq (not device time)

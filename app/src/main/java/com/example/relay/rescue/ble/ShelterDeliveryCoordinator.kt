@@ -8,6 +8,7 @@ import com.example.relay.rescue.ResolvedShelterKeys
 import com.example.relay.rescue.RescueEnvelopeRepository
 import com.example.relay.rescue.RescueRequestKey
 import com.example.relay.rescue.RescueSubmissionStatus
+import com.example.relay.rescue.RescueUrgency
 import com.example.relay.rescue.ShelterReceiptStatus
 import com.example.relay.rescue.SignedShelterManifest
 import com.example.relay.rescue.SignedShelterReceipt
@@ -33,6 +34,11 @@ sealed interface ShelterDeliveryState {
     data class WaitingToRetry(val reason: String) : ShelterDeliveryState
 }
 
+private const val DELIVERY_PRIORITY_HIGH = 3
+private const val DELIVERY_PRIORITY_MEDIUM = 2
+private const val DELIVERY_PRIORITY_LOW = 1
+private const val DELIVERY_PRIORITY_NONE = 0
+
 /**
  * Automatic courier delivery. It never reads rescue plaintext and it never
  * consumes a mesh hop: only a verified PC receipt changes submission state.
@@ -57,6 +63,8 @@ class ShelterDeliveryCoordinator(
     private var job: Job? = null
     private val _state = MutableStateFlow<ShelterDeliveryState>(ShelterDeliveryState.Idle)
     val state: StateFlow<ShelterDeliveryState> = _state
+    private val retryNotBefore = mutableMapOf<RescueRequestKey, Long>()
+    private var candidateInFlight: RescueRequestKey? = null
 
     fun start(scope: CoroutineScope) {
         if (job?.isActive == true) return
@@ -73,15 +81,20 @@ class ShelterDeliveryCoordinator(
     }
 
     private suspend fun deliverTo(advertisement: ShelterAdvertisement) {
+        candidateInFlight = null
         try {
             withTimeout(sessionDeadlineMillis) {
                 client.connect(advertisement).use { deliverSession(advertisement.identity, it) }
             }
         } catch (_: TimeoutCancellationException) {
+            candidateInFlight?.let { retryNotBefore[it] = clock() + RETRY_COOLDOWN_MILLIS }
             _state.value = ShelterDeliveryState.WaitingToRetry("BLE delivery timed out")
         } catch (_: Exception) {
             // Preserve the encrypted record and replay the same idempotency key next time.
+            candidateInFlight?.let { retryNotBefore[it] = clock() + RETRY_COOLDOWN_MILLIS }
             _state.value = ShelterDeliveryState.WaitingToRetry("BLE shelter unavailable")
+        } finally {
+            candidateInFlight = null
         }
     }
 
@@ -91,6 +104,7 @@ class ShelterDeliveryCoordinator(
     ) {
         val manifest = resolveTrustedManifest(advertisedIdentity, session) ?: return
         val candidate = selectCandidate(manifest.manifest.shelterId) ?: return
+        candidateInFlight = candidate.key
         val encoded = encodeCandidate(candidate) ?: return
         _state.value = ShelterDeliveryState.Delivering(manifest.manifest.shelterId)
         val keys = resolveEnvelopeKeys(manifest, candidate) ?: return
@@ -121,11 +135,25 @@ class ShelterDeliveryCoordinator(
 
     private fun selectCandidate(shelterId: String): StoredRescueRecord? {
         val now = clock()
-        return repository.all().firstOrNull { record ->
-            record.state.submissionStatus in DELIVERABLE_STATUSES &&
-                record.envelope.destinationShelterId == shelterId &&
-                record.envelope.expiresAtEpochMillis > now
-        }
+        return repository.all()
+            .asSequence()
+            .filter { record ->
+                (retryNotBefore[record.key] ?: 0L) <= now &&
+                record.state.submissionStatus in DELIVERABLE_STATUSES &&
+                    record.envelope.destinationShelterId == shelterId &&
+                    record.envelope.expiresAtEpochMillis > now
+            }
+            // Initial delivery always wins over receipt refreshes. Within the same class,
+            // emergency requests win, then the oldest request gets a turn. This prevents a
+            // permanently failing receipt refresh from starving all pending SOS envelopes.
+            .sortedWith(
+                compareByDescending<StoredRescueRecord> { it.state.submissionStatus.deliveryPriority() }
+                    .thenByDescending { it.envelope.routingUrgency.deliveryPriority() }
+                    .thenBy { it.envelope.createdAtEpochMillis }
+                    .thenBy { it.envelope.requestId }
+                    .thenBy { it.envelope.requestVersion },
+            )
+            .firstOrNull()
     }
 
     private fun encodeCandidate(candidate: StoredRescueRecord): ByteArray? {
@@ -149,6 +177,19 @@ class ShelterDeliveryCoordinator(
         return keys
     }
 
+    private fun RescueSubmissionStatus.deliveryPriority(): Int = when (this) {
+        RescueSubmissionStatus.PENDING -> DELIVERY_PRIORITY_HIGH
+        RescueSubmissionStatus.IN_TRANSIT -> DELIVERY_PRIORITY_MEDIUM
+        RescueSubmissionStatus.SHELTER_STORED -> DELIVERY_PRIORITY_LOW
+        else -> DELIVERY_PRIORITY_NONE
+    }
+
+    private fun RescueUrgency.deliveryPriority(): Int = when (this) {
+        RescueUrgency.IMMEDIATE -> DELIVERY_PRIORITY_HIGH
+        RescueUrgency.URGENT -> DELIVERY_PRIORITY_MEDIUM
+        RescueUrgency.ROUTINE -> DELIVERY_PRIORITY_LOW
+    }
+
     private suspend fun submitCandidate(
         session: ShelterBleSession,
         candidate: StoredRescueRecord,
@@ -159,6 +200,7 @@ class ShelterDeliveryCoordinator(
         is RescueBleSubmissionResult.Accepted -> result.receipt
         is RescueBleSubmissionResult.Duplicate -> result.receipt
         is RescueBleSubmissionResult.Rejected -> null.also {
+            retryNotBefore[candidate.key] = clock() + RETRY_COOLDOWN_MILLIS
             _state.value = ShelterDeliveryState.WaitingToRetry("shelter rejected delivery")
         }
     }
@@ -170,10 +212,14 @@ class ShelterDeliveryCoordinator(
     ) {
         when (receiptApplier(candidate.key, receipt, keys.receiptSigningPublicKey)) {
             ReceiptApplicationResult.APPLIED -> {
+                retryNotBefore.remove(candidate.key)
                 onRepositoryChanged()
                 finishReceipt(candidate.key, receipt)
             }
-            ReceiptApplicationResult.ALREADY_APPLIED -> finishReceipt(candidate.key, receipt)
+            ReceiptApplicationResult.ALREADY_APPLIED -> {
+                retryNotBefore.remove(candidate.key)
+                finishReceipt(candidate.key, receipt)
+            }
             else -> _state.value = ShelterDeliveryState.WaitingToRetry("invalid shelter receipt")
         }
     }
@@ -185,6 +231,7 @@ class ShelterDeliveryCoordinator(
 
     private companion object {
         const val MAX_ENVELOPE_BYTES = 16 * 1024
+        const val RETRY_COOLDOWN_MILLIS = 30_000L
         val DELIVERABLE_STATUSES = setOf(
             RescueSubmissionStatus.PENDING,
             RescueSubmissionStatus.IN_TRANSIT,

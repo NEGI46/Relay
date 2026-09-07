@@ -58,6 +58,7 @@ sealed interface RescueSessionOperationResult {
  * Sender-owned rescue workflow. The ViewModel supplies UI input only; this coordinator owns
  * version allocation, encryption, atomic persistence, recovery, cancellation, and expiry.
  */
+@Suppress("LongParameterList")
 class ActiveRescueSessionCoordinator(
     private val store: ActiveRescueSessionStore,
     private val recoveryCipher: RecoveryPayloadCipher,
@@ -67,6 +68,7 @@ class ActiveRescueSessionCoordinator(
     private val newEnvelopeId: () -> String = { UUID.randomUUID().toString() },
     private val requestLifetimeMillis: Long = DEFAULT_REQUEST_LIFETIME_MILLIS,
     private val deliveryNotifier: RescueDeliveryNotifier = RescueDeliveryNotifier { },
+    private val senderEnvelopeAuthorizer: (EncryptedRescueEnvelope) -> EncryptedRescueEnvelope = { it },
 ) {
     private val locks = ConcurrentHashMap<String, Mutex>()
 
@@ -78,6 +80,9 @@ class ActiveRescueSessionCoordinator(
     suspend fun create(draft: RescueRequestDraft): RescueSessionOperationResult {
         existingLiveSession()?.let { return it }
         val now = nowEpochMillis()
+        // Location improves dispatch quality but must never gate creation of an SOS.
+        // Indoor, underground, permission-denied, and GPS-off cases still need a durable
+        // request that can be relayed and enriched later after consent.
         val located = attachCurrentLocation(
             draft.copy(
                 requestVersion = 1,
@@ -85,7 +90,7 @@ class ActiveRescueSessionCoordinator(
                 expiresAtEpochMillis = now + requestLifetimeMillis,
                 action = RescueRequestAction.ACTIVE,
             ),
-        ) ?: return RescueSessionOperationResult.LocationUnavailable
+        )
         return mutexFor(located.requestId).withLock {
             val keys = shelterKeyProvider.load()
             if (keys == null) {
@@ -448,11 +453,12 @@ class ActiveRescueSessionCoordinator(
             trackingEnabled = trackingEnabled,
         )
         val sealed = recoveryCipher.seal(recovery)
-        val envelope = RescueCryptography.encrypt(
+        val unsignedEnvelope = RescueCryptography.encrypt(
             payload = draft.toPayload(),
             recipientPublicKey = recipientPublicKey,
             envelopeId = newEnvelopeId(),
         )
+        val envelope = senderEnvelopeAuthorizer(unsignedEnvelope)
         PreparedSession(
             recovery = recovery,
             envelope = envelope,
@@ -496,18 +502,17 @@ class ActiveRescueSessionCoordinator(
         )
     }.getOrNull()
 
-    private suspend fun attachCurrentLocation(draft: RescueRequestDraft): RescueRequestDraft? {
+    private suspend fun attachCurrentLocation(draft: RescueRequestDraft): RescueRequestDraft {
         val provider = locationProvider ?: return draft
-        val fix = runCatching { provider.currentFix(8_000) }.getOrNull() ?: return null
-        return draft.copy(
-            location = RescueLocation(
+        return runCatching { provider.currentFix(8_000) }.getOrNull()?.let { fix ->
+            draft.copy(location = RescueLocation(
                 latitude = fix.latitude,
                 longitude = fix.longitude,
                 accuracyMeters = fix.accuracyMeters,
                 description = draft.location?.description.orEmpty(),
                 capturedAtEpochMillis = fix.capturedAtEpochMillis,
-            ),
-        )
+            ))
+        } ?: draft
     }
 
     private fun mutexFor(requestId: String): Mutex = locks.computeIfAbsent(requestId) { Mutex() }

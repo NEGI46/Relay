@@ -56,6 +56,7 @@ class RescueIntakeService(
      * This method deliberately does not log envelopes or decrypted payloads.
      */
     @Synchronized
+    @Suppress("ComplexCondition", "LongMethod", "CyclomaticComplexMethod", "ReturnCount")
     fun ingest(
         envelope: EncryptedRescueEnvelope,
         carrierId: String,
@@ -71,6 +72,12 @@ class RescueIntakeService(
         }
         if (envelope.recipientKeyId != recipientPrivateKey.keyId) {
             return RescueIngestResult.Rejected(RescueRejectionCode.WRONG_RECIPIENT_KEY)
+        }
+        val senderAuthorizationPresent = envelope.senderKeyId.isNotBlank() ||
+            envelope.senderPublicKeyBase64.isNotBlank() ||
+            envelope.senderSignatureBase64.isNotBlank()
+        if (senderAuthorizationPresent && !RescueCryptography.verifySenderAuthorization(envelope)) {
+            return RescueIngestResult.Rejected(RescueRejectionCode.INVALID_SENDER_AUTHORIZATION)
         }
 
         val now = clock.nowEpochMillis()
@@ -112,17 +119,41 @@ class RescueIntakeService(
                 return@transaction RescueIngestResult.Duplicate(updated, carrierWasNew, deliveryWasNew)
             }
 
+            // A new request revision is still the same operational case. Preserve the
+            // assignment and response state so a location/text update cannot silently return
+            // an already-handled rescue to the unconfirmed queue.
+            val previous = latestVersion(key.requestId)
+                ?.let { find(RescueRequestKey(key.requestId, it)) }
+            if (previous?.envelope?.senderSignatureBase64?.isNotBlank() == true &&
+                (!senderAuthorizationPresent ||
+                    previous.envelope.senderKeyId != envelope.senderKeyId ||
+                    previous.envelope.senderPublicKeyBase64 != envelope.senderPublicKeyBase64)
+            ) {
+                return@transaction RescueIngestResult.Rejected(
+                    RescueRejectionCode.INVALID_SENDER_AUTHORIZATION,
+                )
+            }
+            val carriedStatus = previous?.responseStatus
+                ?.takeUnless { payload.action == RescueRequestAction.CANCELLED || it in terminalStatuses }
+                ?: if (payload.action == RescueRequestAction.CANCELLED) {
+                    RescueResponseStatus.COMPLETED
+                } else {
+                    RescueResponseStatus.UNCONFIRMED
+                }
+            val carriedAssignment = previous
+                ?.takeUnless {
+                    payload.action == RescueRequestAction.CANCELLED ||
+                        it.responseStatus in terminalStatuses
+                }
+                ?.assignedNodeId
+
             val request = StoredRescueRequest(
                 key = key,
                 envelopeHash = envelope.ciphertextSha256Hex,
                 envelope = envelope,
                 payload = payload,
                 receivedAtEpochMillis = now,
-                responseStatus = if (payload.action == RescueRequestAction.CANCELLED) {
-                    RescueResponseStatus.COMPLETED
-                } else {
-                    RescueResponseStatus.UNCONFIRMED
-                },
+                responseStatus = carriedStatus,
                 carrierIds = setOf(carrierId),
                 deliveryIds = setOf(courierDeliveryId),
                 receipt = signReceipt(
@@ -131,10 +162,11 @@ class RescueIntakeService(
                     if (payload.action == RescueRequestAction.CANCELLED) {
                         ShelterReceiptStatus.CANCELLED
                     } else {
-                        ShelterReceiptStatus.STORED
+                        carriedStatus.toReceiptStatus()
                     },
                 ),
-                statusUpdatedAtEpochMillis = now,
+                assignedNodeId = carriedAssignment,
+                statusUpdatedAtEpochMillis = previous?.statusUpdatedAtEpochMillis ?: now,
                 terminalAtEpochMillis = now.takeIf { payload.action == RescueRequestAction.CANCELLED },
             )
             insert(request)

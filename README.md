@@ -121,6 +121,7 @@ Nearby転送完了、peer ACK、HTTP 2xx、Broker保存、ブラウザ受付完�
 - 明示同意した場合だけ位置情報を更新
 - Room + SQLCipherとAndroid Keystoreによる暗号化保存
 - NearbyによるStore-Carry-Forward中継
+- 新規Envelopeは送信端末の署名で版更新を認可し、署名済み依頼の無署名降格を拒否
 - QRまたは貼付入力によるPC Gateway登録
 - `ARMED` / `EMERGENCY_ACTIVE` / `DEGRADED`などの背景中継状態管理
 
@@ -132,6 +133,8 @@ Nearby転送完了、peer ACK、HTTP 2xx、Broker保存、ブラウザ受付完�
 - 個人staffアカウントと`ADMIN` / `OPERATOR` / `VIEWER`の権限分離
 - 救助依頼の受信、担当、対応中、完了、監査記録
 - 救助拠点が署名するReceipt
+- 位置情報を取得できない場合も依頼を端末内へ保存し、後から同意済み更新で補完
+- 到着順序に依存しないReceipt再送と、案件更新時の担当状態引継ぎ
 - 公式情報の出典・取得経路・検証状態の表示
 - HTTPS Brokerによる暗号文、公開Manifest、Receiptの中継
 - SQLiteの競合対策、重複排除、TTL、CSV formula injection対策

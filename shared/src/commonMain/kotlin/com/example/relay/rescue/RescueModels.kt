@@ -7,6 +7,7 @@ import com.example.relay.domain.MessagePayload
 
 const val RESCUE_PROTOCOL_VERSION: Int = 1
 const val RESCUE_MAX_CIPHERTEXT_BYTES: Int = 1_048_576
+const val RESCUE_MAX_SENDER_PUBLIC_KEY_BYTES: Int = 1_024
 
 @Serializable
 enum class RescueUrgency { ROUTINE, URGENT, IMMEDIATE }
@@ -91,7 +92,15 @@ data class EncryptedRescueEnvelope(
     val nonceBase64: String,
     val ciphertextBase64: String,
     val ciphertextSha256Hex: String,
+    /** Optional sender authorization. New Android envelopes populate this; legacy v1 envelopes
+     * remain readable during migration, but a signed request cannot be downgraded to unsigned. */
+    val senderKeyId: String = "",
+    val senderPublicKeyBase64: String = "",
+    val senderSignatureBase64: String = "",
 )
+
+fun EncryptedRescueEnvelope.hasSenderAuthorization(): Boolean =
+    senderKeyId.isNotBlank() || senderPublicKeyBase64.isNotBlank() || senderSignatureBase64.isNotBlank()
 
 @Serializable
 enum class ShelterReceiptStatus { STORED, ACCEPTED, RESPONDING, COMPLETED, CANCELLED, REJECTED }
@@ -206,6 +215,12 @@ fun EncryptedRescueEnvelope.validate(): RescueValidationResult = validationResul
     require(wrappedContentKeyBase64.length in 128..2_048, "invalid_wrapped_key")
     require(nonceBase64.length in 16..32, "invalid_nonce")
     require(ciphertextBase64.length in 24..((RESCUE_MAX_CIPHERTEXT_BYTES * 4 / 3) + 8), "invalid_ciphertext")
+    val senderAuthorizationPresent = hasSenderAuthorization()
+    if (senderAuthorizationPresent) {
+        requireIdentifier(senderKeyId, "invalid_sender_key_id")
+        require(senderPublicKeyBase64.length in 64..RESCUE_MAX_SENDER_PUBLIC_KEY_BYTES, "invalid_sender_public_key")
+        require(senderSignatureBase64.length in 64..256, "invalid_sender_signature")
+    }
 }
 
 fun UnsignedShelterReceipt.validate(): RescueValidationResult = validationResult {
@@ -255,6 +270,13 @@ fun EncryptedRescueEnvelope.authenticatedHeaderBytes(): ByteArray = canonicalByt
     keyWrapAlgorithm,
     contentEncryptionAlgorithm,
     ciphertextSizeBytes.toString(),
+)
+
+/** Canonical bytes signed by the sender key after encryption. */
+fun EncryptedRescueEnvelope.senderAuthorizationBytes(): ByteArray = canonicalBytes(
+    "RelayRescueSender/v1",
+    authenticatedHeaderBytes().decodeToString(),
+    ciphertextSha256Hex,
 )
 
 fun EncryptedRescueEnvelope.duplicateKey(): String = "$requestId:$requestVersion"

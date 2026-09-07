@@ -100,6 +100,7 @@ actual object RescueCryptography {
 
     actual fun decrypt(envelope: EncryptedRescueEnvelope, recipientPrivateKey: RescuePrivateKey): RescuePayload = guarded("decryption_failed") {
         require(envelope.validate() == RescueValidationResult.Valid)
+        require(!envelope.hasSenderAuthorization() || verifySenderAuthorization(envelope))
         require(recipientPrivateKey.algorithm == RescueKeyAlgorithm.RSA_OAEP_SHA256)
         require(recipientPrivateKey.keyId == envelope.recipientKeyId)
         val ciphertext = decode(envelope.ciphertextBase64)
@@ -130,6 +131,25 @@ actual object RescueCryptography {
                 ciphertext.size in 16..RESCUE_MAX_CIPHERTEXT_BYTES &&
                 MessageDigest.isEqual(hexToBytes(envelope.ciphertextSha256Hex), digest(ciphertext))
         }
+    } catch (_: Exception) {
+        false
+    }
+
+    actual fun verifySenderAuthorization(envelope: EncryptedRescueEnvelope): Boolean = try {
+        if (envelope.senderKeyId.isBlank() &&
+            envelope.senderPublicKeyBase64.isBlank() &&
+            envelope.senderSignatureBase64.isBlank()
+        ) return false
+        if (envelope.validate() != RescueValidationResult.Valid) return false
+        val key = RescuePublicKey(
+            keyId = envelope.senderKeyId,
+            algorithm = RescueKeyAlgorithm.ECDSA_P256_SHA256,
+            encodedBase64 = envelope.senderPublicKeyBase64,
+        )
+        Signature.getInstance("SHA256withECDSA").apply {
+            initVerify(parsePublic(key))
+            update(envelope.senderAuthorizationBytes())
+        }.verify(decode(envelope.senderSignatureBase64))
     } catch (_: Exception) {
         false
     }

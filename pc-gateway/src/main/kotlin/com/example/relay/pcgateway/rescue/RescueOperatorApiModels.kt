@@ -52,6 +52,8 @@ data class RescueStatusChangeRequest(
     val status: RescueResponseStatus,
     /** Deprecated client field. The server uses the authenticated staff account instead. */
     val operatorNodeId: String? = null,
+    /** Revision observed by the operator; prevents an old screen from mutating a newer revision. */
+    val expectedRequestVersion: Int? = null,
 )
 
 @Serializable

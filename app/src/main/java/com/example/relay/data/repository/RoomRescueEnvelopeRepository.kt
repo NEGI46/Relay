@@ -16,6 +16,7 @@ import com.example.relay.rescue.RescueValidationResult
 import com.example.relay.rescue.SignedShelterReceipt
 import com.example.relay.rescue.StoredRescueRecord
 import com.example.relay.rescue.forwardRescueEnvelope
+import com.example.relay.rescue.hasSenderAuthorization
 import com.example.relay.rescue.storageSizeBytes
 import com.example.relay.rescue.rank
 import com.example.relay.rescue.toSubmissionStatus
@@ -52,6 +53,7 @@ class RoomRescueEnvelopeRepository(
      * Session updates call this while holding the same Room transaction that updates the recovery
      * record. `allowPruning=false` rejects rather than evicting another active sender's envelope.
      */
+    @Suppress("ComplexCondition", "LongMethod", "CyclomaticComplexMethod", "ReturnCount")
     internal fun storeInTransaction(
         envelope: EncryptedRescueEnvelope,
         receivedAtEpochMillis: Long,
@@ -63,6 +65,9 @@ class RoomRescueEnvelopeRepository(
         ) {
             return RescueStoreResult.Rejected(RescueStoreRejection.INVALID_ENVELOPE)
         }
+        if (envelope.hasSenderAuthorization() && !RescueCryptography.verifySenderAuthorization(envelope)) {
+            return RescueStoreResult.Rejected(RescueStoreRejection.INVALID_SENDER_AUTHORIZATION)
+        }
         if (envelope.expiresAtEpochMillis <= receivedAtEpochMillis) {
             return RescueStoreResult.Rejected(RescueStoreRejection.EXPIRED)
         }
@@ -73,6 +78,16 @@ class RoomRescueEnvelopeRepository(
 
         dao.deleteExpired(receivedAtEpochMillis)
         val key = RescueRequestKey(envelope.requestId, envelope.requestVersion)
+        val previousSigned = dao.all().asSequence().mapNotNull { it.toRecordOrNull() }.firstOrNull {
+            it.envelope.requestId == key.requestId && it.envelope.hasSenderAuthorization()
+        }
+        if (previousSigned != null &&
+            (!envelope.hasSenderAuthorization() ||
+                previousSigned.envelope.senderKeyId != envelope.senderKeyId ||
+                previousSigned.envelope.senderPublicKeyBase64 != envelope.senderPublicKeyBase64)
+        ) {
+            return RescueStoreResult.Rejected(RescueStoreRejection.INVALID_SENDER_AUTHORIZATION)
+        }
         dao.find(key.requestId, key.requestVersion)?.let { existing ->
             return RescueStoreResult.Rejected(
                 if (existing.ciphertextSha256Hex == envelope.ciphertextSha256Hex) {
@@ -148,7 +163,10 @@ class RoomRescueEnvelopeRepository(
                 return@runInTransaction false
             }
             val updated = current.copy(
-                envelope = current.envelope.copy(hopCount = exportedHopCount),
+                // hopCount describes the depth of this stored copy, not how many peers this
+                // device has fanned it out to. Each exported copy carries hopCount + 1 while the
+                // source remains reusable for another independent route.
+                envelope = current.envelope,
                 state = current.state.copy(
                     submissionStatus = maxOf(
                         current.state.submissionStatus,
@@ -264,6 +282,7 @@ class RoomRescueEnvelopeRepository(
         check(envelope.storageSizeBytes() == storageSizeBytes)
         check(envelope.validate() == RescueValidationResult.Valid)
         check(RescueCryptography.verifyEnvelopeFraming(envelope))
+        check(!envelope.hasSenderAuthorization() || RescueCryptography.verifySenderAuthorization(envelope))
         check(receivedAtEpochMillis > 0 && submissionCount >= 0)
         val receipt = signedReceiptJson?.let { json.decodeFromString<SignedShelterReceipt>(it) }
         check(receipt == null || receipt.validate() == RescueValidationResult.Valid)

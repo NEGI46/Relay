@@ -26,7 +26,7 @@ class RescueWorkflowTest {
         val packet = memberTransfer.export(RescueRequestKey("request-1", 1), 2_000)!!
         assertEquals(0, memberStore.get(RescueRequestKey("request-1", 1))!!.envelope.hopCount)
         assertEquals(true, memberTransfer.confirmExport(RescueRequestKey("request-1", 1), packet))
-        assertEquals(1, memberStore.get(RescueRequestKey("request-1", 1))!!.envelope.hopCount)
+        assertEquals(0, memberStore.get(RescueRequestKey("request-1", 1))!!.envelope.hopCount)
         FakeRescueTransferService(courierStore).import(packet, 2_100)
 
         val courierItem = CourierRescuePresenter(courierStore).items().single()

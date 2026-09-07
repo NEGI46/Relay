@@ -75,6 +75,32 @@ class UploadSigningKeyStore(context: Context) {
         Base64.encodeToString(signature.sign(), Base64.NO_WRAP)
     }
 
+    /** Signs immutable rescue-envelope metadata for Nearby, LAN, BLE, and Gateway verification. */
+    fun authorizeEnvelope(envelope: EncryptedRescueEnvelope): EncryptedRescueEnvelope = synchronized(identityLock) {
+        ensureKeyExists()
+        val public = senderPublicKey()
+        val signature = Signature.getInstance(SIGNATURE_ALGORITHM).apply {
+            initSign(getOrCreatePrivateKey())
+            update(envelope.senderAuthorizationBytes())
+        }.sign()
+        envelope.copy(
+            senderKeyId = public.keyId,
+            senderPublicKeyBase64 = public.encodedBase64,
+            senderSignatureBase64 = Base64.encodeToString(signature, Base64.NO_WRAP),
+        )
+    }
+
+    private fun senderPublicKey(): RescuePublicKey {
+        val encoded = requireNotNull(keyStore.getCertificate(KEY_ALIAS)?.publicKey?.encoded) {
+            "upload signing public key is unavailable"
+        }
+        return RescuePublicKey(
+            keyId = RescueCryptography.sha256Hex(encoded),
+            algorithm = RescueKeyAlgorithm.ECDSA_P256_SHA256,
+            encodedBase64 = Base64.encodeToString(encoded, Base64.NO_WRAP),
+        )
+    }
+
     /** Proves possession of the private key when registering or recovering a Broker capability. */
     fun signRegistration(deviceKeyId: String, publicKeyBase64: String): String = synchronized(identityLock) {
         ensureKeyExists()
