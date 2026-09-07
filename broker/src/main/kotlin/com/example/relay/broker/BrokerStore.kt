@@ -3,6 +3,7 @@ package com.example.relay.broker
 import com.example.relay.rescue.EncryptedRescueEnvelope
 import com.example.relay.rescue.SignedShelterReceipt
 import com.example.relay.rescue.authenticatedHeaderBytes
+import com.example.relay.rescue.legacyAuthenticatedHeaderBytes
 import java.io.File
 import java.security.KeyFactory
 import java.security.MessageDigest
@@ -492,9 +493,13 @@ class BrokerStore(dbPath: String) : AutoCloseable {
             val dataToVerify = envelope.authenticatedHeaderBytes() +
                 envelope.ciphertextSha256Hex.encodeToByteArray()
             val sig = Signature.getInstance("SHA256withECDSA")
+            val signature = Base64.getDecoder().decode(signatureBase64)
             sig.initVerify(publicKey)
             sig.update(dataToVerify)
-            sig.verify(Base64.getDecoder().decode(signatureBase64))
+            sig.verify(signature) || Signature.getInstance("SHA256withECDSA").apply {
+                initVerify(publicKey)
+                update(envelope.legacyAuthenticatedHeaderBytes() + envelope.ciphertextSha256Hex.encodeToByteArray())
+            }.verify(signature)
         } catch (_: Exception) {
             false
         }

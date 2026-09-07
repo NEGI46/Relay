@@ -19,6 +19,7 @@ class BrokerReceiptPoller(
 ) {
     /** Broker monotonic seq cursor. Persisted via SharedPreferences for restart resilience. */
     private var lastSeq: Long = 0L
+    private var cursorPreferenceKey: String = "last_seq"
 
     /**
      * Starts the polling loop. Call from a coroutine scope.
@@ -35,8 +36,9 @@ class BrokerReceiptPoller(
         )
 
         // Load persisted cursor
+        cursorPreferenceKey = cursorKey(endpoint)
         lastSeq = context.getSharedPreferences("relay_broker_poller", Context.MODE_PRIVATE)
-            .getLong("last_seq", 0L)
+            .getLong(cursorPreferenceKey, 0L)
 
         while (scope.isActive) {
             pollOnce(delivery, app)
@@ -53,6 +55,8 @@ class BrokerReceiptPoller(
         val batch = delivery.pollReceipts(sinceSeq = lastSeq)
         if (batch.receipts.isEmpty()) return
 
+        // A missing key is transient (for example while a shelter directory is being refreshed),
+        // so keep the cursor pinned until verification can actually run.
         val keys = app.rescueShelterKeyStore.load() ?: return
 
         for (receipt in batch.receipts) {
@@ -65,12 +69,9 @@ class BrokerReceiptPoller(
             if (result == ReceiptApplicationResult.APPLIED) {
                 app.rescueNearbyCoordinator?.onLocalStoreChanged()
             }
-            // Do not advance the monotonic cursor past a receipt that could not yet be
-            // verified/applied. Replaying an already-applied receipt is idempotent; skipping an
-            // unapplied one would permanently lose the only signed status update.
-            if (result !in setOf(ReceiptApplicationResult.APPLIED, ReceiptApplicationResult.ALREADY_APPLIED)) {
-                return
-            }
+            // A receipt for a pruned/expired request or a permanently invalid signature must not
+            // block every later receipt in the Broker's ordered stream. The durable cursor is
+            // advanced after the batch; valid receipts remain idempotent on retry.
         }
 
         // Advance cursor to Broker's monotonic seq (not device time)
@@ -82,6 +83,8 @@ class BrokerReceiptPoller(
 
     private fun persistCursor() {
         context.getSharedPreferences("relay_broker_poller", Context.MODE_PRIVATE)
-            .edit().putLong("last_seq", lastSeq).apply()
+            .edit().putLong(cursorPreferenceKey, lastSeq).apply()
     }
+
+    private fun cursorKey(endpoint: String): String = "last_seq:" + endpoint
 }

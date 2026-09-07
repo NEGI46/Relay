@@ -33,6 +33,7 @@ import java.util.LinkedHashMap
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -104,6 +105,7 @@ class SyncCoordinator(
     private val sentBytes = mutableMapOf<String, Long>()
     private val accountingWindowStartedAt = mutableMapOf<String, Long>()
     private val peerPayloadMutexes = ConcurrentHashMap<String, Mutex>()
+    private val peerSyncMutexes = ConcurrentHashMap<String, Mutex>()
     private val _debugEvents = kotlinx.coroutines.flow.MutableSharedFlow<SyncDebugEvent>(extraBufferCapacity = 64)
     override val debugEvents: kotlinx.coroutines.flow.SharedFlow<SyncDebugEvent> = _debugEvents
     private var started = false
@@ -128,9 +130,11 @@ class SyncCoordinator(
                         sentBytes[event.peer.peerId] = 0
                         accountingWindowStartedAt[event.peer.peerId] = clock.nowMillis()
                     }
-                    send(event.peer.peerId, HelloBody())
-                    sendManifest(event.peer.peerId)
-                    rescueNearbyCoordinator?.onPeerConnected(event.peer.peerId)
+                    withPeerSync(event.peer.peerId) {
+                        send(event.peer.peerId, HelloBody())
+                        sendManifest(event.peer.peerId)
+                        rescueNearbyCoordinator?.onPeerConnected(event.peer.peerId)
+                    }
                 } else if (event is ConnectionEvent.Disconnected) {
                     connectedPeersMutex.withLock { connectedPeers -= event.peerId }
                     incomingPayloadPolicy.onPeerDisconnected(event.peerId)
@@ -140,6 +144,8 @@ class SyncCoordinator(
                         accountingWindowStartedAt.remove(event.peerId)
                     }
                     peerPayloadMutexes.remove(event.peerId)
+                    peerSyncMutexes.remove(event.peerId)
+                    rescueNearbyCoordinator?.onPeerDisconnected(event.peerId)
                 }
             }
         }
@@ -159,10 +165,10 @@ class SyncCoordinator(
         }
         jobs += scope.launch(start = CoroutineStart.UNDISPATCHED) {
             transport.receivedPayloads.collect { incoming ->
-                // Keep ordering for one peer, but never let a slow decode/store/ACK path block
-                // payloads arriving from another phone.
+                // The bounded transport queue provides admission control. Process one payload at
+                // a time here so a slow store cannot create an unbounded child-job backlog.
                 val peerMutex = peerPayloadMutexes.computeIfAbsent(incoming.peerId) { Mutex() }
-                launch { peerMutex.withLock { handle(incoming.peerId, incoming.bytes) } }
+                peerMutex.withLock { handle(incoming.peerId, incoming.bytes) }
             }
         }
         jobs += scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -173,6 +179,10 @@ class SyncCoordinator(
                     val peers = connectedPeersMutex.withLock { connectedPeers.toList() }
                     peers
                         .filter { it in transport.state.value.connectedPeerIds }
+                        // Do not let a blocked initial handshake prevent a later repository
+                        // change from reaching the accounting gate. `send` reserves bytes under
+                        // its own mutex, so concurrent refreshes remain bounded and a refresh
+                        // that exceeds the budget is rejected instead of waiting indefinitely.
                         .forEach { peerId -> sendManifest(peerId) }
                 }
         }
@@ -182,10 +192,10 @@ class SyncCoordinator(
                 val peers = connectedPeersMutex.withLock { connectedPeers.toList() }
                     .filter { it in transport.state.value.connectedPeerIds }
                 peers.forEach { peerId ->
-                    launch {
+                    launch { withPeerSync(peerId) {
                         sendManifest(peerId)
                         rescueNearbyCoordinator?.onPeerConnected(peerId)
-                    }
+                    } }
                 }
             }
         }
@@ -367,8 +377,10 @@ class SyncCoordinator(
         val encoded = codec.encode(deviceId, clock.nowMillis(), body, packetId)
         if (encoded.size > resourcePolicy.maxPayloadBytes) { reject(peerId, "outbound payload limit"); return packetId }
         val now = clock.nowMillis()
+        var reservationWindow: Long? = null
         val reserved = accountingMutex.withLock {
             resetAccountingWindowIfNeeded(peerId, now)
+            reservationWindow = accountingWindowStartedAt[peerId]
             val currentBytes = sentBytes[peerId] ?: 0L
             val maximum = resourcePolicy.maxSentBytesPerConnection
             if (currentBytes > maximum || encoded.size.toLong() > maximum - currentBytes) false
@@ -385,6 +397,8 @@ class SyncCoordinator(
         }
         val transfer = try {
             transport.send(peerId, encoded)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Exception) {
             SendResult.Failed(error.message ?: error.javaClass.simpleName)
         }
@@ -397,9 +411,12 @@ class SyncCoordinator(
             // A failed transfer consumed no link capacity. Release its reservation so a transient
             // radio failure cannot permanently exhaust the connection's send budget.
             accountingMutex.withLock {
-                resetAccountingWindowIfNeeded(peerId, clock.nowMillis())
-                sentBytes[peerId]?.let { currentBytes ->
-                    sentBytes[peerId] = (currentBytes - encoded.size).coerceAtLeast(0L)
+                val failureNow = clock.nowMillis()
+                resetAccountingWindowIfNeeded(peerId, failureNow)
+                if (accountingWindowStartedAt[peerId] == reservationWindow) {
+                    sentBytes[peerId]?.let { currentBytes ->
+                        sentBytes[peerId] = (currentBytes - encoded.size).coerceAtLeast(0L)
+                    }
                 }
             }
             // Do not record payloadTransfers or emit completed — operator path must see a true failure.
@@ -439,10 +456,14 @@ class SyncCoordinator(
 
     private fun resetAccountingWindowIfNeeded(peerId: String, nowEpochMillis: Long) {
         val startedAt = accountingWindowStartedAt[peerId]
-        if (startedAt == null || nowEpochMillis - startedAt >= accountingWindowMs) {
+        if (startedAt == null || nowEpochMillis < startedAt || nowEpochMillis - startedAt >= accountingWindowMs) {
             accountingWindowStartedAt[peerId] = nowEpochMillis
             receivedItems[peerId] = 0
             sentBytes[peerId] = 0L
         }
+    }
+
+    private suspend inline fun withPeerSync(peerId: String, crossinline block: suspend () -> Unit) {
+        peerSyncMutexes.computeIfAbsent(peerId) { Mutex() }.withLock { block() }
     }
 }

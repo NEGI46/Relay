@@ -23,6 +23,23 @@ class RescueCryptographyTest {
     }
 
     @Test
+    fun encryptedKeyAndNonceAreBoundToCiphertextAuthentication() {
+        val recipient = RescueCryptography.generateRecipientKeyPair()
+        val envelope = RescueCryptography.encrypt(payload(), recipient.publicKey, "envelope-1")
+
+        assertFailsWith<RescueCryptoException> {
+            RescueCryptography.decrypt(
+                envelope.copy(
+                    nonceBase64 = envelope.nonceBase64.first().let { first ->
+                        (if (first == 'A') 'B' else 'A') + envelope.nonceBase64.drop(1)
+                    },
+                ),
+                recipient.privateKey,
+            )
+        }
+    }
+
+    @Test
     fun receiptSignatureBindsRequestVersionAndCiphertextHash() {
         val signer = RescueCryptography.generateShelterSigningKeyPair()
         val receipt = UnsignedShelterReceipt(

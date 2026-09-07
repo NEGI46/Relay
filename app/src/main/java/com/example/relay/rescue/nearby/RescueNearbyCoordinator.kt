@@ -10,18 +10,22 @@ import com.example.relay.rescue.ShelterPublicKeyProvider
 import com.example.relay.rescue.ShelterReceiptStatus
 import com.example.relay.rescue.SignedShelterReceipt
 import com.example.relay.rescue.StoredRescueRecord
+import com.example.relay.rescue.sameImmutableEnvelopeAs
 import com.example.relay.rescue.rank
 import com.example.relay.rescue.toSubmissionStatus
 import com.example.relay.rescue.validate
 import com.example.relay.transport.OfflineTransport
 import com.example.relay.transport.SendResult
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.CancellationException
+import java.util.concurrent.ConcurrentHashMap
 
 private const val MAX_INVENTORY_HOP_COUNT = 32
 
@@ -49,7 +53,7 @@ class RescueNearbyCoordinator(
     /** Sender sessions receive receipt state only after the existing signature checks succeed. */
     private val receiptApplier: (RescueRequestKey, SignedShelterReceipt, com.example.relay.rescue.RescuePublicKey) -> ReceiptApplicationResult = repository::applyReceipt,
 ) {
-    private val pendingExports = mutableMapOf<Pair<String, RescueRequestKey>, EncryptedRescueEnvelope>()
+    private val pendingExports = ConcurrentHashMap<Pair<String, RescueRequestKey>, EncryptedRescueEnvelope>()
     private val _debugEvents = MutableSharedFlow<RescueNearbyDebugEvent>(extraBufferCapacity = 64)
     val debugEvents: SharedFlow<RescueNearbyDebugEvent> = _debugEvents.asSharedFlow()
 
@@ -65,6 +69,11 @@ class RescueNearbyCoordinator(
         sendInventory(peerId)
     }
 
+    /** Drops acknowledgements belonging to a disconnected Nearby session. */
+    fun onPeerDisconnected(peerId: String) {
+        pendingExports.keys.removeIf { it.first == peerId }
+    }
+
     /** Re-advertises durable local changes to peers that are already connected. */
     suspend fun onLocalStoreChanged() {
         refreshConnectedPeers()
@@ -75,7 +84,13 @@ class RescueNearbyCoordinator(
      * dropped without touching the encrypted store and never produce an acknowledgement.
      */
     suspend fun handlePayload(peerId: String, bytes: ByteArray) {
-        val packet = runCatching { codec.decode(bytes) }.getOrNull() ?: return
+        val packet = try {
+            codec.decode(bytes)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return
+        }
         when (packet) {
             is RescueNearbyPacket.Inventory -> handleInventory(peerId, packet)
             is RescueNearbyPacket.Request -> handleRequest(peerId, packet)
@@ -127,11 +142,10 @@ class RescueNearbyCoordinator(
         // A same-version, different-hash packet is a collision/tamper candidate, not an update.
         // Do not ask a peer to send it repeatedly.
         if (local != null) {
-            // A courier may have received the envelope through a long route first. Requesting a
-            // shorter-path copy lets it converge on the best known route depth instead of keeping
-            // an unnecessarily exhausted hop budget forever.
-            return local.envelope.ciphertextSha256Hex == remote.ciphertextSha256Hex &&
-                remote.hopCount < local.envelope.hopCount
+            // v1 inventory deliberately omits hopCount for compatibility with strict older
+            // decoders. Do not repeatedly request a same-hash copy whose route depth cannot be
+            // compared; a capability-negotiated v2 inventory can restore path optimization.
+            return false
         }
         return repository.all().none {
             it.envelope.requestId == remote.requestId && it.envelope.requestVersion > remote.requestVersion
@@ -169,8 +183,7 @@ class RescueNearbyCoordinator(
             is RescueStoreResult.Rejected -> {
                 // Only a duplicate proves that the exact immutable ciphertext is already durable.
                 val durable = repository.get(key)?.envelope
-                if (durable?.envelopeId == envelope.envelopeId &&
-                    durable.ciphertextSha256Hex == envelope.ciphertextSha256Hex
+                if (durable != null && durable.sameImmutableEnvelopeAs(envelope)
                 ) {
                     send(peerId, RescueNearbyPacket.Ack(key, envelope.envelopeId, envelope.ciphertextSha256Hex, envelope.hopCount))
                 }
@@ -225,13 +238,16 @@ class RescueNearbyCoordinator(
             .forEach { sendInventory(it) }
     }
 
+    @Suppress("TooGenericExceptionCaught")
     private suspend fun send(peerId: String, packet: RescueNearbyPacket): SendResult {
         val packetType = packet::class.simpleName ?: "rescue"
-        val result = runCatching { codec.encode(packet) }
-            .fold(
-                onSuccess = { transport.send(peerId, it) },
-                onFailure = { SendResult.Failed(it.message ?: "invalid rescue packet") },
-            )
+        val result = try {
+            transport.send(peerId, codec.encode(packet))
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            SendResult.Failed(error.message ?: "rescue transport failed")
+        }
         when (result) {
             SendResult.PayloadTransferCompleted ->
                 _debugEvents.tryEmit(RescueNearbyDebugEvent.TransferCompleted(peerId, packetType))
@@ -264,7 +280,8 @@ data class RescueInventoryEntry(
     val expiresAtEpochMillis: Long,
     val receiptStatus: ShelterReceiptStatus? = null,
     val receiptUpdatedAtEpochMillis: Long? = null,
-    val hopCount: Int = 0,
+    /** Kept local until a capability-negotiated v2 inventory field exists. */
+    @Transient val hopCount: Int = 0,
 ) {
     fun key() = RescueRequestKey(requestId, requestVersion)
 
@@ -320,7 +337,7 @@ class RescueNearbyPacketCodec(
     private val maxInventoryEntries: Int = 64,
     private val maxRequestedEntries: Int = 32,
 ) {
-    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = false; classDiscriminator = "type" }
+    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true; classDiscriminator = "type" }
 
     init {
         require(maxPacketBytes in 512..32 * 1024)

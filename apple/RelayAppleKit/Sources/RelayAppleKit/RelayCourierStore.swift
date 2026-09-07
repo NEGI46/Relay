@@ -72,8 +72,26 @@ public actor RelayCourierStore {
     public func upsert(_ parcel: RelayOpaqueCourierParcel, nowEpochMillis: Int64) throws {
         guard parcel.expiresAtEpochMillis > nowEpochMillis else { return }
         let key = parcel.deliveryId
-        if let existing = parcels[key], existing.ciphertextSha256Hex != parcel.ciphertextSha256Hex { return }
-        parcels[key] = parcel
+        if let existing = parcels[key] {
+            guard existing.ciphertextSha256Hex == parcel.ciphertextSha256Hex,
+                  existing.encryptedEnvelope == parcel.encryptedEnvelope,
+                  existing.destinationShelterId == parcel.destinationShelterId else { return }
+            // A retransmitted pending copy must never roll a verified delivery back to pending
+            // or discard the receipt that makes the delivery durable.
+            guard existing.status != .delivered else { return }
+            parcels[key] = try RelayOpaqueCourierParcel(
+                envelopeId: existing.envelopeId,
+                requestVersion: existing.requestVersion,
+                destinationShelterId: existing.destinationShelterId,
+                expiresAtEpochMillis: max(existing.expiresAtEpochMillis, parcel.expiresAtEpochMillis),
+                ciphertextSha256Hex: existing.ciphertextSha256Hex,
+                encryptedEnvelope: existing.encryptedEnvelope,
+                status: existing.status,
+                receipt: existing.receipt
+            )
+        } else {
+            parcels[key] = parcel
+        }
         try persist()
     }
 

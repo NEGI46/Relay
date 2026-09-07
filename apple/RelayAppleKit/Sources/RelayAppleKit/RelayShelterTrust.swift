@@ -20,12 +20,14 @@ public struct RelayShelterBleIdentity: Equatable, Sendable {
 /// shelter" path.
 public struct RelayVerifiedShelter: Equatable, Sendable {
     public let signedManifestFingerprintPrefix: Data
+    public let shelterId: String?
 
-    public init(signedManifestFingerprintPrefix: Data) throws {
+    public init(signedManifestFingerprintPrefix: Data, shelterId: String? = nil) throws {
         guard signedManifestFingerprintPrefix.count == 9 else {
             throw RelayGattProtocolError.invalidFrame
         }
         self.signedManifestFingerprintPrefix = signedManifestFingerprintPrefix
+        self.shelterId = shelterId
     }
 }
 
@@ -41,5 +43,13 @@ public struct RelayVerifiedShelterDirectory: Sendable {
         shelters.filter { shelter in
             shelter.signedManifestFingerprintPrefix == advertised.signedManifestFingerprintPrefix
         }.count == 1
+    }
+
+    /// Returns the configured shelter ID only when the fingerprint resolves uniquely. A host that
+    /// has not yet loaded IDs must fail closed instead of sending a parcel to an arbitrary shelter.
+    public func destinationShelterId(for advertised: RelayShelterBleIdentity) -> String? {
+        let matches = shelters.filter { $0.signedManifestFingerprintPrefix == advertised.signedManifestFingerprintPrefix }
+        guard matches.count == 1 else { return nil }
+        return matches[0].shelterId
     }
 }

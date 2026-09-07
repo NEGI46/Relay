@@ -5,10 +5,15 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import kotlinx.coroutines.flow.Flow
 
 /** Synchronous DAO. Callers must invoke it from a background thread. */
 @Dao
 interface RescueDao {
+    /** Room invalidation stream covers writes made inside ActiveRescueSessionStore transactions. */
+    @Query("SELECT * FROM rescue_envelopes ORDER BY requestId, requestVersion, envelopeId")
+    fun observeAll(): Flow<List<RescueEntity>>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     fun insert(entity: RescueEntity): Long
 
