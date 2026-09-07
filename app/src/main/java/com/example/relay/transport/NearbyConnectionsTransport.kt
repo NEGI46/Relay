@@ -11,10 +11,12 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -44,15 +46,18 @@ class NearbyConnectionsTransport(
     private val lifecycleMutex = Mutex()
     private val _state = MutableStateFlow(OfflineTransportState())
     private val _discoveredPeers = MutableStateFlow<List<Peer>>(emptyList())
-    // These streams are fed by Nearby callbacks and reconnect jobs. Unbounded channels avoid
-    // silently dropping a disconnect, payload, or transfer completion during a burst, and keep a
-    // slow protocol consumer from blocking the platform event collector.
-    private val _connectionEvents = Channel<ConnectionEvent>(Channel.UNLIMITED)
+    // These streams are fed by Nearby callbacks and reconnect jobs. Broadcast connection events
+    // preserve the two production consumers; unbounded payload/diagnostic channels avoid silently
+    // dropping a payload or transfer completion during a burst.
+    private val _connectionEvents = MutableSharedFlow<ConnectionEvent>(
+        extraBufferCapacity = 256,
+        onBufferOverflow = BufferOverflow.SUSPEND,
+    )
     private val _receivedPayloads = Channel<ReceivedPayload>(Channel.UNLIMITED)
     private val _transportEvents = Channel<TransportEvent>(Channel.UNLIMITED)
     // Play services callbacks, reconnect jobs, and UI initiated operations all touch these
-    // mappings. Concurrent maps prevent a late callback from observing a partially-mutated
-    // LinkedHashMap and make endpoint replacement safe across coroutines.
+    // mappings. Concurrent maps prevent a late callback from observing a partially-mutated map
+    // and make endpoint replacement safe across coroutines.
     private val peerToEndpoint = ConcurrentHashMap<String, String>()
     private val endpointToPeer = ConcurrentHashMap<String, String>()
     private val pendingTransfers = ConcurrentHashMap<Long, PendingTransfer>()
@@ -67,7 +72,7 @@ class NearbyConnectionsTransport(
 
     override val state: StateFlow<OfflineTransportState> = _state
     override val discoveredPeers: StateFlow<List<Peer>> = _discoveredPeers
-    override val connectionEvents: Flow<ConnectionEvent> = _connectionEvents.receiveAsFlow()
+    override val connectionEvents: Flow<ConnectionEvent> = _connectionEvents
     override val receivedPayloads: Flow<ReceivedPayload> = _receivedPayloads.receiveAsFlow()
     override val transportEvents: Flow<TransportEvent> = _transportEvents.receiveAsFlow()
 
@@ -464,7 +469,6 @@ class NearbyConnectionsTransport(
         peerToEndpoint.clear()
         endpointToPeer.clear()
         _discoveredPeers.value = emptyList()
-        while (_connectionEvents.tryReceive().isSuccess) Unit
         while (_receivedPayloads.tryReceive().isSuccess) Unit
         while (_transportEvents.tryReceive().isSuccess) Unit
         _state.update { OfflineTransportState(lastError = lastError) }
