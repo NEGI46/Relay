@@ -35,7 +35,7 @@ class SyncPlannerTest {
     }
 
     @Test
-    fun `expired hop limited and acknowledged messages are excluded`() = runBlocking {
+    fun `expired and hop limited messages are excluded but explicit repair requests resend acked data`() = runBlocking {
         val repository = InMemoryMessageRepository()
         val policy = MessagePolicy(MutableClock(NOW))
         val planner = SyncPlanner(repository, policy)
@@ -48,7 +48,10 @@ class SyncPlannerTest {
         repository.insert(message("acked"))
         repository.markAcknowledged(MessageDelivery("acked", "peer-B", NOW, "packet"))
 
-        assertEquals(emptyList<String>(), planner.messagesToSend("peer-B", listOf("expired", "hop", "acked")).map { it.messageId })
+        assertEquals(
+            listOf("acked"),
+            planner.messagesToSend("peer-B", listOf("expired", "hop", "acked")).map { it.messageId },
+        )
     }
 
     @Test

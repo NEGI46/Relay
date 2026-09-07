@@ -24,6 +24,9 @@ import com.example.relay.rescue.validate
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 /**
  * Room-backed encrypted rescue store. Its API is synchronous to match [RescueEnvelopeRepository],
@@ -36,6 +39,9 @@ class RoomRescueEnvelopeRepository(
     private val json: Json = Json { encodeDefaults = true; ignoreUnknownKeys = false },
 ) : RescueEnvelopeRepository {
     private val dao = database.rescueDao()
+    private val _changes = MutableSharedFlow<Unit>(extraBufferCapacity = 32)
+
+    override val changes: Flow<Unit> = _changes.asSharedFlow()
 
     init {
         require(maxRecordCount > 0)
@@ -45,8 +51,12 @@ class RoomRescueEnvelopeRepository(
     override fun store(
         envelope: EncryptedRescueEnvelope,
         receivedAtEpochMillis: Long,
-    ): RescueStoreResult = database.runInTransaction<RescueStoreResult> {
-        storeInTransaction(envelope, receivedAtEpochMillis)
+    ): RescueStoreResult {
+        val result = database.runInTransaction<RescueStoreResult> {
+            storeInTransaction(envelope, receivedAtEpochMillis)
+        }
+        if (result is RescueStoreResult.Stored) _changes.tryEmit(Unit)
+        return result
     }
 
     /**
@@ -89,13 +99,22 @@ class RoomRescueEnvelopeRepository(
             return RescueStoreResult.Rejected(RescueStoreRejection.INVALID_SENDER_AUTHORIZATION)
         }
         dao.find(key.requestId, key.requestVersion)?.let { existing ->
-            return RescueStoreResult.Rejected(
-                if (existing.ciphertextSha256Hex == envelope.ciphertextSha256Hex) {
-                    RescueStoreRejection.DUPLICATE
-                } else {
-                    RescueStoreRejection.COLLISION
-                },
-            )
+            if (existing.ciphertextSha256Hex != envelope.ciphertextSha256Hex) {
+                return RescueStoreResult.Rejected(RescueStoreRejection.COLLISION)
+            }
+            val current = existing.toRecordOrNull()
+                ?: return RescueStoreResult.Rejected(RescueStoreRejection.INVALID_ENVELOPE)
+            if (envelope.hopCount < current.envelope.hopCount) {
+                val improved = current.copy(
+                    envelope = envelope,
+                    state = current.state.copy(
+                        receivedAtEpochMillis = minOf(current.state.receivedAtEpochMillis, receivedAtEpochMillis),
+                    ),
+                )
+                dao.update(improved.toEntity(sizeBytes))
+                return RescueStoreResult.Stored(improved)
+            }
+            return RescueStoreResult.Rejected(RescueStoreRejection.DUPLICATE)
         }
         if (dao.hasNewerVersion(key.requestId, key.requestVersion)) {
             return RescueStoreResult.Rejected(
@@ -153,8 +172,8 @@ class RoomRescueEnvelopeRepository(
         forwardRescueEnvelope(current.envelope)
     }
 
-    override fun recordSuccessfulExport(key: RescueRequestKey, exportedHopCount: Int): Boolean =
-        database.runInTransaction<Boolean> {
+    override fun recordSuccessfulExport(key: RescueRequestKey, exportedHopCount: Int): Boolean {
+        val changed = database.runInTransaction<Boolean> {
             val entity = dao.find(key.requestId, key.requestVersion) ?: return@runInTransaction false
             val current = entity.toRecordOrNull() ?: return@runInTransaction false
             if (exportedHopCount != current.envelope.hopCount + 1 ||
@@ -178,13 +197,20 @@ class RoomRescueEnvelopeRepository(
             )
             dao.update(updated.toEntity(updated.envelope.storageSizeBytes())) == 1
         }
+        if (changed) _changes.tryEmit(Unit)
+        return changed
+    }
 
     override fun applyReceipt(
         key: RescueRequestKey,
         signedReceipt: SignedShelterReceipt,
         shelterSigningPublicKey: RescuePublicKey,
-    ): ReceiptApplicationResult = database.runInTransaction<ReceiptApplicationResult> {
-        applyReceiptInTransaction(key, signedReceipt, shelterSigningPublicKey)
+    ): ReceiptApplicationResult {
+        val result = database.runInTransaction<ReceiptApplicationResult> {
+            applyReceiptInTransaction(key, signedReceipt, shelterSigningPublicKey)
+        }
+        if (result == ReceiptApplicationResult.APPLIED) _changes.tryEmit(Unit)
+        return result
     }
 
     /** Must be called from the encompassing Room transaction when a session mirrors receipt state. */

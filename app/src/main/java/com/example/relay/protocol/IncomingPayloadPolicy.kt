@@ -4,6 +4,9 @@ import com.example.relay.domain.Clock
 
 fun interface IncomingPayloadPolicy {
     fun allow(peerId: String, byteCount: Int): Boolean
+
+    /** Clears session-scoped accounting when a transport connection is torn down. */
+    fun onPeerDisconnected(peerId: String) = Unit
 }
 
 object AllowAllIncomingPayloads : IncomingPayloadPolicy {
@@ -35,5 +38,9 @@ class FixedWindowIncomingPayloadPolicy(
         window.packets++
         window.bytes += byteCount
         true
+    }
+
+    override fun onPeerDisconnected(peerId: String) {
+        synchronized(windows) { windows.remove(peerId) }
     }
 }

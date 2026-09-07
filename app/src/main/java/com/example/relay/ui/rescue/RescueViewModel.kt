@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -38,6 +39,12 @@ class RescueViewModel(
 
     init {
         refreshCourierItems()
+        // Nearby and broker delivery can add or update courier records while this screen remains
+        // open. Subscribe to durable-store invalidations so the inventory reflects those changes
+        // without requiring navigation or a manual refresh.
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.changes.collect { refreshCourierItemsNow() }
+        }
         viewModelScope.launch(Dispatchers.IO) { restoreSession() }
     }
 

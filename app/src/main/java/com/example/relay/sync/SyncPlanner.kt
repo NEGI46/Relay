@@ -31,13 +31,16 @@ class SyncPlanner(
             .toList()
     }
 
+    @Suppress("UnusedParameter")
     suspend fun messagesToSend(peerId: String, requestedIds: Collection<String>): List<RelayMessage> {
         val requested = requestedIds.toHashSet()
         val pending = mutableListOf<RelayMessage>()
         for (message in repository.all()) {
-            if (message.messageId in requested && policy.canForward(message) &&
-                !repository.wasAcknowledged(message.messageId, peerId)
-            ) {
+            // An explicit request is a repair signal. The peer may have acknowledged an earlier
+            // copy and later lost it after a process crash or database rollback, so suppressing
+            // acknowledged IDs here makes that loss permanent until the next reconnect. The
+            // receiver is idempotent and will acknowledge a duplicate safely.
+            if (message.messageId in requested && policy.canForward(message)) {
                 pending += message
             }
         }

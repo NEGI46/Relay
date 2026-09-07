@@ -18,8 +18,9 @@ import com.google.android.gms.nearby.connection.Strategy
 import com.google.android.gms.tasks.Task
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 class GoogleNearbyPlatform(
@@ -27,12 +28,22 @@ class GoogleNearbyPlatform(
     private val serviceId: String,
     private val client: ConnectionsClient = Nearby.getConnectionsClient(context.applicationContext),
 ) : NearbyPlatform {
-    private val _events = MutableSharedFlow<NearbyPlatformEvent>(extraBufferCapacity = 128)
-    override val events: SharedFlow<NearbyPlatformEvent> = _events
+    // Nearby callbacks are delivered from Play services threads and can burst while the
+    // coroutine collector is decoding a payload. A bounded SharedFlow silently drops events
+    // when full, which can strand a connection or lose a transfer completion. An unlimited
+    // channel preserves callback ordering and applies backpressure only to the collector.
+    private val _events = Channel<NearbyPlatformEvent>(Channel.UNLIMITED)
+    override val events: Flow<NearbyPlatformEvent> = _events.receiveAsFlow()
+
+    private fun emitEvent(event: NearbyPlatformEvent) {
+        // The channel remains open for the lifetime of this platform. trySend keeps Play
+        // services callbacks non-blocking while still retaining every event in the queue.
+        _events.trySend(event)
+    }
 
     private val lifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
-            _events.tryEmit(
+            emitEvent(
                 NearbyPlatformEvent.ConnectionInitiated(
                     endpointId = endpointId,
                     endpointName = info.endpointName,
@@ -44,9 +55,9 @@ class GoogleNearbyPlatform(
 
         override fun onConnectionResult(endpointId: String, resolution: ConnectionResolution) {
             if (resolution.status.statusCode == ConnectionsStatusCodes.STATUS_OK) {
-                _events.tryEmit(NearbyPlatformEvent.ConnectionSucceeded(endpointId))
+                emitEvent(NearbyPlatformEvent.ConnectionSucceeded(endpointId))
             } else {
-                _events.tryEmit(
+                emitEvent(
                     NearbyPlatformEvent.ConnectionFailed(
                         endpointId,
                         ConnectionsStatusCodes.getStatusCodeString(resolution.status.statusCode),
@@ -56,32 +67,38 @@ class GoogleNearbyPlatform(
         }
 
         override fun onDisconnected(endpointId: String) {
-            _events.tryEmit(NearbyPlatformEvent.Disconnected(endpointId))
+            emitEvent(NearbyPlatformEvent.Disconnected(endpointId))
         }
     }
 
     private val discoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
-            _events.tryEmit(NearbyPlatformEvent.EndpointFound(endpointId, info.endpointName))
+            emitEvent(NearbyPlatformEvent.EndpointFound(endpointId, info.endpointName))
         }
 
         override fun onEndpointLost(endpointId: String) {
-            _events.tryEmit(NearbyPlatformEvent.EndpointLost(endpointId))
+            emitEvent(NearbyPlatformEvent.EndpointLost(endpointId))
         }
     }
 
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
             if (payload.type == Payload.Type.BYTES) {
-                payload.asBytes()?.let { _events.tryEmit(NearbyPlatformEvent.BytesReceived(endpointId, it.copyOf())) }
+                payload.asBytes()?.let { emitEvent(NearbyPlatformEvent.BytesReceived(endpointId, it.copyOf())) }
             }
         }
 
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
             when (update.status) {
-                PayloadTransferUpdate.Status.SUCCESS -> _events.tryEmit(NearbyPlatformEvent.PayloadTransferSucceeded(endpointId, update.payloadId))
-                PayloadTransferUpdate.Status.FAILURE -> _events.tryEmit(NearbyPlatformEvent.PayloadTransferFailed(endpointId, update.payloadId, "transfer failed"))
-                PayloadTransferUpdate.Status.CANCELED -> _events.tryEmit(NearbyPlatformEvent.PayloadTransferFailed(endpointId, update.payloadId, "transfer canceled"))
+                PayloadTransferUpdate.Status.SUCCESS -> emitEvent(
+                    NearbyPlatformEvent.PayloadTransferSucceeded(endpointId, update.payloadId),
+                )
+                PayloadTransferUpdate.Status.FAILURE -> emitEvent(
+                    NearbyPlatformEvent.PayloadTransferFailed(endpointId, update.payloadId, "transfer failed"),
+                )
+                PayloadTransferUpdate.Status.CANCELED -> emitEvent(
+                    NearbyPlatformEvent.PayloadTransferFailed(endpointId, update.payloadId, "transfer canceled"),
+                )
             }
         }
     }
