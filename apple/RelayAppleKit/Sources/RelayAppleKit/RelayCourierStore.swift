@@ -79,7 +79,7 @@ public actor RelayCourierStore {
             // A retransmitted pending copy must never roll a verified delivery back to pending
             // or discard the receipt that makes the delivery durable.
             guard existing.status != .delivered else { return }
-            parcels[key] = RelayOpaqueCourierParcel(
+            parcels[key] = try RelayOpaqueCourierParcel(
                 envelopeId: existing.envelopeId,
                 requestVersion: existing.requestVersion,
                 destinationShelterId: existing.destinationShelterId,
