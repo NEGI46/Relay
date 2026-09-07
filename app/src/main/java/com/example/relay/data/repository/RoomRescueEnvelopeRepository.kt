@@ -17,6 +17,7 @@ import com.example.relay.rescue.SignedShelterReceipt
 import com.example.relay.rescue.StoredRescueRecord
 import com.example.relay.rescue.forwardRescueEnvelope
 import com.example.relay.rescue.hasSenderAuthorization
+import com.example.relay.rescue.sameImmutableEnvelopeAs
 import com.example.relay.rescue.storageSizeBytes
 import com.example.relay.rescue.rank
 import com.example.relay.rescue.toSubmissionStatus
@@ -25,8 +26,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.map
 
 /**
  * Room-backed encrypted rescue store. Its API is synchronous to match [RescueEnvelopeRepository],
@@ -39,9 +39,7 @@ class RoomRescueEnvelopeRepository(
     private val json: Json = Json { encodeDefaults = true; ignoreUnknownKeys = false },
 ) : RescueEnvelopeRepository {
     private val dao = database.rescueDao()
-    private val _changes = MutableSharedFlow<Unit>(extraBufferCapacity = 32)
-
-    override val changes: Flow<Unit> = _changes.asSharedFlow()
+    override val changes: Flow<Unit> = dao.observeAll().map { Unit }
 
     init {
         require(maxRecordCount > 0)
@@ -55,7 +53,6 @@ class RoomRescueEnvelopeRepository(
         val result = database.runInTransaction<RescueStoreResult> {
             storeInTransaction(envelope, receivedAtEpochMillis)
         }
-        if (result is RescueStoreResult.Stored) _changes.tryEmit(Unit)
         return result
     }
 
@@ -99,19 +96,23 @@ class RoomRescueEnvelopeRepository(
             return RescueStoreResult.Rejected(RescueStoreRejection.INVALID_SENDER_AUTHORIZATION)
         }
         dao.find(key.requestId, key.requestVersion)?.let { existing ->
-            if (existing.ciphertextSha256Hex != envelope.ciphertextSha256Hex) {
-                return RescueStoreResult.Rejected(RescueStoreRejection.COLLISION)
-            }
             val current = existing.toRecordOrNull()
                 ?: return RescueStoreResult.Rejected(RescueStoreRejection.INVALID_ENVELOPE)
+            if (existing.ciphertextSha256Hex != envelope.ciphertextSha256Hex ||
+                !current.envelope.sameImmutableEnvelopeAs(envelope)
+            ) {
+                return RescueStoreResult.Rejected(RescueStoreRejection.COLLISION)
+            }
             if (envelope.hopCount < current.envelope.hopCount) {
                 val improved = current.copy(
-                    envelope = envelope,
+                    // Only routing depth may change. Preserve the durable encrypted object and
+                    // any already verified receipt exactly as stored.
+                    envelope = current.envelope.copy(hopCount = envelope.hopCount),
                     state = current.state.copy(
                         receivedAtEpochMillis = minOf(current.state.receivedAtEpochMillis, receivedAtEpochMillis),
                     ),
                 )
-                dao.update(improved.toEntity(sizeBytes))
+                dao.update(improved.toEntity(current.envelope.storageSizeBytes()))
                 return RescueStoreResult.Stored(improved)
             }
             return RescueStoreResult.Rejected(RescueStoreRejection.DUPLICATE)
@@ -197,7 +198,6 @@ class RoomRescueEnvelopeRepository(
             )
             dao.update(updated.toEntity(updated.envelope.storageSizeBytes())) == 1
         }
-        if (changed) _changes.tryEmit(Unit)
         return changed
     }
 
@@ -209,7 +209,6 @@ class RoomRescueEnvelopeRepository(
         val result = database.runInTransaction<ReceiptApplicationResult> {
             applyReceiptInTransaction(key, signedReceipt, shelterSigningPublicKey)
         }
-        if (result == ReceiptApplicationResult.APPLIED) _changes.tryEmit(Unit)
         return result
     }
 

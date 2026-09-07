@@ -53,7 +53,13 @@ public actor RelayAutomaticDeliveryCoordinator {
     public func deliverNext(using link: RelayTrustedGattLink, nowEpochMillis: Int64) async throws -> RelayAutomaticDeliveryResult {
         let identity = try RelayShelterBleIdentity(encoded: try await link.readIdentity())
         guard directory.resolves(identity) else { return .rejectedUntrustedShelter }
-        guard let parcel = try await store.pending(nowEpochMillis: nowEpochMillis).first else { return .noPendingParcels }
+        guard let destinationShelterId = directory.destinationShelterId(for: identity) else {
+            return .noPendingParcels
+        }
+        let pending = try await store.pending(nowEpochMillis: nowEpochMillis)
+        guard let parcel = pending.first(where: { $0.destinationShelterId == destinationShelterId }) else {
+            return .noPendingParcels
+        }
 
         let sessionId = randomSessionId()
         let frames = try RelayGattUploadPlanner.plan(

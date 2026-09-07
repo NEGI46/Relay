@@ -222,7 +222,14 @@ class RelayApplication : Application() {
         val storedMode = runCatching {
             NearbyConnectionMode.valueOf(preferences.getString("nearby_connection_mode", null) ?: "")
         }.getOrDefault(NearbyConnectionMode.OPEN)
-        NearbyConnectionPolicy(initialMode = storedMode).also { policy ->
+        val trustedPeers = preferences.getStringSet("nearby_trusted_peers", emptySet()).orEmpty()
+        NearbyConnectionPolicy(
+            initialMode = storedMode,
+            trustedPeers = trustedPeers,
+            onTrustedPeersChanged = { peers ->
+                preferences.edit().putStringSet("nearby_trusted_peers", peers).apply()
+            },
+        ).also { policy ->
             applicationScope.launch {
                 policy.mode.collect { mode ->
                     preferences.edit().putString("nearby_connection_mode", mode.name).apply()

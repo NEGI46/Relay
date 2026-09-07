@@ -10,6 +10,7 @@ import com.example.relay.rescue.forwardRescueEnvelope
 import com.example.relay.rescue.validate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.emptyFlow
 
@@ -108,7 +109,11 @@ class InMemoryRescueEnvelopeRepository(
 ) : RescueEnvelopeRepository {
     private val lock = Any()
     private val records = linkedMapOf<RescueRequestKey, StoredRescueRecord>()
-    private val _changes = MutableSharedFlow<Unit>(extraBufferCapacity = 32)
+    private val _changes = MutableSharedFlow<Unit>(
+        replay = 1,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
 
     override val changes: Flow<Unit> = _changes.asSharedFlow()
 
@@ -151,12 +156,16 @@ class InMemoryRescueEnvelopeRepository(
             return@synchronized RescueStoreResult.Rejected(RescueStoreRejection.INVALID_SENDER_AUTHORIZATION)
         }
         records[key]?.let { existing ->
-            if (existing.envelope.ciphertextSha256Hex != envelope.ciphertextSha256Hex) {
+            if (existing.envelope.ciphertextSha256Hex != envelope.ciphertextSha256Hex ||
+                !existing.envelope.sameImmutableEnvelopeAs(envelope)
+            ) {
                 return@synchronized RescueStoreResult.Rejected(RescueStoreRejection.COLLISION)
             }
             if (envelope.hopCount < existing.envelope.hopCount) {
                 val improved = existing.copy(
-                    envelope = envelope,
+                    // Only routing depth may change. Preserve the durable encrypted object and
+                    // any already verified receipt exactly as stored.
+                    envelope = existing.envelope.copy(hopCount = envelope.hopCount),
                     state = existing.state.copy(
                         receivedAtEpochMillis = minOf(existing.state.receivedAtEpochMillis, receivedAtEpochMillis),
                     ),
@@ -291,6 +300,29 @@ fun EncryptedRescueEnvelope.storageSizeBytes(): Long = ciphertextSizeBytes.toLon
     ciphertextSha256Hex.utf8Size() + 96L
 
 private fun String.utf8Size(): Long = encodeToByteArray().size.toLong()
+
+/** Returns true when two envelopes represent the same immutable encrypted object. */
+internal fun EncryptedRescueEnvelope.sameImmutableEnvelopeAs(other: EncryptedRescueEnvelope): Boolean =
+    protocolVersion == other.protocolVersion &&
+        envelopeId == other.envelopeId &&
+        requestId == other.requestId &&
+        requestVersion == other.requestVersion &&
+        senderDeviceId == other.senderDeviceId &&
+        destinationShelterId == other.destinationShelterId &&
+        routingUrgency == other.routingUrgency &&
+        recipientKeyId == other.recipientKeyId &&
+        createdAtEpochMillis == other.createdAtEpochMillis &&
+        expiresAtEpochMillis == other.expiresAtEpochMillis &&
+        maxHopCount == other.maxHopCount &&
+        keyWrapAlgorithm == other.keyWrapAlgorithm &&
+        contentEncryptionAlgorithm == other.contentEncryptionAlgorithm &&
+        ciphertextSizeBytes == other.ciphertextSizeBytes &&
+        wrappedContentKeyBase64 == other.wrappedContentKeyBase64 &&
+        nonceBase64 == other.nonceBase64 &&
+        ciphertextBase64 == other.ciphertextBase64 &&
+        ciphertextSha256Hex == other.ciphertextSha256Hex &&
+        senderKeyId == other.senderKeyId &&
+        senderPublicKeyBase64 == other.senderPublicKeyBase64
 
 internal fun ShelterReceiptStatus.toSubmissionStatus(): RescueSubmissionStatus = when (this) {
     ShelterReceiptStatus.STORED -> RescueSubmissionStatus.SHELTER_STORED

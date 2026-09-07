@@ -19,6 +19,7 @@ import com.google.android.gms.tasks.Task
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -28,16 +29,15 @@ class GoogleNearbyPlatform(
     private val serviceId: String,
     private val client: ConnectionsClient = Nearby.getConnectionsClient(context.applicationContext),
 ) : NearbyPlatform {
-    // Nearby callbacks are delivered from Play services threads and can burst while the
-    // coroutine collector is decoding a payload. A bounded SharedFlow silently drops events
-    // when full, which can strand a connection or lose a transfer completion. An unlimited
-    // channel preserves callback ordering and applies backpressure only to the collector.
-    private val _events = Channel<NearbyPlatformEvent>(Channel.UNLIMITED)
+    // Callbacks must never be allowed to grow memory without bound. Reconciliation and the
+    // connection state machine can recover from stale payload events, while connection events are
+    // kept ahead of a payload burst by the fixed queue limit.
+    private val _events = Channel<NearbyPlatformEvent>(capacity = 256, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val events: Flow<NearbyPlatformEvent> = _events.receiveAsFlow()
 
     private fun emitEvent(event: NearbyPlatformEvent) {
-        // The channel remains open for the lifetime of this platform. trySend keeps Play
-        // services callbacks non-blocking while still retaining every event in the queue.
+        // Play services callbacks are non-blocking. A burst is bounded and later reconciliation
+        // requests the durable inventory again.
         _events.trySend(event)
     }
 
@@ -143,6 +143,7 @@ class GoogleNearbyPlatform(
         client.stopAdvertising()
         client.stopDiscovery()
         client.stopAllEndpoints()
+        while (_events.tryReceive().isSuccess) Unit
     }
 }
 

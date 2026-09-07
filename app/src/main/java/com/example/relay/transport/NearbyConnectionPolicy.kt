@@ -32,6 +32,7 @@ enum class NearbyConnectionMode {
 class NearbyConnectionPolicy(
     initialMode: NearbyConnectionMode = NearbyConnectionMode.OPEN,
     trustedPeers: Collection<String> = emptySet(),
+    private val onTrustedPeersChanged: (Set<String>) -> Unit = {},
 ) {
     private val _mode = MutableStateFlow(initialMode)
     val mode: StateFlow<NearbyConnectionMode> = _mode
@@ -48,11 +49,11 @@ class NearbyConnectionPolicy(
     }
 
     fun trust(peerId: String) {
-        if (peerId.isNotBlank()) trusted.add(peerId)
+        if (peerId.isNotBlank() && trusted.add(peerId)) onTrustedPeersChanged(trusted.toSet())
     }
 
     fun revoke(peerId: String) {
-        trusted.remove(peerId)
+        if (trusted.remove(peerId)) onTrustedPeersChanged(trusted.toSet())
     }
 
     /** True when a connection to [peerId] is permitted under the current mode. */

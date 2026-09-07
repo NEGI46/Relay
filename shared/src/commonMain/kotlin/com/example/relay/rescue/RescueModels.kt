@@ -254,8 +254,28 @@ fun ReportSignature.validate(): RescueValidationResult = validationResult {
     require(signatureBase64.length in 64..256, "invalid_signature")
 }
 
-/** Canonical, length-prefixed AAD. Mutable hopCount and encrypted fields are deliberately absent. */
+/** Canonical, length-prefixed AAD. Only hopCount is mutable routing metadata. */
 fun EncryptedRescueEnvelope.authenticatedHeaderBytes(): ByteArray = canonicalBytes(
+    protocolVersion.toString(),
+    envelopeId,
+    requestId,
+    requestVersion.toString(),
+    senderDeviceId,
+    destinationShelterId,
+    routingUrgency.name,
+    recipientKeyId,
+    createdAtEpochMillis.toString(),
+    expiresAtEpochMillis.toString(),
+    maxHopCount.toString(),
+    keyWrapAlgorithm,
+    contentEncryptionAlgorithm,
+    ciphertextSizeBytes.toString(),
+    wrappedContentKeyBase64,
+    nonceBase64,
+)
+
+/** v1 AAD retained solely to read envelopes written before key/nonce binding was added. */
+fun EncryptedRescueEnvelope.legacyAuthenticatedHeaderBytes(): ByteArray = canonicalBytes(
     protocolVersion.toString(),
     envelopeId,
     requestId,
@@ -276,6 +296,12 @@ fun EncryptedRescueEnvelope.authenticatedHeaderBytes(): ByteArray = canonicalByt
 fun EncryptedRescueEnvelope.senderAuthorizationBytes(): ByteArray = canonicalBytes(
     "RelayRescueSender/v1",
     authenticatedHeaderBytes().decodeToString(),
+    ciphertextSha256Hex,
+)
+
+internal fun EncryptedRescueEnvelope.legacySenderAuthorizationBytes(): ByteArray = canonicalBytes(
+    "RelayRescueSender/v1",
+    legacyAuthenticatedHeaderBytes().decodeToString(),
     ciphertextSha256Hex,
 )
 

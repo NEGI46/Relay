@@ -146,9 +146,14 @@ class ReceiptOutbox(
                     markAttempt(receiptId)
                     incrementRetry(receiptId)
                 } else {
+                    // Every attempt gets a next-attempt timestamp. Without this, a permanent
+                    // 4xx/5xx or a network failure remains in the first LIMIT 20 rows forever and
+                    // starves all receipts created later.
+                    markAttempt(receiptId)
                     incrementRetry(receiptId)
                 }
             } catch (_: Exception) {
+                markAttempt(receiptId)
                 incrementRetry(receiptId)
             }
         }

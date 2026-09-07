@@ -47,14 +47,14 @@ class NearbyConnectionsTransport(
     private val _state = MutableStateFlow(OfflineTransportState())
     private val _discoveredPeers = MutableStateFlow<List<Peer>>(emptyList())
     // These streams are fed by Nearby callbacks and reconnect jobs. Broadcast connection events
-    // preserve the two production consumers; unbounded payload/diagnostic channels avoid silently
-    // dropping a payload or transfer completion during a burst.
+    // preserve the two production consumers; payload and diagnostic queues are bounded so a peer
+    // cannot exhaust the phone while a database operation is slow.
     private val _connectionEvents = MutableSharedFlow<ConnectionEvent>(
         extraBufferCapacity = 256,
         onBufferOverflow = BufferOverflow.SUSPEND,
     )
-    private val _receivedPayloads = Channel<ReceivedPayload>(Channel.UNLIMITED)
-    private val _transportEvents = Channel<TransportEvent>(Channel.UNLIMITED)
+    private val _receivedPayloads = Channel<ReceivedPayload>(capacity = 128, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    private val _transportEvents = Channel<TransportEvent>(capacity = 256, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     // Play services callbacks, reconnect jobs, and UI initiated operations all touch these
     // mappings. Concurrent maps prevent a late callback from observing a partially-mutated map
     // and make endpoint replacement safe across coroutines.
@@ -113,7 +113,11 @@ class NearbyConnectionsTransport(
         val endpointId = peerToEndpoint[peerId] ?: return fail("accept", "unknown peer")
         if (peerId !in _state.value.pendingVerifications) return fail("accept", "verification is not pending")
         try {
-            platform.acceptConnection(endpointId)
+            val completed = withTimeoutOrNull(connectionAttemptTimeoutMs) {
+                platform.acceptConnection(endpointId)
+                true
+            } ?: false
+            if (!completed) throw IllegalStateException("accept connection timed out")
         } catch (error: Exception) {
             clearPeerConnection(peerId)
             fail("accept", error.safeReason())
@@ -139,6 +143,7 @@ class NearbyConnectionsTransport(
 
     override suspend fun send(peerId: String, payload: ByteArray): SendResult {
         if (payload.size > maxPayloadBytes) return SendResult.Failed("payload exceeds Nearby BYTES limit")
+        if (!connectionPolicy.allowsConnection(peerId)) return SendResult.Failed("peer is not trusted")
         if (peerId !in _state.value.connectedPeerIds) return SendResult.Failed("peer is not connected")
         val endpointId = peerToEndpoint[peerId] ?: return SendResult.Failed("peer endpoint is unavailable")
         var createdPayloadId: Long? = null
@@ -227,12 +232,18 @@ class NearbyConnectionsTransport(
     private suspend fun handleBytesReceived(event: NearbyPlatformEvent.BytesReceived) {
         val peerId = endpointToPeer[event.endpointId] ?: return
         if (peerId !in _state.value.connectedPeerIds) return
+        if (!connectionPolicy.allowsConnection(peerId)) {
+            runCatching { platform.disconnect(event.endpointId) }
+            clearPeerConnection(peerId)
+            _connectionEvents.emit(ConnectionEvent.Disconnected(peerId))
+            return
+        }
         if (event.bytes.size > maxPayloadBytes) {
             fail("receive", "payload exceeds Nearby BYTES limit")
         } else {
             val bytes = event.bytes.copyOf()
-            _receivedPayloads.send(ReceivedPayload(peerId, bytes))
-            _transportEvents.send(TransportEvent.PayloadReceived(peerId, bytes.size))
+            _receivedPayloads.trySend(ReceivedPayload(peerId, bytes))
+            _transportEvents.trySend(TransportEvent.PayloadReceived(peerId, bytes.size))
         }
     }
 
@@ -382,7 +393,11 @@ class NearbyConnectionsTransport(
         // timeout only after requestConnection() returns leaves the peer stuck indefinitely.
         timeoutJob.start()
         try {
-            platform.requestConnection(localDeviceId, endpointId)
+            val completed = withTimeoutOrNull(connectionAttemptTimeoutMs) {
+                platform.requestConnection(localDeviceId, endpointId)
+                true
+            } ?: false
+            if (!completed) throw IllegalStateException("request connection timed out")
         } catch (error: Exception) {
             cancelConnectionAttemptTimeout(peerId)
             connectingPeerIds -= peerId

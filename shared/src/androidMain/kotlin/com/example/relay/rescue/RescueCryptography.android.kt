@@ -65,6 +65,9 @@ actual object RescueCryptography {
         require(maxHopCount in 1..32)
         val contentKey = KeyGenerator.getInstance("AES").apply { init(256, random) }.generateKey()
         val nonce = ByteArray(12).also(random::nextBytes)
+        val wrapped = rsaCipher(Cipher.ENCRYPT_MODE, parsePublic(recipientPublicKey)).doFinal(contentKey.encoded)
+        val wrappedBase64 = encode(wrapped)
+        val nonceBase64 = encode(nonce)
         val plaintext = json.encodeToString(payload).encodeToByteArray()
         val header = EncryptedRescueEnvelope(
             envelopeId = envelopeId,
@@ -78,8 +81,8 @@ actual object RescueCryptography {
             expiresAtEpochMillis = payload.expiresAtEpochMillis,
             maxHopCount = maxHopCount,
             ciphertextSizeBytes = plaintext.size + 16,
-            wrappedContentKeyBase64 = "",
-            nonceBase64 = "",
+            wrappedContentKeyBase64 = wrappedBase64,
+            nonceBase64 = nonceBase64,
             ciphertextBase64 = "",
             ciphertextSha256Hex = "0".repeat(64),
         )
@@ -89,10 +92,9 @@ actual object RescueCryptography {
         }
         val ciphertext = cipher.doFinal(plaintext)
         require(ciphertext.size == header.ciphertextSizeBytes)
-        val wrapped = rsaCipher(Cipher.ENCRYPT_MODE, parsePublic(recipientPublicKey)).doFinal(contentKey.encoded)
         header.copy(
-            wrappedContentKeyBase64 = encode(wrapped),
-            nonceBase64 = encode(nonce),
+            wrappedContentKeyBase64 = wrappedBase64,
+            nonceBase64 = nonceBase64,
             ciphertextBase64 = encode(ciphertext),
             ciphertextSha256Hex = sha256Hex(ciphertext),
         )
@@ -111,11 +113,18 @@ actual object RescueCryptography {
         require(nonce.size == 12)
         val keyBytes = rsaCipher(Cipher.DECRYPT_MODE, parsePrivate(recipientPrivateKey)).doFinal(decode(envelope.wrappedContentKeyBase64))
         require(keyBytes.size == 32)
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
-            init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, nonce))
-            updateAAD(envelope.authenticatedHeaderBytes())
-        }
-        val payload = json.decodeFromString<RescuePayload>(cipher.doFinal(ciphertext).decodeToString())
+        val plaintext = runCatching {
+            Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, nonce))
+                updateAAD(envelope.authenticatedHeaderBytes())
+            }.doFinal(ciphertext)
+        }.recoverCatching {
+            Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, nonce))
+                updateAAD(envelope.legacyAuthenticatedHeaderBytes())
+            }.doFinal(ciphertext)
+        }.getOrThrow()
+        val payload = json.decodeFromString<RescuePayload>(plaintext.decodeToString())
         require(payload.validate() == RescueValidationResult.Valid)
         require(payload.requestId == envelope.requestId && payload.senderDeviceId == envelope.senderDeviceId)
         require(payload.requestVersion == envelope.requestVersion)
@@ -146,10 +155,14 @@ actual object RescueCryptography {
             algorithm = RescueKeyAlgorithm.ECDSA_P256_SHA256,
             encodedBase64 = envelope.senderPublicKeyBase64,
         )
+        val signature = decode(envelope.senderSignatureBase64)
         Signature.getInstance("SHA256withECDSA").apply {
             initVerify(parsePublic(key))
             update(envelope.senderAuthorizationBytes())
-        }.verify(decode(envelope.senderSignatureBase64))
+        }.verify(signature) || Signature.getInstance("SHA256withECDSA").apply {
+            initVerify(parsePublic(key))
+            update(envelope.legacySenderAuthorizationBytes())
+        }.verify(signature)
     } catch (_: Exception) {
         false
     }
