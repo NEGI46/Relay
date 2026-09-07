@@ -153,8 +153,11 @@ class ReceiptOutbox(
                     incrementRetry(receiptId)
                 }
             } catch (_: Exception) {
-                markAttempt(receiptId)
-                incrementRetry(receiptId)
+                // A connection reset is normally transient. Permit one immediate retry so a
+                // one-shot radio/proxy failure does not add a full minute of delivery latency.
+                // Once an item has already failed once, record the attempt timestamp to keep a
+                // permanently broken endpoint from monopolising the LIMIT 20 window.
+                recordTransientFailure(receiptId)
             }
         }
         return sent
@@ -196,6 +199,20 @@ class ReceiptOutbox(
                 "UPDATE receipt_outbox SET retry_count = retry_count + 1 WHERE receipt_id = ?",
             ).use { stmt ->
                 stmt.setString(1, receiptId)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    private fun recordTransientFailure(receiptId: String) {
+        persistence.withConnection { connection ->
+            connection.prepareStatement(
+                "UPDATE receipt_outbox SET retry_count = retry_count + 1, " +
+                    "last_attempt_at = CASE WHEN retry_count = 0 THEN last_attempt_at ELSE ? END " +
+                    "WHERE receipt_id = ?",
+            ).use { stmt ->
+                stmt.setLong(1, System.currentTimeMillis())
+                stmt.setString(2, receiptId)
                 stmt.executeUpdate()
             }
         }

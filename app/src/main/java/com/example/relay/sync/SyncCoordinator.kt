@@ -179,7 +179,11 @@ class SyncCoordinator(
                     val peers = connectedPeersMutex.withLock { connectedPeers.toList() }
                     peers
                         .filter { it in transport.state.value.connectedPeerIds }
-                        .forEach { peerId -> withPeerSync(peerId) { sendManifest(peerId) } }
+                        // Do not let a blocked initial handshake prevent a later repository
+                        // change from reaching the accounting gate. `send` reserves bytes under
+                        // its own mutex, so concurrent refreshes remain bounded and a refresh
+                        // that exceeds the budget is rejected instead of waiting indefinitely.
+                        .forEach { peerId -> sendManifest(peerId) }
                 }
         }
         jobs += scope.launch(start = CoroutineStart.UNDISPATCHED) {
