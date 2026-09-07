@@ -122,7 +122,7 @@ class InMemoryRescueEnvelopeRepository(
         require(maxStoredBytes > 0)
     }
 
-    @Suppress("CyclomaticComplexMethod", "ComplexCondition")
+    @Suppress("CyclomaticComplexMethod", "ComplexCondition", "LongMethod")
     override fun store(
         envelope: EncryptedRescueEnvelope,
         receivedAtEpochMillis: Long,
@@ -302,6 +302,7 @@ fun EncryptedRescueEnvelope.storageSizeBytes(): Long = ciphertextSizeBytes.toLon
 private fun String.utf8Size(): Long = encodeToByteArray().size.toLong()
 
 /** Returns true when two envelopes represent the same immutable encrypted object. */
+@Suppress("CyclomaticComplexMethod")
 internal fun EncryptedRescueEnvelope.sameImmutableEnvelopeAs(other: EncryptedRescueEnvelope): Boolean =
     protocolVersion == other.protocolVersion &&
         envelopeId == other.envelopeId &&

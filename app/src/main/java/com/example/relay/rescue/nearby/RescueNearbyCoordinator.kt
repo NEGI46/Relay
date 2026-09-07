@@ -238,6 +238,7 @@ class RescueNearbyCoordinator(
             .forEach { sendInventory(it) }
     }
 
+    @Suppress("TooGenericExceptionCaught")
     private suspend fun send(peerId: String, packet: RescueNearbyPacket): SendResult {
         val packetType = packet::class.simpleName ?: "rescue"
         val result = try {

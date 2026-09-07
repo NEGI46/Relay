@@ -53,8 +53,14 @@ class NearbyConnectionsTransport(
         extraBufferCapacity = 256,
         onBufferOverflow = BufferOverflow.SUSPEND,
     )
-    private val _receivedPayloads = Channel<ReceivedPayload>(capacity = 128, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-    private val _transportEvents = Channel<TransportEvent>(capacity = 256, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    private val _receivedPayloads = Channel<ReceivedPayload>(
+        capacity = 128,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    private val _transportEvents = Channel<TransportEvent>(
+        capacity = 256,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
     // Play services callbacks, reconnect jobs, and UI initiated operations all touch these
     // mappings. Concurrent maps prevent a late callback from observing a partially-mutated map
     // and make endpoint replacement safe across coroutines.
@@ -117,7 +123,7 @@ class NearbyConnectionsTransport(
                 platform.acceptConnection(endpointId)
                 true
             } ?: false
-            if (!completed) throw IllegalStateException("accept connection timed out")
+            check(completed) { "accept connection timed out" }
         } catch (error: Exception) {
             clearPeerConnection(peerId)
             fail("accept", error.safeReason())
@@ -230,15 +236,13 @@ class NearbyConnectionsTransport(
     }
 
     private suspend fun handleBytesReceived(event: NearbyPlatformEvent.BytesReceived) {
-        val peerId = endpointToPeer[event.endpointId] ?: return
-        if (peerId !in _state.value.connectedPeerIds) return
+        val peerId = endpointToPeer[event.endpointId]
+        if (peerId == null || peerId !in _state.value.connectedPeerIds) return
         if (!connectionPolicy.allowsConnection(peerId)) {
             runCatching { platform.disconnect(event.endpointId) }
             clearPeerConnection(peerId)
             _connectionEvents.emit(ConnectionEvent.Disconnected(peerId))
-            return
-        }
-        if (event.bytes.size > maxPayloadBytes) {
+        } else if (event.bytes.size > maxPayloadBytes) {
             fail("receive", "payload exceeds Nearby BYTES limit")
         } else {
             val bytes = event.bytes.copyOf()
@@ -397,7 +401,7 @@ class NearbyConnectionsTransport(
                 platform.requestConnection(localDeviceId, endpointId)
                 true
             } ?: false
-            if (!completed) throw IllegalStateException("request connection timed out")
+            check(completed) { "request connection timed out" }
         } catch (error: Exception) {
             cancelConnectionAttemptTimeout(peerId)
             connectingPeerIds -= peerId
