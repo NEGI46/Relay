@@ -48,7 +48,10 @@ class SyncPlannerTest {
         repository.insert(message("acked"))
         repository.markAcknowledged(MessageDelivery("acked", "peer-B", NOW, "packet"))
 
-        assertEquals(listOf("acked"), planner.messagesToSend("peer-B", listOf("expired", "hop", "acked")).map { it.messageId })
+        assertEquals(
+            listOf("acked"),
+            planner.messagesToSend("peer-B", listOf("expired", "hop", "acked")).map { it.messageId },
+        )
     }
 
     @Test

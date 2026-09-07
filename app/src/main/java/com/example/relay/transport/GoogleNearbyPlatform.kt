@@ -90,9 +90,15 @@ class GoogleNearbyPlatform(
 
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
             when (update.status) {
-                PayloadTransferUpdate.Status.SUCCESS -> emitEvent(NearbyPlatformEvent.PayloadTransferSucceeded(endpointId, update.payloadId))
-                PayloadTransferUpdate.Status.FAILURE -> emitEvent(NearbyPlatformEvent.PayloadTransferFailed(endpointId, update.payloadId, "transfer failed"))
-                PayloadTransferUpdate.Status.CANCELED -> emitEvent(NearbyPlatformEvent.PayloadTransferFailed(endpointId, update.payloadId, "transfer canceled"))
+                PayloadTransferUpdate.Status.SUCCESS -> emitEvent(
+                    NearbyPlatformEvent.PayloadTransferSucceeded(endpointId, update.payloadId),
+                )
+                PayloadTransferUpdate.Status.FAILURE -> emitEvent(
+                    NearbyPlatformEvent.PayloadTransferFailed(endpointId, update.payloadId, "transfer failed"),
+                )
+                PayloadTransferUpdate.Status.CANCELED -> emitEvent(
+                    NearbyPlatformEvent.PayloadTransferFailed(endpointId, update.payloadId, "transfer canceled"),
+                )
             }
         }
     }

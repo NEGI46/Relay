@@ -62,6 +62,7 @@ sealed interface SyncDebugEvent {
 private const val NEARBY_PAGE_SIZE = 64
 
 @OptIn(FlowPreview::class)
+@Suppress("LongParameterList")
 class SyncCoordinator(
     private val deviceId: String,
     private val transport: OfflineTransport,
@@ -110,6 +111,7 @@ class SyncCoordinator(
     private var activeSettings = RelayRuntimeSettings()
     fun payloadTransfer(messageId: String, peerId: String): PayloadTransfer? = payloadTransfers[messageId to peerId]
 
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
     override suspend fun start(settings: RelayRuntimeSettings): Boolean = lifecycleMutex.withLock {
         if (settings.mode == OperatingMode.NORMAL) {
             _debugEvents.tryEmit(SyncDebugEvent.Rejected("local", "communication requires DRILL or RELAY mode"))
@@ -148,7 +150,9 @@ class SyncCoordinator(
                         is RescueNearbyDebugEvent.TransferCompleted ->
                             _debugEvents.emit(SyncDebugEvent.RescueTransferCompleted(event.peerId, event.packetType))
                         is RescueNearbyDebugEvent.TransferFailed ->
-                            _debugEvents.emit(SyncDebugEvent.RescueTransferFailed(event.peerId, event.packetType, event.reason))
+                            _debugEvents.emit(
+                                SyncDebugEvent.RescueTransferFailed(event.peerId, event.packetType, event.reason),
+                            )
                     }
                 }
             }

@@ -193,6 +193,7 @@ class RelayCommunicationRuntime(
         is TransportEvent.Error -> "$operation error: ${reason.take(100)}"
     }
 
+    @Suppress("MagicNumber")
     private fun SyncDebugEvent.toSafeText(): String = when (this) {
         is SyncDebugEvent.Rejected -> "validation rejected: peer=${peerId.take(12)} reason=${reason.take(100)}"
         is SyncDebugEvent.SendFailed -> "send failed: peer=${peerId.take(12)} item=${itemId.take(12)} reason=${reason.take(80)}"
@@ -200,7 +201,9 @@ class RelayCommunicationRuntime(
         is SyncDebugEvent.PeerAcknowledged -> "peer ACK: peer=${peerId.take(12)} message=${messageId.take(12)}"
         is SyncDebugEvent.GatewayReceiptRecorded -> "gateway receipt: message=${messageId.take(12)} actor=${actorId.take(12)}"
         is SyncDebugEvent.MessageStored -> "DB save: message=${messageId.take(12)} duplicate=$duplicate"
-        is SyncDebugEvent.RescueTransferCompleted -> "rescue ${packetType.take(24)} transferred: peer=${peerId.take(12)}"
-        is SyncDebugEvent.RescueTransferFailed -> "rescue ${packetType.take(24)} failed: peer=${peerId.take(12)} reason=${reason.take(80)}"
+        is SyncDebugEvent.RescueTransferCompleted ->
+            "rescue ${packetType.take(24)} transferred: peer=${peerId.take(12)}"
+        is SyncDebugEvent.RescueTransferFailed ->
+            "rescue ${packetType.take(24)} failed: peer=${peerId.take(12)} reason=${reason.take(80)}"
     }
 }

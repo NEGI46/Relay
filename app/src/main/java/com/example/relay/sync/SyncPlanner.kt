@@ -31,6 +31,7 @@ class SyncPlanner(
             .toList()
     }
 
+    @Suppress("UnusedParameter")
     suspend fun messagesToSend(peerId: String, requestedIds: Collection<String>): List<RelayMessage> {
         val requested = requestedIds.toHashSet()
         val pending = mutableListOf<RelayMessage>()

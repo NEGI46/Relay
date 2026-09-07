@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 
+@Suppress("LongParameterList")
 class NearbyConnectionsTransport(
     private val localDeviceId: String,
     private val platform: NearbyPlatform,

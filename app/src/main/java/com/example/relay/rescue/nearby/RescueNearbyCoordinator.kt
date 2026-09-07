@@ -23,6 +23,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
+private const val MAX_INVENTORY_HOP_COUNT = 32
+
 sealed interface RescueNearbyDebugEvent {
     data class TransferCompleted(val peerId: String, val packetType: String) : RescueNearbyDebugEvent
     data class TransferFailed(val peerId: String, val packetType: String, val reason: String) : RescueNearbyDebugEvent
@@ -272,7 +274,7 @@ data class RescueInventoryEntry(
             expiresAtEpochMillis > now &&
             (receiptStatus == null) == (receiptUpdatedAtEpochMillis == null) &&
             (receiptUpdatedAtEpochMillis == null || receiptUpdatedAtEpochMillis > 0) &&
-            hopCount in 0..32
+            hopCount in 0..MAX_INVENTORY_HOP_COUNT
 }
 
 @Serializable
