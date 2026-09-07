@@ -19,6 +19,14 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+
+sealed interface RescueNearbyDebugEvent {
+    data class TransferCompleted(val peerId: String, val packetType: String) : RescueNearbyDebugEvent
+    data class TransferFailed(val peerId: String, val packetType: String, val reason: String) : RescueNearbyDebugEvent
+}
 
 /**
  * Encrypted rescue store-carry-forward exchange over the existing Nearby byte transport.
@@ -40,6 +48,8 @@ class RescueNearbyCoordinator(
     private val receiptApplier: (RescueRequestKey, SignedShelterReceipt, com.example.relay.rescue.RescuePublicKey) -> ReceiptApplicationResult = repository::applyReceipt,
 ) {
     private val pendingExports = mutableMapOf<Pair<String, RescueRequestKey>, EncryptedRescueEnvelope>()
+    private val _debugEvents = MutableSharedFlow<RescueNearbyDebugEvent>(extraBufferCapacity = 64)
+    val debugEvents: SharedFlow<RescueNearbyDebugEvent> = _debugEvents.asSharedFlow()
 
     init {
         require(maxInventoryEntries in 1..256)
@@ -114,7 +124,13 @@ class RescueNearbyCoordinator(
         val local = repository.get(remote.key())
         // A same-version, different-hash packet is a collision/tamper candidate, not an update.
         // Do not ask a peer to send it repeatedly.
-        if (local != null) return false
+        if (local != null) {
+            // A courier may have received the envelope through a long route first. Requesting a
+            // shorter-path copy lets it converge on the best known route depth instead of keeping
+            // an unnecessarily exhausted hop budget forever.
+            return local.envelope.ciphertextSha256Hex == remote.ciphertextSha256Hex &&
+                remote.hopCount < local.envelope.hopCount
+        }
         return repository.all().none {
             it.envelope.requestId == remote.requestId && it.envelope.requestVersion > remote.requestVersion
         }
@@ -207,12 +223,21 @@ class RescueNearbyCoordinator(
             .forEach { sendInventory(it) }
     }
 
-    private suspend fun send(peerId: String, packet: RescueNearbyPacket): SendResult =
-        runCatching { codec.encode(packet) }
+    private suspend fun send(peerId: String, packet: RescueNearbyPacket): SendResult {
+        val packetType = packet::class.simpleName ?: "rescue"
+        val result = runCatching { codec.encode(packet) }
             .fold(
                 onSuccess = { transport.send(peerId, it) },
                 onFailure = { SendResult.Failed(it.message ?: "invalid rescue packet") },
             )
+        when (result) {
+            SendResult.PayloadTransferCompleted ->
+                _debugEvents.tryEmit(RescueNearbyDebugEvent.TransferCompleted(peerId, packetType))
+            is SendResult.Failed ->
+                _debugEvents.tryEmit(RescueNearbyDebugEvent.TransferFailed(peerId, packetType, result.reason))
+        }
+        return result
+    }
 
     private fun StoredRescueRecord.isAdvertisableAt(now: Long): Boolean =
         now < envelope.expiresAtEpochMillis &&
@@ -225,6 +250,7 @@ class RescueNearbyCoordinator(
         expiresAtEpochMillis = envelope.expiresAtEpochMillis,
         receiptStatus = state.signedReceipt?.receipt?.status,
         receiptUpdatedAtEpochMillis = state.signedReceipt?.receipt?.receivedAtEpochMillis,
+        hopCount = envelope.hopCount,
     )
 }
 
@@ -236,6 +262,7 @@ data class RescueInventoryEntry(
     val expiresAtEpochMillis: Long,
     val receiptStatus: ShelterReceiptStatus? = null,
     val receiptUpdatedAtEpochMillis: Long? = null,
+    val hopCount: Int = 0,
 ) {
     fun key() = RescueRequestKey(requestId, requestVersion)
 
@@ -244,7 +271,8 @@ data class RescueInventoryEntry(
             ciphertextSha256Hex.length == 64 && ciphertextSha256Hex.all { it in '0'..'9' || it in 'a'..'f' } &&
             expiresAtEpochMillis > now &&
             (receiptStatus == null) == (receiptUpdatedAtEpochMillis == null) &&
-            (receiptUpdatedAtEpochMillis == null || receiptUpdatedAtEpochMillis > 0)
+            (receiptUpdatedAtEpochMillis == null || receiptUpdatedAtEpochMillis > 0) &&
+            hopCount in 0..32
 }
 
 @Serializable

@@ -1,15 +1,20 @@
 package com.example.relay.transport
 
+import com.example.relay.domain.ConnectionAuthenticator
+import com.example.relay.domain.ConnectionVerification
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -26,6 +31,8 @@ class NearbyConnectionsTransport(
     private val connectionAttemptTimeoutMs: Long = 30_000,
     private val reconnectBaseDelayMs: Long = 1_000,
     private val reconnectMaxDelayMs: Long = 30_000,
+    /** Optional deployment-provided identity/authentication policy. */
+    private val connectionAuthenticator: ConnectionAuthenticator? = null,
 ) : OfflineTransport {
     private data class PendingTransfer(
         val peerId: String,
@@ -36,11 +43,17 @@ class NearbyConnectionsTransport(
     private val lifecycleMutex = Mutex()
     private val _state = MutableStateFlow(OfflineTransportState())
     private val _discoveredPeers = MutableStateFlow<List<Peer>>(emptyList())
-    private val _connectionEvents = MutableSharedFlow<ConnectionEvent>(extraBufferCapacity = 64)
-    private val _receivedPayloads = MutableSharedFlow<ReceivedPayload>(extraBufferCapacity = 64)
-    private val _transportEvents = MutableSharedFlow<TransportEvent>(extraBufferCapacity = 128)
-    private val peerToEndpoint = linkedMapOf<String, String>()
-    private val endpointToPeer = linkedMapOf<String, String>()
+    // These streams are fed by Nearby callbacks and reconnect jobs. Unbounded channels avoid
+    // silently dropping a disconnect, payload, or transfer completion during a burst, and keep a
+    // slow protocol consumer from blocking the platform event collector.
+    private val _connectionEvents = Channel<ConnectionEvent>(Channel.UNLIMITED)
+    private val _receivedPayloads = Channel<ReceivedPayload>(Channel.UNLIMITED)
+    private val _transportEvents = Channel<TransportEvent>(Channel.UNLIMITED)
+    // Play services callbacks, reconnect jobs, and UI initiated operations all touch these
+    // mappings. Concurrent maps prevent a late callback from observing a partially-mutated
+    // LinkedHashMap and make endpoint replacement safe across coroutines.
+    private val peerToEndpoint = ConcurrentHashMap<String, String>()
+    private val endpointToPeer = ConcurrentHashMap<String, String>()
     private val pendingTransfers = ConcurrentHashMap<Long, PendingTransfer>()
     // Typed as MutableSet so member calls resolve through java.util.Set (API 1) rather than
     // ConcurrentHashMap.KeySetView (API 24); the backing set is still the concurrent key-set,
@@ -53,9 +66,9 @@ class NearbyConnectionsTransport(
 
     override val state: StateFlow<OfflineTransportState> = _state
     override val discoveredPeers: StateFlow<List<Peer>> = _discoveredPeers
-    override val connectionEvents = _connectionEvents
-    override val receivedPayloads = _receivedPayloads
-    override val transportEvents = _transportEvents
+    override val connectionEvents: Flow<ConnectionEvent> = _connectionEvents.receiveAsFlow()
+    override val receivedPayloads: Flow<ReceivedPayload> = _receivedPayloads.receiveAsFlow()
+    override val transportEvents: Flow<TransportEvent> = _transportEvents.receiveAsFlow()
 
     override suspend fun start() = lifecycleMutex.withLock {
         if (_state.value.started) return
@@ -66,10 +79,10 @@ class NearbyConnectionsTransport(
         eventJob = scope.launch(start = CoroutineStart.UNDISPATCHED) { platform.events.collect(::handlePlatformEvent) }
         try {
             platform.startAdvertising(localDeviceId)
-            _state.value = _state.value.copy(started = true, advertising = true)
+            _state.update { it.copy(started = true, advertising = true) }
             _transportEvents.emit(TransportEvent.AdvertisingStarted)
             platform.startDiscovery()
-            _state.value = _state.value.copy(discovering = true)
+            _state.update { it.copy(discovering = true) }
             _transportEvents.emit(TransportEvent.DiscoveryStarted)
         } catch (error: Exception) {
             runCatching { platform.stopAll() }
@@ -123,21 +136,36 @@ class NearbyConnectionsTransport(
         if (peerId !in _state.value.connectedPeerIds) return SendResult.Failed("peer is not connected")
         val endpointId = peerToEndpoint[peerId] ?: return SendResult.Failed("peer endpoint is unavailable")
         var createdPayloadId: Long? = null
+        var callbackActive = true
+        val callbackLock = Any()
         return try {
             val completion = CompletableDeferred<SendResult>()
-            val payloadId = platform.sendBytes(endpointId, payload.copyOf()) { createdId ->
-                createdPayloadId = createdId
-                pendingTransfers[createdId] = PendingTransfer(peerId, endpointId, completion)
+            val result = withTimeoutOrNull(transferTimeoutMs) {
+                // The SDK task can stall before returning its payload id. The timeout must cover
+                // payload creation and send setup as well as the transfer callback itself.
+                val payloadId = platform.sendBytes(endpointId, payload.copyOf()) { createdId ->
+                    synchronized(callbackLock) {
+                        // A non-cooperative SDK task may invoke this callback after the timeout.
+                        // Do not resurrect a pending transfer after its caller has returned.
+                        if (callbackActive) {
+                            createdPayloadId = createdId
+                            pendingTransfers[createdId] = PendingTransfer(peerId, endpointId, completion)
+                        }
+                    }
+                }
+                _transportEvents.emit(TransportEvent.PayloadSendRequested(peerId, payloadId, payload.size))
+                completion.await()
             }
-            _transportEvents.emit(TransportEvent.PayloadSendRequested(peerId, payloadId, payload.size))
-            withTimeoutOrNull(transferTimeoutMs) { completion.await() }
-                ?: SendResult.Failed("payload transfer timed out").also { pendingTransfers.remove(payloadId) }
+            result ?: SendResult.Failed("payload transfer timed out")
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             SendResult.Failed(error.safeReason()).also { fail("send", error.safeReason()) }
         } finally {
-            createdPayloadId?.let { pendingTransfers.remove(it) }
+            synchronized(callbackLock) {
+                callbackActive = false
+                createdPayloadId?.let { pendingTransfers.remove(it) }
+            }
         }
     }
 
@@ -163,10 +191,12 @@ class NearbyConnectionsTransport(
         }
         cancelConnectionAttemptTimeout(peerId)
         cancelReconnect(peerId, resetAttempts = true)
-        _state.value = _state.value.copy(
-            connectedPeerIds = _state.value.connectedPeerIds + peerId,
-            pendingVerifications = _state.value.pendingVerifications - peerId,
-        )
+        _state.update {
+            it.copy(
+                connectedPeerIds = it.connectedPeerIds + peerId,
+                pendingVerifications = it.pendingVerifications - peerId,
+            )
+        }
         _connectionEvents.emit(ConnectionEvent.Connected(Peer(peerId)))
     }
 
@@ -233,7 +263,7 @@ class NearbyConnectionsTransport(
         }
         peerToEndpoint[peerId] = endpointId
         endpointToPeer[endpointId] = peerId
-        _discoveredPeers.value = peerToEndpoint.keys.map(::Peer)
+        _discoveredPeers.value = peerToEndpoint.keys.sorted().map(::Peer)
         _transportEvents.emit(TransportEvent.PeerFound(peerId))
         // Disaster mode is intentionally hands-off: use a deterministic initiator
         // so both devices do not race to request the same connection. TRUSTED mode
@@ -253,7 +283,7 @@ class NearbyConnectionsTransport(
         connectingPeerIds -= peerId
         endpointToPeer.remove(endpointId)
         peerToEndpoint.remove(peerId)
-        _discoveredPeers.value = peerToEndpoint.keys.map(::Peer)
+        _discoveredPeers.value = peerToEndpoint.keys.sorted().map(::Peer)
         _transportEvents.emit(TransportEvent.PeerLost(peerId))
     }
 
@@ -282,6 +312,21 @@ class NearbyConnectionsTransport(
             scheduleReconnect(peerId)
             return
         }
+        when (val verification = connectionAuthenticator?.verificationRequired(peerId, digits)) {
+            is ConnectionVerification.Rejected -> {
+                runCatching { platform.rejectConnection(event.endpointId) }
+                clearPeerConnection(peerId)
+                _connectionEvents.emit(ConnectionEvent.Failed(peerId, verification.reason))
+                return
+            }
+            is ConnectionVerification.PendingManualVerification -> {
+                _state.update { it.copy(pendingVerifications = it.pendingVerifications + (peerId to digits)) }
+                _connectionEvents.emit(ConnectionEvent.AuthenticationRequired(Peer(peerId), digits))
+                return
+            }
+            is ConnectionVerification.AutoAcceptedUntrusted,
+            null -> Unit
+        }
         // Nearby authentication digits remain available for diagnostics, but are
         // not presented as a user task. Incoming connections are accepted after
         // the transport-level code is available; application data is still
@@ -306,10 +351,12 @@ class NearbyConnectionsTransport(
             }
         cancelConnectionAttemptTimeout(peerId)
         connectingPeerIds -= peerId
-        _state.value = _state.value.copy(
-            connectedPeerIds = _state.value.connectedPeerIds - peerId,
-            pendingVerifications = _state.value.pendingVerifications - peerId,
-        )
+        _state.update {
+            it.copy(
+                connectedPeerIds = it.connectedPeerIds - peerId,
+                pendingVerifications = it.pendingVerifications - peerId,
+            )
+        }
     }
 
     private suspend fun requestPeerConnection(peerId: String) {
@@ -324,9 +371,12 @@ class NearbyConnectionsTransport(
         }
         if (!_state.value.started || peerId in _state.value.connectedPeerIds || !connectingPeerIds.add(peerId)) return
         val timeoutJob = prepareConnectionAttemptTimeout(peerId)
+        // Start the watchdog before entering the Play services task. The task itself can remain
+        // pending (for example while Bluetooth permission resolution is shown), so starting the
+        // timeout only after requestConnection() returns leaves the peer stuck indefinitely.
+        timeoutJob.start()
         try {
             platform.requestConnection(localDeviceId, endpointId)
-            timeoutJob.start()
         } catch (error: Exception) {
             cancelConnectionAttemptTimeout(peerId)
             connectingPeerIds -= peerId
@@ -341,10 +391,12 @@ class NearbyConnectionsTransport(
             delay(connectionAttemptTimeoutMs)
             connectionAttemptTimeoutJobs.remove(peerId)
             if (!connectingPeerIds.remove(peerId) || !_state.value.started) return@launch
-            _state.value = _state.value.copy(
-                connectedPeerIds = _state.value.connectedPeerIds - peerId,
-                pendingVerifications = _state.value.pendingVerifications - peerId,
-            )
+            _state.update {
+                it.copy(
+                    connectedPeerIds = it.connectedPeerIds - peerId,
+                    pendingVerifications = it.pendingVerifications - peerId,
+                )
+            }
             peerToEndpoint[peerId]?.let { endpointId -> runCatching { platform.disconnect(endpointId) } }
             fail("connect", "connection attempt timed out")
             _connectionEvents.emit(ConnectionEvent.Failed(peerId, "connection attempt timed out"))
@@ -391,7 +443,7 @@ class NearbyConnectionsTransport(
     private fun isDeterministicInitiator(peerId: String): Boolean = localDeviceId < peerId
 
     private suspend fun fail(operation: String, reason: String) {
-        _state.value = _state.value.copy(lastError = reason)
+        _state.update { it.copy(lastError = reason) }
         _transportEvents.emit(TransportEvent.Error(operation, reason))
     }
 
@@ -411,7 +463,10 @@ class NearbyConnectionsTransport(
         peerToEndpoint.clear()
         endpointToPeer.clear()
         _discoveredPeers.value = emptyList()
-        _state.value = OfflineTransportState(lastError = lastError)
+        while (_connectionEvents.tryReceive().isSuccess) Unit
+        while (_receivedPayloads.tryReceive().isSuccess) Unit
+        while (_transportEvents.tryReceive().isSuccess) Unit
+        _state.update { OfflineTransportState(lastError = lastError) }
     }
 
     private fun Throwable.safeReason(): String = message?.take(160) ?: javaClass.simpleName

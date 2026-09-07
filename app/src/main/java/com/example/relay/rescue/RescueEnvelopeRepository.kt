@@ -8,6 +8,10 @@ import com.example.relay.rescue.ShelterReceiptStatus
 import com.example.relay.rescue.SignedShelterReceipt
 import com.example.relay.rescue.forwardRescueEnvelope
 import com.example.relay.rescue.validate
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.emptyFlow
 
 data class RescueRequestKey(val requestId: String, val requestVersion: Int)
 
@@ -78,6 +82,9 @@ enum class ReceiptApplicationResult {
  * and receipt application atomic.
  */
 interface RescueEnvelopeRepository {
+    /** Hot invalidation stream for courier UIs and background delivery owners. */
+    val changes: Flow<Unit>
+        get() = emptyFlow()
     fun store(envelope: EncryptedRescueEnvelope, receivedAtEpochMillis: Long): RescueStoreResult
     fun get(key: RescueRequestKey): StoredRescueRecord?
     fun all(): List<StoredRescueRecord>
@@ -101,6 +108,9 @@ class InMemoryRescueEnvelopeRepository(
 ) : RescueEnvelopeRepository {
     private val lock = Any()
     private val records = linkedMapOf<RescueRequestKey, StoredRescueRecord>()
+    private val _changes = MutableSharedFlow<Unit>(extraBufferCapacity = 32)
+
+    override val changes: Flow<Unit> = _changes.asSharedFlow()
 
     init {
         require(maxRecordCount > 0)
@@ -141,13 +151,21 @@ class InMemoryRescueEnvelopeRepository(
             return@synchronized RescueStoreResult.Rejected(RescueStoreRejection.INVALID_SENDER_AUTHORIZATION)
         }
         records[key]?.let { existing ->
-            return@synchronized RescueStoreResult.Rejected(
-                if (existing.envelope.ciphertextSha256Hex == envelope.ciphertextSha256Hex) {
-                    RescueStoreRejection.DUPLICATE
-                } else {
-                    RescueStoreRejection.COLLISION
-                },
-            )
+            if (existing.envelope.ciphertextSha256Hex != envelope.ciphertextSha256Hex) {
+                return@synchronized RescueStoreResult.Rejected(RescueStoreRejection.COLLISION)
+            }
+            if (envelope.hopCount < existing.envelope.hopCount) {
+                val improved = existing.copy(
+                    envelope = envelope,
+                    state = existing.state.copy(
+                        receivedAtEpochMillis = minOf(existing.state.receivedAtEpochMillis, receivedAtEpochMillis),
+                    ),
+                )
+                records[key] = improved
+                _changes.tryEmit(Unit)
+                return@synchronized RescueStoreResult.Stored(improved)
+            }
+            return@synchronized RescueStoreResult.Rejected(RescueStoreRejection.DUPLICATE)
         }
         if (records.keys.any { it.requestId == key.requestId && it.requestVersion > key.requestVersion }) {
             return@synchronized RescueStoreResult.Rejected(RescueStoreRejection.SUPERSEDED_BY_NEWER_VERSION)
@@ -161,6 +179,7 @@ class InMemoryRescueEnvelopeRepository(
         val record = StoredRescueRecord(envelope, RescueEnvelopeState(receivedAtEpochMillis))
         records[key] = record
         val pruned = pruneForCapacity(protectedKey = key)
+        _changes.tryEmit(Unit)
         RescueStoreResult.Stored(record, superseded + pruned)
     }
 
@@ -197,6 +216,7 @@ class InMemoryRescueEnvelopeRepository(
                 submissionCount = current.state.submissionCount + 1,
             ),
         )
+        _changes.tryEmit(Unit)
         true
     }
 
@@ -225,6 +245,7 @@ class InMemoryRescueEnvelopeRepository(
         records[key] = current.copy(
             state = current.state.copy(submissionStatus = status, signedReceipt = signedReceipt),
         )
+        _changes.tryEmit(Unit)
         ReceiptApplicationResult.APPLIED
     }
 

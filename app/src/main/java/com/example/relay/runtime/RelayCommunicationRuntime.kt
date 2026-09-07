@@ -77,6 +77,7 @@ class RelayCommunicationRuntime(
                 when (event) {
                     is SyncDebugEvent.PeerAcknowledged,
                     is SyncDebugEvent.GatewayReceiptRecorded,
+                    is SyncDebugEvent.RescueTransferCompleted,
                     -> {
                         _state.value = _state.value.copy(lastSyncAt = System.currentTimeMillis())
                     }
@@ -84,6 +85,11 @@ class RelayCommunicationRuntime(
                         // Surface send failures on the operator-visible lastError path (not as success).
                         _state.value = _state.value.copy(
                             lastError = "送信失敗: ${event.reason.take(120)}",
+                        )
+                    }
+                    is SyncDebugEvent.RescueTransferFailed -> {
+                        _state.value = _state.value.copy(
+                            lastError = "救助データ送信失敗: ${event.reason.take(120)}",
                         )
                     }
                     is SyncDebugEvent.Rejected -> {
@@ -194,5 +200,7 @@ class RelayCommunicationRuntime(
         is SyncDebugEvent.PeerAcknowledged -> "peer ACK: peer=${peerId.take(12)} message=${messageId.take(12)}"
         is SyncDebugEvent.GatewayReceiptRecorded -> "gateway receipt: message=${messageId.take(12)} actor=${actorId.take(12)}"
         is SyncDebugEvent.MessageStored -> "DB save: message=${messageId.take(12)} duplicate=$duplicate"
+        is SyncDebugEvent.RescueTransferCompleted -> "rescue ${packetType.take(24)} transferred: peer=${peerId.take(12)}"
+        is SyncDebugEvent.RescueTransferFailed -> "rescue ${packetType.take(24)} failed: peer=${peerId.take(12)} reason=${reason.take(80)}"
     }
 }
