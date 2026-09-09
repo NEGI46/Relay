@@ -199,9 +199,12 @@ class BrokerStore(dbPath: String) : AutoCloseable {
             // Preserve the high-water mark even when TTL cleanup empties the queue. A
             // timestamp/ID cursor alone can skip later inserts in the same millisecond or
             // after a wall-clock rollback. Retain the existing wire cursor format.
-            st.execute("CREATE TABLE IF NOT EXISTS broker_queue_clock(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL)")
-            st.execute("INSERT OR IGNORE INTO broker_queue_clock SELECT 1, COALESCE(MAX(stored_at), 0) FROM broker_envelopes")
-            st.execute("UPDATE broker_queue_clock SET value=MAX(value, (SELECT COALESCE(MAX(stored_at), 0) FROM broker_envelopes)) WHERE id=1")
+            st.execute("""CREATE TABLE IF NOT EXISTS broker_queue_clock(
+                id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL)""")
+            st.execute("""INSERT OR IGNORE INTO broker_queue_clock
+                SELECT 1, COALESCE(MAX(stored_at), 0) FROM broker_envelopes""")
+            st.execute("""UPDATE broker_queue_clock
+                SET value=MAX(value, (SELECT COALESCE(MAX(stored_at), 0) FROM broker_envelopes)) WHERE id=1""")
 
             // Sequence receipt *availability*, not just receipt creation: a courier may
             // subscribe to an old envelope after consuming newer receipts. Seed beyond the
@@ -224,11 +227,14 @@ class BrokerStore(dbPath: String) : AutoCloseable {
                 INSERT OR IGNORE INTO broker_receipt_deliveries(receipt_id, device_key_id)
                 SELECT NEW.receipt_id, device_key_id FROM broker_envelope_devices WHERE envelope_id=NEW.envelope_id;
             END""")
-            st.execute("""CREATE TRIGGER IF NOT EXISTS broker_courier_subscribed AFTER INSERT ON broker_envelope_devices BEGIN
+            st.execute("""CREATE TRIGGER IF NOT EXISTS broker_courier_subscribed
+                AFTER INSERT ON broker_envelope_devices BEGIN
                 INSERT OR IGNORE INTO broker_receipt_deliveries(receipt_id, device_key_id)
-                SELECT receipt_id, NEW.device_key_id FROM broker_receipts WHERE envelope_id=NEW.envelope_id ORDER BY seq;
+                SELECT receipt_id, NEW.device_key_id FROM broker_receipts
+                WHERE envelope_id=NEW.envelope_id ORDER BY seq;
             END""")
-            st.execute("CREATE INDEX IF NOT EXISTS idx_broker_receipt_delivery_device ON broker_receipt_deliveries(device_key_id, seq)")
+            st.execute("""CREATE INDEX IF NOT EXISTS idx_broker_receipt_delivery_device
+                ON broker_receipt_deliveries(device_key_id, seq)""")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelopes_shelter ON broker_envelopes(shelter_id, expires_at)")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelopes_cursor ON broker_envelopes(shelter_id, stored_at, envelope_id)")
             st.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_broker_receipt_id ON broker_envelopes(broker_receipt_id)")

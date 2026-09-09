@@ -1,6 +1,24 @@
 package com.example.relay.rescue.ble
 
-import com.example.relay.rescue.*
+import com.example.relay.rescue.DirectoryAcceptance
+import com.example.relay.rescue.InMemoryRescueEnvelopeRepository
+import com.example.relay.rescue.RegionalRootBundle
+import com.example.relay.rescue.RegionalShelterDirectoryResolver
+import com.example.relay.rescue.RescueCryptography
+import com.example.relay.rescue.RescueRequestCreator
+import com.example.relay.rescue.RescueRequestDraft
+import com.example.relay.rescue.RescueRequestKey
+import com.example.relay.rescue.RescueSupportNeed
+import com.example.relay.rescue.RescueUrgency
+import com.example.relay.rescue.RescueCreationResult
+import com.example.relay.rescue.ReceiptApplicationResult
+import com.example.relay.rescue.ShelterPublicKeyManifest
+import com.example.relay.rescue.ShelterReceiptStatus
+import com.example.relay.rescue.UnsignedRegionalShelterDirectory
+import com.example.relay.rescue.UnsignedShelterReceipt
+import com.example.relay.rescue.beaconFingerprintBytes
+import com.example.relay.rescue.signRegionalShelterDirectory
+import com.example.relay.rescue.signShelterManifest
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -21,12 +39,19 @@ class ShelterDeliveryFairnessTest {
         val root = RegionalRootBundle(regionId = "test-region", rootSigningPublicKey = rootKeys.publicKey)
         val manifest = signShelterManifest(
             root.regionId,
-            ShelterPublicKeyManifest(shelterId = "test-shelter", recipientPublicKey = recipient.publicKey, receiptSigningPublicKey = signer.publicKey, validFromEpochMillis = now - 1000, validUntilEpochMillis = now + 3_600_000, generation = 1),
+            ShelterPublicKeyManifest(
+                shelterId = "test-shelter", recipientPublicKey = recipient.publicKey,
+                receiptSigningPublicKey = signer.publicKey, validFromEpochMillis = now - 1000,
+                validUntilEpochMillis = now + 3_600_000, generation = 1,
+            ),
             rootKeys.privateKey,
         )
         val resolver = RegionalShelterDirectoryResolver(listOf(root))
         assertTrue(resolver.accept(signRegionalShelterDirectory(
-            UnsignedRegionalShelterDirectory(regionId = root.regionId, generation = 1, issuedAtEpochMillis = now - 1000, validUntilEpochMillis = now + 3_600_000, shelters = listOf(manifest)),
+            UnsignedRegionalShelterDirectory(
+                regionId = root.regionId, generation = 1, issuedAtEpochMillis = now - 1000,
+                validUntilEpochMillis = now + 3_600_000, shelters = listOf(manifest),
+            ),
             rootKeys.privateKey,
         ), now) is DirectoryAcceptance.Accepted)
         val repository = InMemoryRescueEnvelopeRepository()
@@ -35,7 +60,8 @@ class ShelterDeliveryFairnessTest {
                 RescueRequestDraft(
                     requestId = "request-$index", senderDeviceId = "sender", destinationShelterId = "test-shelter",
                     createdAtEpochMillis = now - 100 + index, expiresAtEpochMillis = now + 3_600_000,
-                    urgency = RescueUrgency.URGENT, personCount = 1, supportNeeds = setOf(RescueSupportNeed.WATER), freeText = "",
+                    urgency = RescueUrgency.URGENT, personCount = 1,
+                    supportNeeds = setOf(RescueSupportNeed.WATER), freeText = "",
                 ), recipient.publicKey, envelopeId = "envelope-$index",
             ) as RescueCreationResult.Stored
             val envelope = created.record.envelope
@@ -44,7 +70,10 @@ class ShelterDeliveryFairnessTest {
                 requestVersion = 1, ciphertextSha256Hex = envelope.ciphertextSha256Hex, shelterId = "test-shelter",
                 receivedAtEpochMillis = now, status = ShelterReceiptStatus.STORED,
             ), signer.privateKey)
-            assertEquals(ReceiptApplicationResult.APPLIED, repository.applyReceipt(created.record.key, receipt, signer.publicKey))
+            assertEquals(
+                ReceiptApplicationResult.APPLIED,
+                repository.applyReceipt(created.record.key, receipt, signer.publicKey),
+            )
             envelope.requestId to receipt
         }
         val identity = ShelterBleIdentity(2, manifest.beaconFingerprintBytes().copyOf(9))

@@ -275,11 +275,12 @@ class NearbyConnectionsTransport(
     }
 
     private suspend fun addPeer(endpointId: String, peerId: String, initiateConnection: Boolean = true) {
-        if (peerId.isBlank() || peerId == localDeviceId) return
         // An endpoint must not change identities underneath an active connection.
         val mappedPeer = endpointToPeer[endpointId]
-        if (mappedPeer != null && mappedPeer != peerId) {
-            return fail("discovery", "endpoint identity changed")
+        val identityChanged = mappedPeer != null && mappedPeer != peerId
+        if (peerId.isBlank() || peerId == localDeviceId || identityChanged) {
+            if (identityChanged) fail("discovery", "endpoint identity changed")
+            return
         }
         val existing = peerToEndpoint[peerId]
         if (existing != null && existing != endpointId) {

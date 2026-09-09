@@ -414,7 +414,9 @@ class BrokerStoreTest {
         store.put(oldEnvelope, "origin", now)
         store.saveReceipt("fuchu-01", testReceipt(), now)
         store.put(testEnvelope(envelopeId = "env-2", requestId = "req-2"), "courier", now)
-        store.saveReceipt("fuchu-01", testReceipt(receiptId = "receipt-2", envelopeId = "env-2", requestId = "req-2"), now)
+        store.saveReceipt(
+            "fuchu-01", testReceipt(receiptId = "receipt-2", envelopeId = "env-2", requestId = "req-2"), now,
+        )
         val first = store.receiptsForDevice(courier.capabilityToken, 0)
         assertEquals(listOf("receipt-2"), first.receipts.map { it.receipt.receiptId })
         store.put(oldEnvelope, "courier", now)
