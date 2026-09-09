@@ -13,6 +13,7 @@ import com.example.relay.rescue.RescueUrgency
 import com.example.relay.rescue.RescueCreationResult
 import com.example.relay.rescue.ReceiptApplicationResult
 import com.example.relay.rescue.ShelterPublicKeyManifest
+import com.example.relay.rescue.SignedShelterReceipt
 import com.example.relay.rescue.ShelterReceiptStatus
 import com.example.relay.rescue.UnsignedRegionalShelterDirectory
 import com.example.relay.rescue.UnsignedShelterReceipt
@@ -79,16 +80,7 @@ class ShelterDeliveryFairnessTest {
         val identity = ShelterBleIdentity(2, manifest.beaconFingerprintBytes().copyOf(9))
         val advertisements = MutableSharedFlow<ShelterAdvertisement>()
         val submitted = mutableListOf<String>()
-        val client = FakeShelterBleClient(advertisements) {
-            object : ShelterBleSession {
-                override suspend fun readIdentity() = identity
-                override suspend fun submit(submission: RescueBleSubmission): RescueBleSubmissionResult {
-                    submitted += submission.courierDeliveryId
-                    return RescueBleSubmissionResult.Duplicate(receipts.getValue(submission.courierDeliveryId))
-                }
-                override fun close() = Unit
-            }
-        }
+        val client = receiptClient(advertisements, identity, receipts, submitted)
         val coordinator = ShelterDeliveryCoordinator(client, repository, resolver, "carrier", ids(), clock = { now })
         coordinator.start(backgroundScope)
         runCurrent()
@@ -114,6 +106,22 @@ class ShelterDeliveryFairnessTest {
         coordinator.stop()
         runCurrent()
         assertEquals(ShelterDeliveryState.Idle, coordinator.state.value)
+    }
+
+    private fun receiptClient(
+        advertisements: MutableSharedFlow<ShelterAdvertisement>,
+        identity: ShelterBleIdentity,
+        receipts: Map<String, SignedShelterReceipt>,
+        submitted: MutableList<String>,
+    ) = FakeShelterBleClient(advertisements) {
+        object : ShelterBleSession {
+            override suspend fun readIdentity() = identity
+            override suspend fun submit(submission: RescueBleSubmission): RescueBleSubmissionResult {
+                submitted += submission.courierDeliveryId
+                return RescueBleSubmissionResult.Duplicate(receipts.getValue(submission.courierDeliveryId))
+            }
+            override fun close() = Unit
+        }
     }
 
     private fun ids() = object : CourierDeliveryIdStore {
