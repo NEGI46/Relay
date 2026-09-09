@@ -12,6 +12,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CoroutineScope
@@ -104,6 +105,8 @@ class ReceiptOutbox(
         while (scope.isActive) {
             try {
                 flushPending()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Exception) {
                 // Transport exception text can contain endpoint diagnostics. Receipt metadata is
                 // also sensitive operational data, so retain only a stable error class here.
@@ -152,6 +155,8 @@ class ReceiptOutbox(
                     markAttempt(receiptId)
                     incrementRetry(receiptId)
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: Exception) {
                 // A connection reset is normally transient. Permit one immediate retry so a
                 // one-shot radio/proxy failure does not add a full minute of delivery latency.

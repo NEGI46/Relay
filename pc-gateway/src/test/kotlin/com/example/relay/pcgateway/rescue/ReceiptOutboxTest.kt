@@ -5,6 +5,7 @@ import com.example.relay.rescue.ShelterReceiptStatus
 import com.example.relay.rescue.SignedShelterReceipt
 import com.example.relay.rescue.UnsignedShelterReceipt
 import java.io.File
+import io.ktor.client.plugins.plugin
 import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -29,6 +30,29 @@ class ReceiptOutboxTest {
     fun teardown() {
         persistence.close()
         dbFile.delete()
+    }
+
+    @Test
+    fun `cancelled flush preserves retry accounting and propagates cancellation`() = kotlinx.coroutines.runBlocking {
+        val client = io.ktor.client.HttpClient(io.ktor.client.engine.cio.CIO)
+        client.plugin(io.ktor.client.plugins.HttpSend).intercept {
+            throw kotlinx.coroutines.CancellationException("stop requested")
+        }
+        try {
+            val outbox = ReceiptOutbox(persistence, "https://broker.test", "shelter-1", "gateway-1", client)
+            outbox.enqueue(createReceipt("cancelled", "envelope-1"))
+            var cancelled = false
+            try {
+                outbox.flushPending()
+            } catch (_: kotlinx.coroutines.CancellationException) {
+                cancelled = true
+            }
+            assertTrue(cancelled)
+            assertEquals("0", queryAll().single()["retry_count"])
+            assertEquals("PENDING", queryAll().single()["status"])
+        } finally {
+            client.close()
+        }
     }
 
     @Test

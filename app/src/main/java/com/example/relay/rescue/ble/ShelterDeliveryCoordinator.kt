@@ -14,6 +14,7 @@ import com.example.relay.rescue.SignedShelterManifest
 import com.example.relay.rescue.SignedShelterReceipt
 import com.example.relay.rescue.StoredRescueRecord
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
@@ -89,6 +90,8 @@ class ShelterDeliveryCoordinator(
         } catch (_: TimeoutCancellationException) {
             candidateInFlight?.let { retryNotBefore[it] = clock() + RETRY_COOLDOWN_MILLIS }
             _state.value = ShelterDeliveryState.WaitingToRetry("BLE delivery timed out")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             // Preserve the encrypted record and replay the same idempotency key next time.
             candidateInFlight?.let { retryNotBefore[it] = clock() + RETRY_COOLDOWN_MILLIS }
@@ -105,6 +108,9 @@ class ShelterDeliveryCoordinator(
         val manifest = resolveTrustedManifest(advertisedIdentity, session) ?: return
         val candidate = selectCandidate(manifest.manifest.shelterId) ?: return
         candidateInFlight = candidate.key
+        // Every attempt, including unchanged receipts and local validation failures, yields
+        // to other requests before polling this request again.
+        retryNotBefore[candidate.key] = clock() + RETRY_COOLDOWN_MILLIS
         val encoded = encodeCandidate(candidate) ?: return
         _state.value = ShelterDeliveryState.Delivering(manifest.manifest.shelterId)
         val keys = resolveEnvelopeKeys(manifest, candidate) ?: return
@@ -212,12 +218,10 @@ class ShelterDeliveryCoordinator(
     ) {
         when (receiptApplier(candidate.key, receipt, keys.receiptSigningPublicKey)) {
             ReceiptApplicationResult.APPLIED -> {
-                retryNotBefore.remove(candidate.key)
                 onRepositoryChanged()
                 finishReceipt(candidate.key, receipt)
             }
             ReceiptApplicationResult.ALREADY_APPLIED -> {
-                retryNotBefore.remove(candidate.key)
                 finishReceipt(candidate.key, receipt)
             }
             else -> _state.value = ShelterDeliveryState.WaitingToRetry("invalid shelter receipt")

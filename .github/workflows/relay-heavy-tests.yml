@@ -6,6 +6,9 @@ name: Relay Heavy Tests (Scheduled)
 # These complement the per-PR unit/lint/playwright jobs.
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/relay-heavy-tests.yml'
   schedule:
     - cron: '30 3 * * 1,4'  # Monday and Thursday at 03:30 UTC
   workflow_dispatch:
@@ -27,7 +30,7 @@ jobs:
     name: Packaged Broker-Gateway E2E
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: ${{ github.event_name == 'schedule' || inputs.run_e2e }}
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'schedule' || inputs.run_e2e }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -85,28 +88,22 @@ jobs:
       - name: Run E2E flow tests
         run: |
           echo "=== Manifest fetch ==="
-          MANIFEST=$(curl -sf http://127.0.0.1:19877/api/public/manifest)
-          echo "$MANIFEST" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('recipientPublicKey') or d.get('publicKey'), 'No public key in manifest'" \
+          MANIFEST=$(curl -sf http://127.0.0.1:19877/api/public/rescue/manifest)
+          echo "$MANIFEST" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['recipientPublicKey']['encodedBase64'] and d['shelterId'] == 'ci-test-shelter', 'Invalid public manifest'" \
             || { echo "::error::Manifest lacks public key"; exit 1; }
           echo "Manifest OK"
 
-          echo "=== Envelope submission ==="
-          ENVELOPE='{"envelopeId":"ci-e2e-'$(date +%s)'","shelterId":"ci-test-shelter","encryptedPayload":"dGVzdA==","originDeviceId":"ci-device","timestamp":"'$(date -Iseconds)'"}'
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:19876/v1/envelopes -H 'Content-Type: application/json' -d "$ENVELOPE")
-          echo "Envelope submission status: $HTTP_CODE"
-          if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then
-            if [[ "$HTTP_CODE" == "400" || "$HTTP_CODE" == "422" ]]; then
-              echo "::warning::Broker rejected test envelope (status $HTTP_CODE) — format may differ"
-            else
-              echo "::error::Unexpected envelope submission status: $HTTP_CODE"
-              exit 1
-            fi
+          echo "=== Malformed envelope rejection ==="
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:19876/v1/rescue/upload -H 'Content-Type: application/json' -d '{}')
+          if [[ "$HTTP_CODE" != "400" ]]; then
+            echo "::error::Expected malformed upload to return 400, got $HTTP_CODE"
+            exit 1
           fi
 
           echo "=== Final health checks ==="
           curl -sf http://127.0.0.1:19876/v1/health || { echo "::error::Broker unhealthy after test"; exit 1; }
           curl -sf http://127.0.0.1:19877/api/health || { echo "::error::Gateway unhealthy after test"; exit 1; }
-          echo "=== E2E PASS ==="
+          echo "=== Packaged API smoke PASS (health, manifest, invalid input) ==="
       - name: Cleanup processes
         if: always()
         run: |
