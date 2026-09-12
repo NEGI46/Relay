@@ -1,5 +1,6 @@
 package com.example.relay.pcgateway.e2e
 
+import com.example.relay.rescue.ShelterPublicKeyManifest
 import com.example.relay.broker.BrokerConfig
 import com.example.relay.broker.BrokerProfile
 import com.example.relay.broker.BrokerStore
@@ -154,11 +155,12 @@ class PackagedBrokerGatewayE2eTest {
 
     @Test
     fun testGatewayManifestAvailable() = runBlocking {
-        val response = client.get("http://127.0.0.1:$gatewayPort/api/public/manifest")
-        // Manifest should be accessible (returns public key info)
-        assertTrue(
-            response.status == HttpStatusCode.OK || response.status == HttpStatusCode.NotFound,
-            "Manifest endpoint should respond, got: ${response.status}"
+        val response = client.get("http://127.0.0.1:$gatewayPort/api/public/rescue/manifest")
+        assertEquals(HttpStatusCode.OK, response.status)
+        val manifest = kotlinx.serialization.json.Json.decodeFromString<ShelterPublicKeyManifest>(
+            response.bodyAsText(),
         )
+        assertEquals("e2e-shelter", manifest.shelterId)
+        assertTrue(manifest.recipientPublicKey.encodedBase64.isNotBlank())
     }
 }

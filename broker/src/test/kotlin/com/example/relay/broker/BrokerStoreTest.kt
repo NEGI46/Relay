@@ -390,6 +390,74 @@ class BrokerStoreTest {
     }
 
     @Test
+    fun `new uploads remain visible after equal timestamps clock rollback purge and restart`() {
+        val now = System.currentTimeMillis()
+        val first = testEnvelope(envelopeId = "env-zzz", expiresAt = now + 100)
+        store.put(first, "dk1", now)
+        val firstPage = store.pendingForShelter("fuchu-01", now, null, 50, "gw")
+        store.put(testEnvelope(envelopeId = "env-aaa", requestId = "req-2"), "dk1", now)
+        val secondPage = store.pendingForShelter("fuchu-01", now, firstPage.cursor, 50, "gw")
+        assertEquals(listOf("env-aaa"), secondPage.envelopes.map { it.envelopeId })
+        store.purgeExpired(now + 7_200_000)
+        store.close()
+        store = BrokerStore(dbFile.absolutePath)
+        store.put(testEnvelope(envelopeId = "env-000", requestId = "req-3"), "dk1", now - 10_000)
+        val afterRestart = store.pendingForShelter("fuchu-01", now, secondPage.cursor, 50, "gw")
+        assertEquals(listOf("env-000"), afterRestart.envelopes.map { it.envelopeId })
+    }
+
+    @Test
+    fun `late courier receives older receipts beyond its previously consumed cursor`() {
+        val now = System.currentTimeMillis()
+        val courier = store.registerDevice("courier", "key", now)
+        val oldEnvelope = testEnvelope()
+        store.put(oldEnvelope, "origin", now)
+        store.saveReceipt("fuchu-01", testReceipt(), now)
+        store.put(testEnvelope(envelopeId = "env-2", requestId = "req-2"), "courier", now)
+        store.saveReceipt(
+            "fuchu-01", testReceipt(receiptId = "receipt-2", envelopeId = "env-2", requestId = "req-2"), now,
+        )
+        val first = store.receiptsForDevice(courier.capabilityToken, 0)
+        assertEquals(listOf("receipt-2"), first.receipts.map { it.receipt.receiptId })
+        store.put(oldEnvelope, "courier", now)
+        val later = store.receiptsForDevice(courier.capabilityToken, first.cursor)
+        assertEquals(listOf("rcpt-001"), later.receipts.map { it.receipt.receiptId })
+        assertTrue(later.cursor > first.cursor)
+        store.put(oldEnvelope, "courier", now)
+        assertTrue(store.receiptsForDevice(courier.capabilityToken, later.cursor).receipts.isEmpty())
+        store.close()
+        store = BrokerStore(dbFile.absolutePath)
+        assertTrue(store.receiptsForDevice(courier.capabilityToken, later.cursor).receipts.isEmpty())
+    }
+
+    @Test
+    fun `receipt delivery migration preserves legacy cursor and cascades retention`() {
+        val now = System.currentTimeMillis()
+        val courier = store.registerDevice("courier", "key", now)
+        store.put(testEnvelope(expiresAt = now + 100), "courier", now)
+        store.saveReceipt("fuchu-01", testReceipt(), now)
+        store.close()
+        var legacyCursor = 0L
+        DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}").use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("DROP TRIGGER broker_receipt_available")
+                statement.execute("DROP TRIGGER broker_courier_subscribed")
+                statement.execute("DROP TABLE broker_receipt_deliveries")
+                statement.executeQuery("SELECT MAX(seq) FROM broker_receipts").use { rows ->
+                    assertTrue(rows.next())
+                    legacyCursor = rows.getLong(1)
+                }
+            }
+        }
+        store = BrokerStore(dbFile.absolutePath)
+        val migrated = store.receiptsForDevice(courier.capabilityToken, legacyCursor)
+        assertEquals(1, migrated.receipts.size)
+        assertTrue(migrated.cursor > legacyCursor)
+        assertEquals(1, store.purgeExpired(now + 100))
+        assertTrue(store.receiptsForDevice(courier.capabilityToken, 0).receipts.isEmpty())
+    }
+
+    @Test
     fun `rate limiter allows within limit and blocks over limit`() {
         val limiter = SlidingWindowRateLimiter(maxRequests = 3, windowMillis = 60_000)
         val now = System.currentTimeMillis()

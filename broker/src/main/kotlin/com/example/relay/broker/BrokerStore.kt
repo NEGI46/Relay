@@ -196,6 +196,45 @@ class BrokerStore(dbPath: String) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
+            // Preserve the high-water mark even when TTL cleanup empties the queue. A
+            // timestamp/ID cursor alone can skip later inserts in the same millisecond or
+            // after a wall-clock rollback. Retain the existing wire cursor format.
+            st.execute("""CREATE TABLE IF NOT EXISTS broker_queue_clock(
+                id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL)""")
+            st.execute("""INSERT OR IGNORE INTO broker_queue_clock
+                SELECT 1, COALESCE(MAX(stored_at), 0) FROM broker_envelopes""")
+            st.execute("""UPDATE broker_queue_clock
+                SET value=MAX(value, (SELECT COALESCE(MAX(stored_at), 0) FROM broker_envelopes)) WHERE id=1""")
+
+            // Sequence receipt *availability*, not just receipt creation: a courier may
+            // subscribe to an old envelope after consuming newer receipts. Seed beyond the
+            // legacy sequence so persisted Android cursors remain valid during migration.
+            st.execute("""CREATE TABLE IF NOT EXISTS broker_receipt_deliveries(
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                receipt_id TEXT NOT NULL REFERENCES broker_receipts(receipt_id) ON DELETE CASCADE,
+                device_key_id TEXT NOT NULL,
+                UNIQUE(receipt_id, device_key_id)
+            )""")
+            st.execute("""INSERT INTO sqlite_sequence(name, seq)
+                SELECT 'broker_receipt_deliveries', COALESCE(MAX(seq), 0) FROM broker_receipts
+                HAVING NOT EXISTS(SELECT 1 FROM sqlite_sequence WHERE name='broker_receipt_deliveries')""")
+            st.execute("""UPDATE sqlite_sequence SET seq=MAX(seq, (SELECT COALESCE(MAX(seq), 0) FROM broker_receipts))
+                WHERE name='broker_receipt_deliveries'""")
+            st.execute("""INSERT OR IGNORE INTO broker_receipt_deliveries(receipt_id, device_key_id)
+                SELECT r.receipt_id, d.device_key_id FROM broker_receipts r
+                JOIN broker_envelope_devices d ON d.envelope_id=r.envelope_id ORDER BY r.seq""")
+            st.execute("""CREATE TRIGGER IF NOT EXISTS broker_receipt_available AFTER INSERT ON broker_receipts BEGIN
+                INSERT OR IGNORE INTO broker_receipt_deliveries(receipt_id, device_key_id)
+                SELECT NEW.receipt_id, device_key_id FROM broker_envelope_devices WHERE envelope_id=NEW.envelope_id;
+            END""")
+            st.execute("""CREATE TRIGGER IF NOT EXISTS broker_courier_subscribed
+                AFTER INSERT ON broker_envelope_devices BEGIN
+                INSERT OR IGNORE INTO broker_receipt_deliveries(receipt_id, device_key_id)
+                SELECT receipt_id, NEW.device_key_id FROM broker_receipts
+                WHERE envelope_id=NEW.envelope_id ORDER BY seq;
+            END""")
+            st.execute("""CREATE INDEX IF NOT EXISTS idx_broker_receipt_delivery_device
+                ON broker_receipt_deliveries(device_key_id, seq)""")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelopes_shelter ON broker_envelopes(shelter_id, expires_at)")
             st.execute("CREATE INDEX IF NOT EXISTS idx_broker_envelopes_cursor ON broker_envelopes(shelter_id, stored_at, envelope_id)")
             st.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_broker_receipt_id ON broker_envelopes(broker_receipt_id)")
@@ -373,6 +412,12 @@ class BrokerStore(dbPath: String) : AutoCloseable {
             }
         }
 
+        val storedAt = connection.prepareStatement(
+            "UPDATE broker_queue_clock SET value=MAX(value + 1, ?) WHERE id=1 RETURNING value",
+        ).use { statement ->
+            statement.setLong(1, now)
+            statement.executeQuery().use { result -> check(result.next()); result.getLong(1) }
+        }
         val brokerReceiptId = UUID.randomUUID().toString()
         connection.prepareStatement(
             """INSERT INTO broker_envelopes
@@ -390,7 +435,7 @@ class BrokerStore(dbPath: String) : AutoCloseable {
             ps.setString(8, envelope.ciphertextSha256Hex)
             ps.setString(9, brokerJson.encodeToString(envelope))
             ps.setString(10, deviceKeyId)
-            ps.setLong(11, now)
+            ps.setLong(11, storedAt)
             ps.executeUpdate()
         }
         linkDevice(envelope.envelopeId, deviceKeyId, now)
@@ -404,7 +449,7 @@ class BrokerStore(dbPath: String) : AutoCloseable {
             BrokerUploadResponse(
                 brokerReceiptId = brokerReceiptId,
                 envelopeId = envelope.envelopeId,
-                storedAtEpochMillis = now,
+                storedAtEpochMillis = storedAt,
             ),
         )
     }
@@ -616,10 +661,10 @@ class BrokerStore(dbPath: String) : AutoCloseable {
             ?: return BrokerReceiptBatch(emptyList(), sinceSeq)
         var maxSeq = sinceSeq
         val receipts = connection.prepareStatement(
-            """SELECT r.receipt_json, r.seq FROM broker_receipts r
-               JOIN broker_envelope_devices d ON d.envelope_id = r.envelope_id
-               WHERE d.device_key_id=? AND r.seq>?
-               ORDER BY r.seq ASC LIMIT 100""",
+            """SELECT r.receipt_json, d.seq FROM broker_receipt_deliveries d
+               JOIN broker_receipts r ON r.receipt_id = d.receipt_id
+               WHERE d.device_key_id=? AND d.seq>?
+               ORDER BY d.seq ASC LIMIT 100""",
         ).use { ps ->
             ps.setString(1, deviceKeyId)
             ps.setLong(2, sinceSeq)

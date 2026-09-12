@@ -96,6 +96,10 @@ class NearbyConnectionsTransport(
             platform.startDiscovery()
             _state.update { it.copy(discovering = true) }
             _transportEvents.send(TransportEvent.DiscoveryStarted)
+        } catch (cancelled: CancellationException) {
+            runCatching { platform.stopAll() }
+            cleanup(null)
+            throw cancelled
         } catch (error: Exception) {
             runCatching { platform.stopAll() }
             cleanup(error.safeReason())
@@ -124,6 +128,9 @@ class NearbyConnectionsTransport(
                 true
             } ?: false
             check(completed) { "accept connection timed out" }
+        } catch (cancelled: CancellationException) {
+            clearPeerConnection(peerId)
+            throw cancelled
         } catch (error: Exception) {
             clearPeerConnection(peerId)
             fail("accept", error.safeReason())
@@ -132,6 +139,7 @@ class NearbyConnectionsTransport(
     }
 
     override suspend fun rejectConnection(peerId: String) {
+        cancelReconnect(peerId, resetAttempts = true)
         val endpointId = peerToEndpoint[peerId] ?: return
         try {
             platform.rejectConnection(endpointId)
@@ -142,6 +150,7 @@ class NearbyConnectionsTransport(
     }
 
     override suspend fun disconnect(peerId: String) {
+        cancelReconnect(peerId, resetAttempts = true)
         peerToEndpoint[peerId]?.let(platform::disconnect)
         clearPeerConnection(peerId)
         _connectionEvents.emit(ConnectionEvent.Disconnected(peerId))
@@ -266,7 +275,13 @@ class NearbyConnectionsTransport(
     }
 
     private suspend fun addPeer(endpointId: String, peerId: String, initiateConnection: Boolean = true) {
-        if (peerId.isBlank() || peerId == localDeviceId) return
+        // An endpoint must not change identities underneath an active connection.
+        val mappedPeer = endpointToPeer[endpointId]
+        val identityChanged = mappedPeer != null && mappedPeer != peerId
+        if (peerId.isBlank() || peerId == localDeviceId || identityChanged) {
+            if (identityChanged) fail("discovery", "endpoint identity changed")
+            return
+        }
         val existing = peerToEndpoint[peerId]
         if (existing != null && existing != endpointId) {
             if (peerId in connectingPeerIds || peerId in _state.value.connectedPeerIds ||
@@ -313,6 +328,7 @@ class NearbyConnectionsTransport(
         // Register the endpoint without issuing a second request.
         addPeer(event.endpointId, event.endpointName, initiateConnection = false)
         val peerId = endpointToPeer[event.endpointId] ?: return
+        if (peerId != event.endpointName) return
         // TRUSTED mode fails closed: an inbound peer that is not on the allow-list is
         // rejected outright and is never retried, because the refusal is a policy
         // decision rather than a transient transport error.
@@ -327,7 +343,7 @@ class NearbyConnectionsTransport(
         reconnectJobs.remove(peerId)?.cancel()
         val digits = event.authenticationDigits?.takeIf { it.isNotBlank() }
         if (digits == null) {
-            platform.rejectConnection(event.endpointId)
+            runCatching { platform.rejectConnection(event.endpointId) }
             clearPeerConnection(peerId)
             _connectionEvents.emit(ConnectionEvent.Failed(peerId, "authentication code unavailable"))
             scheduleReconnect(peerId)
@@ -353,7 +369,14 @@ class NearbyConnectionsTransport(
         // the transport-level code is available; application data is still
         // validated, size-limited, deduplicated, and marked unverified.
         try {
-            platform.acceptConnection(event.endpointId)
+            val completed = withTimeoutOrNull(connectionAttemptTimeoutMs) {
+                platform.acceptConnection(event.endpointId)
+                true
+            } ?: false
+            check(completed) { "accept connection timed out" }
+        } catch (cancelled: CancellationException) {
+            clearPeerConnection(peerId)
+            throw cancelled
         } catch (error: Exception) {
             clearPeerConnection(peerId)
             fail("accept", error.safeReason())
@@ -402,6 +425,9 @@ class NearbyConnectionsTransport(
                 true
             } ?: false
             check(completed) { "request connection timed out" }
+        } catch (cancelled: CancellationException) {
+            clearPeerConnection(peerId)
+            throw cancelled
         } catch (error: Exception) {
             cancelConnectionAttemptTimeout(peerId)
             connectingPeerIds -= peerId

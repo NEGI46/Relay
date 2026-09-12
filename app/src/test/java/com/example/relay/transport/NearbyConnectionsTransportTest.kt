@@ -16,6 +16,67 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class NearbyConnectionsTransportTest {
     @Test
+    fun `stalled automatic acceptance times out without killing event collection`() = runTest {
+        val platform = FakeNearbyPlatform(stallAccept = true)
+        val transport = NearbyConnectionsTransport("device-Z", platform, AllowedNearbyPermissionGate, backgroundScope)
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("stalled", "device-A", "1234", true))
+        runCurrent()
+        advanceTimeBy(30_000)
+        runCurrent()
+        platform.events.emit(NearbyPlatformEvent.EndpointFound("healthy", "device-B"))
+        runCurrent()
+        assertTrue(transport.discoveredPeers.value.any { it.peerId == "device-B" })
+        assertFalse("device-A" in transport.state.value.connectedPeerIds)
+    }
+
+    @Test
+    fun `explicit disconnect cancels a pending reconnect`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val transport = NearbyConnectionsTransport("device-A", platform, AllowedNearbyPermissionGate, backgroundScope)
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.EndpointFound("endpoint", "device-B"))
+        platform.events.emit(NearbyPlatformEvent.ConnectionFailed("endpoint", "temporary"))
+        runCurrent()
+        transport.disconnect("device-B")
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertEquals(listOf("endpoint"), platform.requested)
+    }
+
+    @Test
+    fun `endpoint cannot be rebound to another peer identity`() = runTest {
+        val platform = FakeNearbyPlatform()
+        val transport = NearbyConnectionsTransport("device-Z", platform, AllowedNearbyPermissionGate, backgroundScope)
+        val received = mutableListOf<ReceivedPayload>()
+        backgroundScope.launch { transport.receivedPayloads.collect(received::add) }
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("endpoint", "device-A", "1234", true))
+        platform.events.emit(NearbyPlatformEvent.ConnectionSucceeded("endpoint"))
+        platform.events.emit(NearbyPlatformEvent.EndpointFound("endpoint", "device-B"))
+        platform.events.emit(NearbyPlatformEvent.BytesReceived("endpoint", byteArrayOf(1)))
+        runCurrent()
+        assertEquals(listOf("device-A"), received.map { it.peerId })
+        assertEquals(listOf(Peer("device-A")), transport.discoveredPeers.value)
+    }
+
+    @Test
+    fun `stop during automatic acceptance does not report a retryable failure`() = runTest {
+        val platform = FakeNearbyPlatform(stallAccept = true)
+        val transport = NearbyConnectionsTransport("device-A", platform, AllowedNearbyPermissionGate, backgroundScope)
+        transport.start()
+        platform.events.emit(NearbyPlatformEvent.ConnectionInitiated("endpoint", "device-B", "1234", true))
+        runCurrent()
+        transport.stop()
+        runCurrent()
+        assertFalse(transport.state.value.started)
+        assertEquals(null, transport.state.value.lastError)
+        advanceTimeBy(31_000)
+        runCurrent()
+        assertTrue(platform.requested.isEmpty())
+    }
+
+    @Test
     fun `failed automatic acceptance is retried by deterministic initiator`() = runTest {
         val platform = FakeNearbyPlatform(failAccept = true)
         val transport = NearbyConnectionsTransport("device-A", platform, AllowedNearbyPermissionGate, backgroundScope)
@@ -617,6 +678,7 @@ private class FakeNearbyPlatform(
     private val completeDuringSend: Boolean = false,
     private val failSendAfterPayloadCreated: Boolean = false,
     private val failAccept: Boolean = false,
+    private val stallAccept: Boolean = false,
 ) : NearbyPlatform {
     override val events = MutableSharedFlow<NearbyPlatformEvent>(extraBufferCapacity = 32)
     var advertisingStarts = 0
@@ -631,6 +693,7 @@ private class FakeNearbyPlatform(
     override suspend fun startDiscovery() { discoveryStarts++ }
     override suspend fun requestConnection(localEndpointName: String, endpointId: String) { requested += endpointId }
     override suspend fun acceptConnection(endpointId: String) {
+        if (stallAccept) kotlinx.coroutines.awaitCancellation()
         if (failAccept) error("temporary accept failure")
         accepted += endpointId
     }
