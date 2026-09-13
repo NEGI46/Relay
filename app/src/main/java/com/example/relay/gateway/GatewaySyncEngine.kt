@@ -9,6 +9,7 @@ import com.example.relay.domain.RelayRuntimeSettings
 import com.example.relay.domain.ReceiptType
 import android.content.Context
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
@@ -64,7 +65,13 @@ class GatewaySyncEngine(
 
     suspend fun requestPair(code: String): Boolean {
         val settings = settingsStore.load()
-        return runCatching { client.requestPair(settings, code) }.getOrDefault(false)
+        return try {
+            client.requestPair(settings, code)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
     }
 
     suspend fun syncOnce(): GatewaySyncResult = mutex.withLock {
@@ -194,6 +201,8 @@ class GatewaySyncEngine(
                 push.response.acceptedMessageIds.size + push.response.duplicateMessageIds.size,
                 receipts.size,
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Exception) {
             val httpError = error as? GatewayHttpException
             if (httpError != null) {

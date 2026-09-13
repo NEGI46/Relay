@@ -17,6 +17,7 @@ import com.example.relay.gateway.protocol.GatewayReceipt
 import com.example.relay.gateway.protocol.GatewayRejection
 import com.example.relay.gateway.protocol.SyncMessagesResponse
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -294,6 +295,60 @@ class GatewaySyncEngineTest {
         assertTrue(client.requestCleanedUp.isCompleted)
     }
 
+    @Test fun `cancelling a manual sync is not converted into a network failure`() = runTest {
+        val repository = InMemoryMessageRepository().also { it.insert(com.example.relay.message()) }
+        val client = SuspendingClient()
+        val settings = FakeSettings(
+            GatewaySettings(
+                "127.0.0.1",
+                8080,
+                "gateway",
+                "bridge",
+                enabled = true,
+                lastSyncResult = "never",
+            ),
+        )
+        val engine = GatewaySyncEngine(
+            repository,
+            settings,
+            FakeCredentials(TEST_GATEWAY_TOKEN),
+            client,
+            MessagePolicy(MutableClock(NOW)),
+            backgroundScope,
+            FakePending(),
+        )
+
+        val sync = async { engine.syncOnce() }
+        client.requestStarted.await()
+        sync.cancel()
+        runCurrent()
+
+        assertTrue(sync.isCancelled)
+        assertTrue(client.requestCleanedUp.isCompleted)
+        assertEquals("never", settings.load().lastSyncResult)
+    }
+
+    @Test fun `cancelling a pairing request is propagated to its caller`() = runTest {
+        val client = SuspendingClient()
+        val engine = GatewaySyncEngine(
+            InMemoryMessageRepository(),
+            FakeSettings(GatewaySettings()),
+            FakeCredentials(null),
+            client,
+            MessagePolicy(MutableClock(NOW)),
+            backgroundScope,
+            FakePending(),
+        )
+
+        val pairing = async { engine.requestPair("123456") }
+        client.pairStarted.await()
+        pairing.cancel()
+        runCurrent()
+
+        assertTrue(pairing.isCancelled)
+        assertTrue(client.pairCleanedUp.isCompleted)
+    }
+
     @Test fun `a discovered beacon contradicting an enrolled gateway is refused and never delivered to`() = runTest {
         val repository = InMemoryMessageRepository().also { it.insert(com.example.relay.message()) }
         val client = FakeClient()
@@ -426,8 +481,17 @@ private class FakeClient(
 private class SuspendingClient : GatewayBridgeClient {
     val requestStarted = CompletableDeferred<Unit>()
     val requestCleanedUp = CompletableDeferred<Unit>()
+    val pairStarted = CompletableDeferred<Unit>()
+    val pairCleanedUp = CompletableDeferred<Unit>()
 
-    override suspend fun requestPair(settings: GatewaySettings, code: String) = false
+    override suspend fun requestPair(settings: GatewaySettings, code: String): Boolean {
+        pairStarted.complete(Unit)
+        try {
+            awaitCancellation()
+        } finally {
+            pairCleanedUp.complete(Unit)
+        }
+    }
 
     override suspend fun push(
         settings: GatewaySettings,

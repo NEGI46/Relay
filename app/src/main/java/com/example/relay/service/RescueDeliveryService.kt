@@ -310,12 +310,20 @@ class RescueDeliveryService : Service() {
             // Share the application discovery socket/multicast lock with normal Gateway sync.
             val delivery = HttpShelterGatewayDelivery(app.gatewayDiscovery)
             val deliveryIds = SharedPreferencesCourierDeliveryIdStore(app)
+            val attemptedInRound = linkedSetOf<RescueRequestKey>()
             while (isActive) {
                 val candidate = selectLocalGatewayCandidate(
                     app.rescueRepository.all(),
                     System.currentTimeMillis(),
+                    attemptedInRound,
                 )
                 if (candidate != null) {
+                    // Reserve before the network call so a failed or cancelled attempt cannot
+                    // monopolise the next service iteration and starve another rescue request.
+                    attemptedInRound += RescueRequestKey(
+                        candidate.envelope.requestId,
+                        candidate.envelope.requestVersion,
+                    )
                     when (val result = delivery.deliver(
                         candidate.envelope,
                         app.deviceId,
@@ -337,6 +345,10 @@ class RescueDeliveryService : Service() {
                     }
                     else -> recordDeliveryDiagnostic(result)
                     }
+                } else if (attemptedInRound.isNotEmpty()) {
+                    // Start a fresh priority-ordered round after every currently eligible request
+                    // has received one delivery or status-polling opportunity.
+                    attemptedInRound.clear()
                 }
                 delay(2_000)
             }
@@ -520,7 +532,9 @@ private fun NearbyPrerequisite.toDegradeReason(): DegradeReason = when (this) {
 internal fun selectLocalGatewayCandidate(
     records: List<StoredRescueRecord>,
     nowEpochMillis: Long,
-): StoredRescueRecord? = records.asSequence()
+    attemptedKeys: Set<RescueRequestKey> = emptySet(),
+): StoredRescueRecord? {
+    return records.asSequence()
     .filter { it.envelope.expiresAtEpochMillis > nowEpochMillis }
     .filter {
         it.state.submissionStatus in setOf(
@@ -536,7 +550,10 @@ internal fun selectLocalGatewayCandidate(
             .thenByDescending { it.envelope.routingUrgency.deliveryPriority() }
             .thenByDescending { it.envelope.createdAtEpochMillis },
     )
-    .firstOrNull()
+    .firstOrNull {
+        RescueRequestKey(it.envelope.requestId, it.envelope.requestVersion) !in attemptedKeys
+    }
+}
 
 private fun RescueSubmissionStatus.deliveryPriority(): Int = when (this) {
     RescueSubmissionStatus.PENDING -> 3
